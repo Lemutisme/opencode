@@ -1,0 +1,431 @@
+export * as Snapshot from "./snapshot"
+
+import { makeLocationNode } from "./effect/app-node"
+import path from "path"
+import { randomUUID } from "crypto"
+import { Context, Effect, Layer, Schema } from "effect"
+import { ChildProcess } from "effect/unstable/process"
+import { Config } from "./config"
+import { File } from "./file"
+import { FSUtil } from "./fs-util"
+import { Git } from "./git"
+import { Global } from "./global"
+import { Location } from "./location"
+import { AppProcess } from "./process"
+import { AbsolutePath, RelativePath } from "./schema"
+import { Hash } from "./util/hash"
+
+export const ID = Schema.String.pipe(Schema.brand("Snapshot.ID"))
+export type ID = typeof ID.Type
+
+const Reference = Schema.Struct({
+  version: Schema.Literal(1),
+  snapshot: ID,
+  directory: AbsolutePath,
+  repository: Git.Repository,
+})
+
+export class Error extends Schema.TaggedErrorClass<Error>()("Snapshot.Error", {
+  operation: Schema.Literals(["capture", "files", "diff", "preview", "restore", "materialize"]),
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
+
+export interface CompareInput {
+  readonly from: ID
+  readonly to: ID
+}
+
+export interface CaptureInput {
+  /** Location-relative paths that must be captured even when ignored or larger than the normal snapshot limit. */
+  readonly include?: readonly RelativePath[]
+}
+
+export interface DiffInput extends CompareInput {
+  readonly context?: number
+  readonly paths?: readonly RelativePath[]
+}
+
+export interface RestoreInput {
+  /** Paths are relative to the project root. */
+  readonly files: ReadonlyMap<RelativePath, ID>
+}
+
+export interface PreviewInput extends RestoreInput {
+  readonly context?: number
+}
+
+export interface Interface {
+  /**
+   * Capture the current Location-scoped filesystem state as a content-addressed
+   * tree. Returns `undefined` when snapshots are disabled, unsupported, or the
+   * best-effort capture fails.
+   */
+  readonly capture: (input?: CaptureInput) => Effect.Effect<ID | undefined>
+
+  /**
+   * List project-relative paths changed between two captured trees without
+   * loading file contents or generating patches.
+   */
+  readonly files: (input: CompareInput) => Effect.Effect<readonly RelativePath[], Error>
+
+  /**
+   * Generate structured per-file diffs between two captured trees. `context`
+   * controls unchanged lines around each unified diff hunk.
+   */
+  readonly diff: (input: DiffInput) => Effect.Effect<readonly File.Diff[], Error>
+
+  /**
+   * Preview the filesystem result of a selective restore without modifying the
+   * worktree. Each project-relative path maps to the tree it would be restored
+   * from.
+   */
+  readonly preview: (input: PreviewInput) => Effect.Effect<readonly File.Diff[], Error>
+
+  /**
+   * Restore selected project-relative paths from their associated trees. A path
+   * absent from its selected tree is removed; paths outside the map are untouched.
+   */
+  readonly restore: (input: RestoreInput) => Effect.Effect<void, Error>
+
+  /**
+   * Replace the snapshot index with a captured tree and check out all its entries.
+   * Files absent from the tree remain untouched. Prefer selective `restore` when
+   * only known paths should change.
+   */
+  readonly checkout: (snapshot: ID) => Effect.Effect<void, Error>
+
+  /** Materialize one captured tree into a new isolated worktree. */
+  readonly materialize: (input: {
+    readonly snapshot: ID
+    readonly directory: AbsolutePath
+  }) => Effect.Effect<void, Error>
+}
+
+export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Snapshot") {}
+
+const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const config = yield* Config.Service
+    const fs = yield* FSUtil.Service
+    const git = yield* Git.Service
+    const global = yield* Global.Service
+    const location = yield* Location.Service
+    const processes = yield* AppProcess.Service
+    const source = yield* git.repo.discover(location.project.directory)
+    const worktree = source
+      ? AbsolutePath.make(yield* fs.realPath(source.worktree).pipe(Effect.orDie))
+      : location.project.directory
+    const directory = AbsolutePath.make(yield* fs.realPath(location.directory).pipe(Effect.orDie))
+    const legacyDirectory = path.join(global.data, "snapshot", location.project.id, Hash.fast(worktree))
+    // A new namespace preserves historical borrowed stores without treating them as owned.
+    const gitDirectory = AbsolutePath.make(`${legacyDirectory}.owned`)
+    const referencePath = (snapshot: ID) =>
+      path.join(global.data, "snapshot", "references", Hash.fast(directory), `${Hash.fast(snapshot)}.json`)
+
+    const scope = Effect.fnUntraced(function* () {
+      const relative = path.relative(worktree, location.directory)
+      if (relative.startsWith("..") || path.isAbsolute(relative))
+        return yield* new Error({ operation: "capture", message: "Location is outside the project" })
+      return RelativePath.make(relative.replaceAll("\\", "/") || ".")
+    })
+
+    const repository = Effect.fnUntraced(function* () {
+      if (!source) return yield* new Error({ operation: "capture", message: "Project is not a Git repository" })
+      if (yield* fs.existsSafe(path.join(gitDirectory, "HEAD")))
+        return new Git.Repository({
+          worktree,
+          gitDirectory,
+          commonDirectory: gitDirectory,
+        })
+      const staging = AbsolutePath.make(`${gitDirectory}.init-${randomUUID()}`)
+      yield* Effect.gen(function* () {
+        yield* git.repo.create({ worktree, gitDirectory: staging, seed: source, dissociate: true })
+        yield* fs.rename(staging, gitDirectory)
+      }).pipe(
+        Effect.ensuring(fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore)),
+        Effect.mapError((cause) => failure("capture", cause)),
+      )
+      return new Git.Repository({ worktree, gitDirectory, commonDirectory: gitDirectory })
+    })
+
+    const enabled = Effect.fnUntraced(function* () {
+      if (location.vcs?.type !== "git") return false
+      return Config.latest(yield* config.entries(), "snapshots") !== false
+    })
+
+    const capture = Effect.fn("Snapshot.capture")(function* (input?: CaptureInput) {
+      if (!(yield* enabled())) return undefined
+      return yield* Effect.gen(function* () {
+        const repo = yield* repository()
+        const forceInclude = yield* Effect.forEach(input?.include ?? [], (item) =>
+          Effect.gen(function* () {
+            const target = path.resolve(location.directory, item)
+            if (!FSUtil.contains(location.directory, target))
+              return yield* new Error({ operation: "capture", message: `Included path escapes the Location: ${item}` })
+            return RelativePath.make(path.relative(worktree, target).replaceAll("\\", "/") || ".")
+          }),
+        )
+        const snapshot = ID.make(
+          yield* git.tree.capture({
+            repository: repo,
+            scopes: [yield* scope()],
+            ignores: source,
+            maximumUntrackedFileBytes: 2 * 1024 * 1024,
+            forceInclude,
+          }),
+        )
+        const target = referencePath(snapshot)
+        const temporary = `${target}.${randomUUID()}.tmp`
+        yield* Effect.gen(function* () {
+          yield* fs.ensureDir(path.dirname(target))
+          yield* fs.writeFileString(temporary, JSON.stringify({ version: 1, snapshot, directory, repository: repo }))
+          // First publication wins; a repeated capture cannot redirect an existing subject.
+          yield* fs
+            .link(temporary, target)
+            .pipe(Effect.catchReason("PlatformError", "AlreadyExists", () => resolve(snapshot).pipe(Effect.asVoid)))
+        }).pipe(Effect.ensuring(fs.remove(temporary, { force: true }).pipe(Effect.ignore)))
+        return snapshot
+      }).pipe(
+        Effect.catch((cause) => Effect.logWarning("failed to capture snapshot", { cause }).pipe(Effect.as(undefined))),
+      )
+    })
+
+    const resolve = Effect.fnUntraced(function* (snapshot: ID) {
+      const reference = yield* fs
+        .readFileString(referencePath(snapshot))
+        .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+      if (reference !== undefined) {
+        const retained = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Reference))(reference)
+        if (
+          retained.snapshot !== snapshot ||
+          retained.directory !== directory ||
+          retained.repository.gitDirectory !== retained.repository.commonDirectory ||
+          !FSUtil.contains(path.join(global.data, "snapshot"), retained.repository.gitDirectory) ||
+          !FSUtil.contains(retained.repository.worktree, directory)
+        )
+          return yield* new Error({ operation: "materialize", message: "Snapshot reference identity does not match" })
+        if (
+          !FSUtil.contains(
+            yield* fs.realPath(path.join(global.data, "snapshot")),
+            yield* fs.realPath(retained.repository.gitDirectory),
+          )
+        )
+          return yield* new Error({ operation: "materialize", message: "Snapshot reference escapes native storage" })
+        return retained.repository
+      }
+      // Legacy captures have no reference; preserve their existing exact namespace only.
+      if (yield* fs.existsSafe(path.join(legacyDirectory, "HEAD")))
+        return new Git.Repository({
+          worktree,
+          gitDirectory: AbsolutePath.make(legacyDirectory),
+          commonDirectory: AbsolutePath.make(legacyDirectory),
+        })
+      return yield* new Error({ operation: "materialize", message: "Snapshot reference is unavailable" })
+    })
+
+    const retained = Effect.fnUntraced(function* (snapshots: readonly ID[]) {
+      const sources = yield* Effect.forEach(Array.from(new Set(snapshots)), (snapshot) =>
+        resolve(snapshot).pipe(Effect.map((repository) => ({ snapshot, repository }))),
+      )
+      const target = sources.at(-1)?.repository
+      if (!target) return yield* repository()
+      yield* Effect.forEach(
+        sources,
+        (source) =>
+          Effect.gen(function* () {
+            if (source.repository.worktree !== target.worktree)
+              return yield* new Error({ operation: "materialize", message: "Snapshots have different project roots" })
+            yield* git.tree.retain({
+              repository: target,
+              source: source.repository,
+              tree: Git.TreeID.make(source.snapshot),
+            })
+          }),
+        { discard: true },
+      )
+      return target
+    })
+
+    const compare = Effect.fnUntraced(function* (operation: "files" | "diff", input: CompareInput) {
+      const repo = yield* retained([input.from, input.to]).pipe(Effect.mapError((cause) => failure(operation, cause)))
+      return { repository: repo, from: Git.TreeID.make(input.from), to: Git.TreeID.make(input.to) }
+    })
+
+    const files = Effect.fn("Snapshot.files")(function* (input: CompareInput) {
+      const comparison = yield* compare("files", input)
+      const files = yield* git.tree.files(comparison).pipe(Effect.mapError((cause) => failure("files", cause)))
+      if (!source || !(yield* fs.existsSafe(path.join(source.gitDirectory, "HEAD")))) return files
+      const ignored = yield* git.index
+        .ignored({ repository: source, paths: files })
+        .pipe(Effect.mapError((cause) => failure("files", cause)))
+      return files.filter((file) => !ignored.has(file))
+    })
+
+    const diff = Effect.fn("Snapshot.diff")(function* (input: DiffInput) {
+      const comparison = yield* compare("diff", input)
+      const files = yield* git.tree.files(comparison).pipe(Effect.mapError((cause) => failure("diff", cause)))
+      const ignored =
+        source && (yield* fs.existsSafe(path.join(source.gitDirectory, "HEAD")))
+          ? yield* git.index
+              .ignored({ repository: source, paths: files })
+              .pipe(Effect.mapError((cause) => failure("diff", cause)))
+          : new Set<RelativePath>()
+      return yield* git.tree
+        .diff({
+          ...comparison,
+          context: input.context,
+          paths: (input.paths ?? files).filter((file) => !ignored.has(file)),
+        })
+        .pipe(Effect.mapError((cause) => failure("diff", cause)))
+    })
+
+    const plan = Effect.fnUntraced(function* (
+      operation: "preview" | "restore",
+      input: RestoreInput,
+      root: AbsolutePath,
+    ) {
+      const files = new Map<RelativePath, Git.TreeID>()
+      for (const [file, snapshot] of input.files) {
+        const absolute = path.resolve(root, file)
+        if (!FSUtil.contains(root, absolute))
+          return yield* new Error({ operation, message: `Path escapes the project: ${file}` })
+        files.set(file, Git.TreeID.make(snapshot))
+      }
+      return files
+    })
+
+    const preview = Effect.fn("Snapshot.preview")(function* (input: PreviewInput) {
+      if (Config.latest(yield* config.entries(), "snapshots") === false)
+        return yield* new Error({ operation: "preview", message: "Snapshots are disabled" })
+      const repo = yield* retained(Array.from(input.files.values())).pipe(
+        Effect.mapError((cause) => failure("preview", cause)),
+      )
+      const files = yield* plan("preview", input, repo.worktree)
+      const current = yield* git.tree
+        .capture({
+          repository: repo,
+          scopes: Array.from(files.keys()),
+          ignores: source,
+          maximumUntrackedFileBytes: 2 * 1024 * 1024,
+        })
+        .pipe(Effect.mapError((cause) => failure("preview", cause)))
+      return yield* git.tree
+        .preview({
+          repository: repo,
+          current,
+          files,
+          context: input.context,
+        })
+        .pipe(Effect.mapError((cause) => failure("preview", cause)))
+    })
+
+    const restore = Effect.fn("Snapshot.restore")(function* (input: RestoreInput) {
+      if (Config.latest(yield* config.entries(), "snapshots") === false)
+        return yield* new Error({ operation: "restore", message: "Snapshots are disabled" })
+      const repo = yield* retained(Array.from(input.files.values())).pipe(
+        Effect.mapError((cause) => failure("restore", cause)),
+      )
+      yield* git.tree
+        .restore({ repository: repo, files: yield* plan("restore", input, repo.worktree) })
+        .pipe(Effect.mapError((cause) => failure("restore", cause)))
+    })
+
+    const checkout = Effect.fn("Snapshot.checkout")(function* (snapshot: ID) {
+      const repo = yield* resolve(snapshot).pipe(Effect.mapError((cause) => failure("restore", cause)))
+      yield* git.tree
+        .checkout({ repository: repo, tree: Git.TreeID.make(snapshot) })
+        .pipe(Effect.mapError((cause) => failure("restore", cause)))
+    })
+
+    const materialize = Effect.fn("Snapshot.materialize")(function* (input: {
+      readonly snapshot: ID
+      readonly directory: AbsolutePath
+    }) {
+      if (Config.latest(yield* config.entries(), "snapshots") === false)
+        return yield* new Error({ operation: "materialize", message: "Snapshots are disabled" })
+      if (yield* fs.existsSafe(input.directory))
+        return yield* new Error({ operation: "materialize", message: `Directory already exists: ${input.directory}` })
+      const source = yield* resolve(input.snapshot).pipe(Effect.mapError((cause) => failure("materialize", cause)))
+      const gitDirectory = AbsolutePath.make(`${input.directory}.git`)
+      yield* fs
+        .makeDirectory(input.directory, { recursive: true })
+        .pipe(Effect.mapError((cause) => new Error({ operation: "materialize", message: cause.message, cause })))
+      const target = yield* git.repo
+        .create({ worktree: input.directory, gitDirectory, seed: source })
+        .pipe(Effect.mapError((cause) => failure("materialize", cause)))
+      yield* git.tree
+        .checkout({ repository: target, tree: Git.TreeID.make(input.snapshot) })
+        .pipe(Effect.mapError((cause) => failure("materialize", cause)))
+      yield* fs
+        .writeFileString(path.join(input.directory, ".git"), `gitdir: ${gitDirectory}\n`)
+        .pipe(Effect.mapError((cause) => new Error({ operation: "materialize", message: cause.message, cause })))
+      const runGit = (args: ReadonlyArray<string>) =>
+        processes
+          .run(
+            ChildProcess.make("git", args, {
+              cwd: input.directory,
+              extendEnv: true,
+              env: {
+                GIT_AUTHOR_NAME: "OpenCode Replay",
+                GIT_AUTHOR_EMAIL: "replay@opencode.local",
+                GIT_COMMITTER_NAME: "OpenCode Replay",
+                GIT_COMMITTER_EMAIL: "replay@opencode.local",
+              },
+            }),
+          )
+          .pipe(
+            Effect.flatMap(AppProcess.requireSuccess),
+            Effect.mapError((cause) => new Error({ operation: "materialize", message: cause.message, cause })),
+          )
+      const commit = (yield* runGit(["commit-tree", input.snapshot, "-m", "Replay subject"])).stdout
+        .toString("utf8")
+        .trim()
+      yield* runGit(["update-ref", "HEAD", commit])
+      yield* runGit(["reset", "--mixed", "HEAD"])
+      return undefined
+    })
+
+    return Service.of({ capture, files, diff, preview, restore, checkout, materialize })
+  }),
+)
+
+export const locationLayer = layer.pipe(Layer.provideMerge(Config.locationLayer))
+
+export const node = makeLocationNode({
+  service: Service,
+  layer,
+  deps: [Config.node, FSUtil.node, Git.node, Global.node, Location.node, AppProcess.node],
+})
+
+export const noopLayer = Layer.succeed(
+  Service,
+  Service.of({
+    capture: () => Effect.succeed(undefined),
+    files: () => Effect.succeed([]),
+    diff: () => Effect.succeed([]),
+    preview: () => Effect.succeed([]),
+    restore: () => Effect.void,
+    checkout: () => Effect.void,
+    materialize: () => Effect.void,
+  }),
+)
+
+function failure(operation: Error["operation"], cause: unknown) {
+  if (cause instanceof Error && cause.operation === operation) return cause
+  return new Error({
+    operation,
+    message: cause instanceof globalThis.Error ? cause.message : String(cause),
+    cause,
+  })
+}
+
+/** Legacy persisted session diff shape. */
+export type LegacyFileDiff = {
+  file?: string
+  patch?: string
+  additions: number
+  deletions: number
+  status?: "added" | "deleted" | "modified"
+}

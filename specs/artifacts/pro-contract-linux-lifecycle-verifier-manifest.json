@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "platform": "linux-x64",
+  "network": "none-required",
+  "argv": [
+    "sh",
+    "-c",
+    "test \"$(cat lifecycle.txt)\" = ready && sha256sum lifecycle.txt"
+  ],
+  "expected": {
+    "exit": 0,
+    "path": "lifecycle.txt",
+    "sha256": "ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b"
+  }
+}

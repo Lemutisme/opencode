@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "contractID": "pct_linux_lifecycle_20260818_run2",
+  "policyHash": "95d20f58dc04e3d0c223a7fc0963e0858d791058c0a6d977dfa0f229d47ecdf0",
+  "subjectHash": "f7ddd02611840c873fa168a4bba5e0a559277670",
+  "passed": true,
+  "checks": [
+    {
+      "argv": [
+        "sh",
+        "-c",
+        "test \"$(cat lifecycle.txt)\" = ready"
+      ],
+      "cwd": ".",
+      "expectedExit": 0,
+      "exit": 0,
+      "stdoutHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutTruncated": false,
+      "stderrTruncated": false
+    }
+  ],
+  "protected": [
+    {
+      "path": "lifecycle.txt",
+      "exists": true,
+      "hash": "ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b",
+      "expectedHash": "ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "lifecycle.txt",
+      "exists": true,
+      "hash": "ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b"
+    }
+  ]
+}
