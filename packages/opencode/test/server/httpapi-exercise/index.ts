@@ -662,6 +662,88 @@ const scenarios: Scenario[] = [
     object(body)
     check(body.healthy === true, "v2 server should report healthy")
   }),
+  http.protected.get("/api/contract", "v2.proContract.list").json(200, data(array)),
+  http.protected
+    .get("/api/contract/quiet", "v2.proContract.quiet")
+    .at((ctx) => ({ path: "/api/contract/quiet?scope=httpapi", headers: ctx.headers() }))
+    .json(200, (body) => {
+      object(body)
+      check(body.scope === "httpapi", "quiet snapshot should bind its scope")
+      check(body.quiet === true, "empty scope should be quiet")
+    }),
+  http.protected
+    .get("/api/contract/{contractID}", "v2.proContract.get")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+    }))
+    .json(404, object, "status"),
+  http.protected
+    .get("/api/contract/{contractID}/execution", "v2.proContract.execution")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}/execution", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+    }))
+    .json(404, object, "status"),
+  http.protected
+    .post("/api/contract", "v2.proContract.issue")
+    .mutating()
+    .at((ctx) => ({
+      path: "/api/contract",
+      headers: ctx.headers(),
+      body: {
+        id: "pct_httpapi",
+        scope: "httpapi",
+        goal: "Exercise ProContract admission",
+        location: { directory: ctx.directory },
+        model: { providerID: "openai", id: "gpt-5.3-codex" },
+      },
+    }))
+    .json(200, (body) => {
+      object(body)
+      object(body.data)
+      object(body.execution)
+      object(body.receipt)
+    }),
+  http.protected
+    .post("/api/contract/{contractID}/attestation", "v2.proContract.attest")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}/attestation", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+      body: { evidenceHash: "missing" },
+    }))
+    .json(404, object, "status"),
+  http.protected
+    .post("/api/contract/{contractID}/challenge", "v2.proContract.challenge")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}/challenge", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+      body: { evidenceHash: "missing", disclosure: "sealed" },
+    }))
+    .json(404, object, "status"),
+  http.protected
+    .post("/api/contract/{contractID}/release", "v2.proContract.release")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}/release", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+      body: { reason: "missing" },
+    }))
+    .json(404, object, "status"),
+  http.protected
+    .post("/api/contract/{contractID}/resume", "v2.proContract.resume")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}/resume", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+    }))
+    .json(404, object, "status"),
+  http.protected
+    .post("/api/contract/{contractID}/revision/decision", "v2.proContract.decideRevision")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}/revision/decision", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+      body: { accept: false },
+    }))
+    .json(404, object, "status"),
   http.protected.get("/api/location", "v2.location.get").json(200, object),
   http.protected.get("/api/agent", "v2.agent.list").json(200, locationData(array)),
   http.protected.get("/api/model", "v2.model.list").json(200, locationData(array)),

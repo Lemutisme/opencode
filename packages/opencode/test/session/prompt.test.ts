@@ -57,6 +57,10 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
+import { ProContract } from "@opencode-ai/core/pro-contract"
+import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ProContractOpenCodeTable } from "@opencode-ai/core/pro-contract/sql"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -71,6 +75,7 @@ const ref = {
   providerID: ProviderV2.ID.make("test"),
   modelID: ModelV2.ID.make("test-model"),
 }
+const contractModel = ModelV2.Ref.make({ providerID: ref.providerID, id: ref.modelID })
 
 function withSh<A, E, R>(fx: () => Effect.Effect<A, E, R>) {
   return Effect.acquireUseRelease(
@@ -206,6 +211,8 @@ const promptRoot = LayerNode.group([
   SystemPrompt.node,
   CrossSpawnSpawner.node,
   RuntimeFlags.node,
+  ProContract.node,
+  ProContractOpenCode.node,
 ])
 
 function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
@@ -443,6 +450,55 @@ const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
 })
 
 // Loop semantics
+
+noLLMServer.instance("rejects every legacy execution path for Contract Sessions", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const contracts = yield* ProContract.Service
+    const bindings = yield* ProContractOpenCode.Service
+    const { db } = yield* Database.Service
+    const chat = yield* sessions.create({ title: "Contract" })
+    const contractID = ProContract.ID.make("pct_legacy_fence")
+    const spec = ProContract.defaultSpec("Preserve the legacy fence", Date.now())
+    const binding = yield* bindings.create({
+      contractID,
+      revision: 1,
+      location: { directory: AbsolutePath.make(test.directory) },
+      model: contractModel,
+      nextActionAt: 0,
+    })
+    yield* db
+      .update(ProContractOpenCodeTable)
+      .set({ session_id: chat.id, data: { ...binding, sessionID: chat.id } })
+      .where(eq(ProContractOpenCodeTable.contract_id, contractID))
+      .run()
+      .pipe(Effect.orDie)
+    yield* contracts.issue({ id: contractID, scope: "legacy-fence", spec, executor: "opencode" })
+
+    const promptExit = yield* prompt
+      .prompt({ sessionID: chat.id, agent: "build", noReply: true, parts: [{ type: "text", text: "bypass" }] })
+      .pipe(Effect.exit)
+    const loopExit = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.exit)
+    const shellExit = yield* prompt.shell({ sessionID: chat.id, agent: "build", command: "true" }).pipe(Effect.exit)
+    const commandExit = yield* prompt
+      .command({ sessionID: chat.id, command: "missing", arguments: "" })
+      .pipe(Effect.exit)
+    expect(Exit.isFailure(promptExit)).toBe(true)
+    if (Exit.isFailure(promptExit))
+      expect(Cause.pretty(promptExit.cause)).toContain("reserved for institutional execution")
+    expect(Exit.isFailure(loopExit)).toBe(true)
+    if (Exit.isFailure(loopExit)) expect(Cause.pretty(loopExit.cause)).toContain("reserved for institutional execution")
+    expect(Exit.isFailure(shellExit)).toBe(true)
+    if (Exit.isFailure(shellExit))
+      expect(Cause.pretty(shellExit.cause)).toContain("reserved for institutional execution")
+    expect(Exit.isFailure(commandExit)).toBe(true)
+    if (Exit.isFailure(commandExit))
+      expect(Cause.pretty(commandExit.cause)).toContain("reserved for institutional execution")
+    expect(yield* sessions.messages({ sessionID: chat.id })).toEqual([])
+  }),
+)
 
 noLLMServer.instance(
   "loop exits immediately when last assistant has stop finish",

@@ -130,6 +130,12 @@ import type {
   PermissionRuleset,
   PermissionV2Reply,
   PermissionV2Source,
+  ProContractBudget,
+  ProContractCapability,
+  ProContractEvidence,
+  ProContractRequirement,
+  ProContractResolution,
+  ProContractTrigger,
   ProjectCommands,
   ProjectCurrentErrors,
   ProjectCurrentResponses,
@@ -305,6 +311,26 @@ import type {
   V2PermissionSavedListResponses,
   V2PermissionSavedRemoveErrors,
   V2PermissionSavedRemoveResponses,
+  V2ProContractAttestErrors,
+  V2ProContractAttestResponses,
+  V2ProContractChallengeErrors,
+  V2ProContractChallengeResponses,
+  V2ProContractDecideRevisionErrors,
+  V2ProContractDecideRevisionResponses,
+  V2ProContractExecutionErrors,
+  V2ProContractExecutionResponses,
+  V2ProContractGetErrors,
+  V2ProContractGetResponses,
+  V2ProContractIssueErrors,
+  V2ProContractIssueResponses,
+  V2ProContractListErrors,
+  V2ProContractListResponses,
+  V2ProContractQuietErrors,
+  V2ProContractQuietResponses,
+  V2ProContractReleaseErrors,
+  V2ProContractReleaseResponses,
+  V2ProContractResumeErrors,
+  V2ProContractResumeResponses,
   V2ProjectCopyCreateErrors,
   V2ProjectCopyCreateResponses,
   V2ProjectCopyRefreshErrors,
@@ -6987,6 +7013,302 @@ export class ProjectCopy2 extends HeyApiClient {
   }
 }
 
+export class ProContract extends HeyApiClient {
+  /**
+   * List contracts
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      scope?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "scope" }] }])
+    return (options?.client ?? this.client).get<V2ProContractListResponses, V2ProContractListErrors, ThrowOnError>({
+      url: "/api/contract",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Issue contract
+   */
+  public issue<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+      scope?: string
+      goal?: string
+      brief?: string
+      requires?: Array<ProContractRequirement>
+      location?: LocationRef
+      model?: ModelRef
+      trigger?: ProContractTrigger
+      authority?: Array<ProContractCapability>
+      budget?: ProContractBudget
+      evidence?: ProContractEvidence
+      resolution?: ProContractResolution
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "id" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "goal" },
+            { in: "body", key: "brief" },
+            { in: "body", key: "requires" },
+            { in: "body", key: "location" },
+            { in: "body", key: "model" },
+            { in: "body", key: "trigger" },
+            { in: "body", key: "authority" },
+            { in: "body", key: "budget" },
+            { in: "body", key: "evidence" },
+            { in: "body", key: "resolution" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2ProContractIssueResponses, V2ProContractIssueErrors, ThrowOnError>({
+      url: "/api/contract",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Check contract quiescence
+   */
+  public quiet<ThrowOnError extends boolean = false>(
+    parameters: {
+      scope: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "scope" }] }])
+    return (options?.client ?? this.client).get<V2ProContractQuietResponses, V2ProContractQuietErrors, ThrowOnError>({
+      url: "/api/contract/quiet",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get contract
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "contractID" }] }])
+    return (options?.client ?? this.client).get<V2ProContractGetResponses, V2ProContractGetErrors, ThrowOnError>({
+      url: "/api/contract/{contractID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get OpenCode execution
+   */
+  public execution<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "contractID" }] }])
+    return (options?.client ?? this.client).get<
+      V2ProContractExecutionResponses,
+      V2ProContractExecutionErrors,
+      ThrowOnError
+    >({
+      url: "/api/contract/{contractID}/execution",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Attest contract evidence
+   */
+  public attest<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+      evidenceHash?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "contractID" },
+            { in: "body", key: "evidenceHash" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2ProContractAttestResponses, V2ProContractAttestErrors, ThrowOnError>(
+      {
+        url: "/api/contract/{contractID}/attestation",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Challenge contract verification
+   */
+  public challenge<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+      evidenceHash?: string
+      disclosure?: "executor" | "sealed"
+      summary?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "contractID" },
+            { in: "body", key: "evidenceHash" },
+            { in: "body", key: "disclosure" },
+            { in: "body", key: "summary" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2ProContractChallengeResponses,
+      V2ProContractChallengeErrors,
+      ThrowOnError
+    >({
+      url: "/api/contract/{contractID}/challenge",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Decide contract revision
+   */
+  public decideRevision<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+      accept?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "contractID" },
+            { in: "body", key: "accept" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2ProContractDecideRevisionResponses,
+      V2ProContractDecideRevisionErrors,
+      ThrowOnError
+    >({
+      url: "/api/contract/{contractID}/revision/decision",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Release contract
+   */
+  public release<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+      reason?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "contractID" },
+            { in: "body", key: "reason" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2ProContractReleaseResponses,
+      V2ProContractReleaseErrors,
+      ThrowOnError
+    >({
+      url: "/api/contract/{contractID}/release",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Resume escalated contract
+   */
+  public resume<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "contractID" }] }])
+    return (options?.client ?? this.client).post<V2ProContractResumeResponses, V2ProContractResumeErrors, ThrowOnError>(
+      {
+        url: "/api/contract/{contractID}/resume",
+        ...options,
+        ...params,
+      },
+    )
+  }
+}
+
 export class V2 extends HeyApiClient {
   private _health?: Health
   get health(): Health {
@@ -7071,6 +7393,11 @@ export class V2 extends HeyApiClient {
   private _projectCopy?: ProjectCopy2
   get projectCopy(): ProjectCopy2 {
     return (this._projectCopy ??= new ProjectCopy2({ client: this.client }))
+  }
+
+  private _proContract?: ProContract
+  get proContract(): ProContract {
+    return (this._proContract ??= new ProContract({ client: this.client }))
   }
 }
 

@@ -8,7 +8,7 @@ import {
   isContextOverflowFailure,
   type ProviderErrorEvent,
 } from "@opencode-ai/llm"
-import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
+import { Cause, Clock, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
@@ -17,6 +17,8 @@ import { Location } from "../../location"
 import { ModelV2 } from "../../model"
 import { PermissionV2 } from "../../permission"
 import { ProviderV2 } from "../../provider"
+import { ProContract } from "../../pro-contract"
+import { ProContractOpenCode } from "../../pro-contract/open-code"
 import { QuestionV2 } from "../../question"
 import { SystemContext } from "../../system-context/index"
 import { SystemContextRegistry } from "../../system-context/registry"
@@ -105,6 +107,8 @@ const layer = Layer.effect(
     const referenceGuidance = yield* ReferenceGuidance.Service
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
+    const contracts = yield* ProContract.Service
+    const contractBindings = yield* ProContractOpenCode.Service
     const db = (yield* Database.Service).db
     const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
@@ -180,6 +184,31 @@ const layer = Layer.effect(
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
       const agent = yield* agents.select(session.agent)
+      const contractBinding = yield* contractBindings.forSession(session.id)
+      const contract = contractBinding ? yield* contracts.get(contractBinding.contractID) : undefined
+      const contractDependencies =
+        contract?.status === "active"
+          ? (yield* Effect.forEach(
+              contract.spec.requires,
+              Effect.fnUntraced(function* (item) {
+                const dependency = yield* contracts.get(item.contractID)
+                if (!dependency?.attestationID) return undefined
+                const attestation = yield* contracts.getAttestation(dependency.attestationID)
+                if (!attestation) return undefined
+                return { dependency, attestation }
+              }),
+            )).filter((item) => item !== undefined)
+          : []
+      const now = yield* Clock.currentTimeMillis
+      if (
+        contractBinding &&
+        (!contractBinding.dispatched ||
+          contractBinding.leaseOwner !== contractBindings.owner ||
+          (contractBinding.leaseExpiresAt ?? 0) <= now ||
+          contractBinding.revision !== contract?.revision ||
+          contract?.escalation)
+      )
+        return { needsContinuation: false, step }
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
@@ -200,12 +229,78 @@ const layer = Layer.effect(
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
-      const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
+      const contractPermissions = contractBinding
+        ? [
+            { action: "*", resource: "*", effect: "deny" as const },
+            { action: "contract_report_ready", resource: "*", effect: "allow" as const },
+            { action: "contract_report_blocked", resource: "*", effect: "allow" as const },
+            { action: "contract_propose_revision", resource: "*", effect: "allow" as const },
+            { action: "todowrite", resource: "*", effect: "allow" as const },
+            ...(contract?.status === "active" && contract.spec.authority.includes("filesystem.read")
+              ? [
+                  { action: "read", resource: "*", effect: "allow" as const },
+                  { action: "glob", resource: "*", effect: "allow" as const },
+                  { action: "grep", resource: "*", effect: "allow" as const },
+                ]
+              : []),
+            ...(contract?.status === "active" && contract.spec.authority.includes("filesystem.write")
+              ? [{ action: "edit", resource: "*", effect: "allow" as const }]
+              : []),
+            ...(contract?.status === "active" && contract.spec.authority.includes("process.execute")
+              ? [{ action: "bash", resource: "*", effect: "allow" as const }]
+              : []),
+          ]
+        : [
+            { action: "contract_report_ready", resource: "*", effect: "deny" as const },
+            { action: "contract_report_blocked", resource: "*", effect: "deny" as const },
+            { action: "contract_propose_revision", resource: "*", effect: "deny" as const },
+          ]
+      const toolMaterialization = isLastStep
+        ? undefined
+        : yield* tools.materialize([...(agent.info?.permissions ?? []), ...contractPermissions])
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline]
+        system: [
+          agent.info?.system,
+          system.baseline,
+          contract?.status === "active"
+            ? [
+                `<pro_contract id="${contract.id}" revision="${contract.revision}">`,
+                contract.spec.goal,
+                ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
+                ...(contract.challenge?.disclosure === "executor"
+                  ? [
+                      "Verifier challenge:",
+                      contract.challenge.summary ?? "Verification failed",
+                      `Negative witness: ${contract.challenge.evidenceHash}`,
+                      ...(contract.challenge.attestationID
+                        ? [`Challenged attestation: ${contract.challenge.attestationID}`]
+                        : []),
+                    ]
+                  : []),
+                ...(contractDependencies.length
+                  ? [
+                      "Verified prerequisites:",
+                      ...contractDependencies.map(
+                        (item) =>
+                          `${item.dependency.id}@${item.dependency.revision}: ${item.dependency.spec.goal} ` +
+                          `(attestation ${item.attestation.id}, evidence ${item.attestation.evidenceHash}, ` +
+                          `verifier ${item.attestation.verifierID}/${item.attestation.class})` +
+                          (item.dependency.handoff ? `; handoff: ${item.dependency.handoff.summary}` : ""),
+                      ),
+                    ]
+                  : []),
+                `Delegated authority: ${contract.spec.authority.join(", ")}.`,
+                "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
+                "After completing the prescribed checks, call contract_report_ready with all known unresolved assumptions. A final answer alone does not hand work to the verifier.",
+                "</pro_contract>",
+              ].join("\n")
+            : contractBinding && contract
+              ? `Contract ${contract.id} is ${contract.status}. No further execution is authorized.`
+              : undefined,
+        ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
@@ -214,6 +309,8 @@ const layer = Layer.effect(
       })
       if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
         return yield* Effect.die(continueAfterCompaction(currentStep))
+      if (contractBinding && !(yield* contractBindings.reserveTurn(session.id, yield* Clock.currentTimeMillis)))
+        return { needsContinuation: false, step: currentStep }
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
@@ -428,5 +525,7 @@ export const node = makeLocationNode({
     Config.node,
     Snapshot.node,
     Database.node,
+    ProContract.node,
+    ProContractOpenCode.node,
   ],
 })

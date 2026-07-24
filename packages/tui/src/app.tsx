@@ -50,6 +50,7 @@ import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
+import { DialogContracts } from "./component/dialog-contracts"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { Home } from "./routes/home"
 import { Session } from "./routes/session"
@@ -58,6 +59,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
+import { DialogPrompt } from "./ui/dialog-prompt"
 import { ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
@@ -766,6 +768,58 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "status",
         run: () => {
           dialog.replace(() => <DialogStatus />)
+        },
+        category: "System",
+      },
+      {
+        name: "contract.list",
+        title: "Contracts",
+        slashName: "contracts",
+        run: () => {
+          dialog.replace(() => <DialogContracts scope={sdk.directory} />)
+        },
+        category: "System",
+      },
+      {
+        name: "contract.issue",
+        title: "Issue contract",
+        run: async () => {
+          const goal = await DialogPrompt.show(dialog, "Issue contract", {
+            placeholder: "What must remain outstanding?",
+          })
+          if (!goal?.trim()) return
+          const brief = await DialogPrompt.show(dialog, "Handoff brief", {
+            placeholder: "Optional context for the future executor",
+          })
+          if (brief == null) return
+          const directory = sdk.directory
+          if (!directory) {
+            toast.show({ variant: "error", message: "A project directory is required" })
+            return
+          }
+          const model = local.model.current()
+          if (!model) {
+            toast.show({ variant: "error", message: "Select a model before issuing a contract" })
+            return
+          }
+          const result = await sdk.client.v2.proContract.issue({
+            id: `pct_${crypto.randomUUID()}`,
+            scope: directory,
+            goal: goal.trim(),
+            brief: brief.trim(),
+            location: { directory },
+            model: {
+              providerID: model.providerID,
+              id: model.modelID,
+              variant: local.model.variant.current(),
+            },
+          })
+          if (result.error) {
+            toast.show({ variant: "error", message: errorMessage(result.error) })
+            return
+          }
+          toast.show({ variant: "success", message: "Contract issued" })
+          dialog.replace(() => <DialogContracts scope={directory} />)
         },
         category: "System",
       },

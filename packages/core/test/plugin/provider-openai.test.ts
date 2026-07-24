@@ -153,6 +153,35 @@ describe("OpenAIPlugin", () => {
     }),
   )
 
+  it.effect("applies OPENAI_BASE_URL to the V2 catalog", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.OPENAI_BASE_URL
+        process.env.OPENAI_BASE_URL = "https://openai-proxy.test/v1"
+        return previous
+      }),
+      () =>
+        Effect.gen(function* () {
+          const catalog = yield* Catalog.Service
+          yield* catalog.transform((catalog) => {
+            catalog.provider.update(ProviderV2.ID.openai, (provider) => {
+              provider.api = { type: "aisdk", package: "@ai-sdk/openai" }
+            })
+            catalog.model.update(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5"), () => {})
+          })
+          yield* addPlugin()
+          expect(required(yield* catalog.model.get(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5"))).api.url).toBe(
+            "https://openai-proxy.test/v1",
+          )
+        }),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.OPENAI_BASE_URL
+          else process.env.OPENAI_BASE_URL = previous
+        }),
+    ),
+  )
+
   it.effect("does not disable gpt-5-chat-latest for non-OpenAI providers", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

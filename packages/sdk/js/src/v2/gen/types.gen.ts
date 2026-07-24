@@ -2953,6 +2953,12 @@ export type ProjectCopyError = {
   }
 }
 
+export type ProContractNotFoundError = {
+  _tag: "ProContractNotFoundError"
+  contractID: string
+  message: string
+}
+
 export type EffectHttpApiErrorForbidden = {
   _tag: "Forbidden"
 }
@@ -6145,6 +6151,107 @@ export type ReferenceInfo = {
 
 export type ProjectCopyCopy = {
   directory: string
+}
+
+export type ProContractRequirement = {
+  contractID: string
+  revision: number
+}
+
+export type ProContractTrigger =
+  | {
+      type: "immediate"
+    }
+  | {
+      type: "time"
+      at: number
+    }
+
+export type ProContractCapability = "filesystem.read" | "filesystem.write" | "process.execute"
+
+export type ProContractBudget = {
+  turns: number
+  actions: number
+  deadline: number
+}
+
+export type ProContractEvidence = {
+  type: "principal"
+}
+
+export type ProContractResolution = {
+  maxAttempts: number
+  retryDelay: number
+}
+
+export type ProContractSpec = {
+  trigger: ProContractTrigger
+  goal: string
+  brief: string
+  requires: Array<ProContractRequirement>
+  authority: Array<ProContractCapability>
+  budget: ProContractBudget
+  evidence: ProContractEvidence
+  resolution: ProContractResolution
+}
+
+export type ProContractStatus = "dormant" | "active" | "discharged" | "released"
+
+export type ProContractHandoff = {
+  summary: string
+  uncertainties: Array<string>
+  time: number
+}
+
+export type ProContractChallenge = {
+  evidenceHash: string
+  disclosure: "executor" | "sealed"
+  summary?: string
+  time: number
+  attestationID?: string
+}
+
+export type ProContractInfo = {
+  id: string
+  scope: string
+  spec: ProContractSpec
+  issuer: string
+  revision: number
+  status: ProContractStatus
+  specHash: string
+  escalation?: {
+    reason: string
+    time: number
+  }
+  handoff?: ProContractHandoff
+  challenge?: ProContractChallenge
+  pendingRevision?: {
+    spec: ProContractSpec
+    specHash: string
+    reason: string
+  }
+  attestationID?: string
+}
+
+export type ProContractOpenCodeExecution = {
+  contractID: string
+  revision: number
+  location: LocationRef
+  model: ModelRef
+  sessionID: string
+  promptID: string
+  dispatched: boolean
+  attempts: number
+  nextActionAt: number
+  turnsUsed: number
+  actionsUsed: number
+  leaseOwner?: string
+  leaseExpiresAt?: number
+}
+
+export type ProContractReceipt = {
+  frontier: number
+  hash: string
 }
 
 export type EventModelsDevRefreshed = {
@@ -13580,6 +13687,406 @@ export type V2ProjectCopyRefreshResponses = {
 }
 
 export type V2ProjectCopyRefreshResponse = V2ProjectCopyRefreshResponses[keyof V2ProjectCopyRefreshResponses]
+
+export type V2ProContractListData = {
+  body?: never
+  path?: never
+  query?: {
+    scope?: string
+  }
+  url: "/api/contract"
+}
+
+export type V2ProContractListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2ProContractListError = V2ProContractListErrors[keyof V2ProContractListErrors]
+
+export type V2ProContractListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<ProContractInfo>
+  }
+}
+
+export type V2ProContractListResponse = V2ProContractListResponses[keyof V2ProContractListResponses]
+
+export type V2ProContractIssueData = {
+  body: {
+    id?: string
+    scope: string
+    goal: string
+    brief?: string
+    requires?: Array<ProContractRequirement>
+    location: LocationRef
+    model: ModelRef
+    trigger?: ProContractTrigger
+    authority?: Array<ProContractCapability>
+    budget?: ProContractBudget
+    evidence?: ProContractEvidence
+    resolution?: ProContractResolution
+  }
+  path?: never
+  query?: never
+  url: "/api/contract"
+}
+
+export type V2ProContractIssueErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2ProContractIssueError = V2ProContractIssueErrors[keyof V2ProContractIssueErrors]
+
+export type V2ProContractIssueResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: ProContractInfo
+    execution: ProContractOpenCodeExecution
+    receipt: ProContractReceipt
+  }
+}
+
+export type V2ProContractIssueResponse = V2ProContractIssueResponses[keyof V2ProContractIssueResponses]
+
+export type V2ProContractQuietData = {
+  body?: never
+  path?: never
+  query: {
+    scope: string
+  }
+  url: "/api/contract/quiet"
+}
+
+export type V2ProContractQuietErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2ProContractQuietError = V2ProContractQuietErrors[keyof V2ProContractQuietErrors]
+
+export type V2ProContractQuietResponses = {
+  /**
+   * Success
+   */
+  200: {
+    scope: string
+    quiet: boolean
+    frontier: number
+    ledgerHash: string
+    stateHash: string
+    outstanding: Array<string>
+  }
+}
+
+export type V2ProContractQuietResponse = V2ProContractQuietResponses[keyof V2ProContractQuietResponses]
+
+export type V2ProContractGetData = {
+  body?: never
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}"
+}
+
+export type V2ProContractGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+}
+
+export type V2ProContractGetError = V2ProContractGetErrors[keyof V2ProContractGetErrors]
+
+export type V2ProContractGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: ProContractInfo
+  }
+}
+
+export type V2ProContractGetResponse = V2ProContractGetResponses[keyof V2ProContractGetResponses]
+
+export type V2ProContractExecutionData = {
+  body?: never
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}/execution"
+}
+
+export type V2ProContractExecutionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+}
+
+export type V2ProContractExecutionError = V2ProContractExecutionErrors[keyof V2ProContractExecutionErrors]
+
+export type V2ProContractExecutionResponses = {
+  /**
+   * ProContract.OpenCodeExecution
+   */
+  200: ProContractOpenCodeExecution
+}
+
+export type V2ProContractExecutionResponse = V2ProContractExecutionResponses[keyof V2ProContractExecutionResponses]
+
+export type V2ProContractAttestData = {
+  body: {
+    evidenceHash: string
+  }
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}/attestation"
+}
+
+export type V2ProContractAttestErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2ProContractAttestError = V2ProContractAttestErrors[keyof V2ProContractAttestErrors]
+
+export type V2ProContractAttestResponses = {
+  /**
+   * ProContract.Receipt
+   */
+  200: ProContractReceipt
+}
+
+export type V2ProContractAttestResponse = V2ProContractAttestResponses[keyof V2ProContractAttestResponses]
+
+export type V2ProContractChallengeData = {
+  body: {
+    evidenceHash: string
+    disclosure: "executor" | "sealed"
+    summary?: string
+  }
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}/challenge"
+}
+
+export type V2ProContractChallengeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2ProContractChallengeError = V2ProContractChallengeErrors[keyof V2ProContractChallengeErrors]
+
+export type V2ProContractChallengeResponses = {
+  /**
+   * ProContract.Receipt
+   */
+  200: ProContractReceipt
+}
+
+export type V2ProContractChallengeResponse = V2ProContractChallengeResponses[keyof V2ProContractChallengeResponses]
+
+export type V2ProContractDecideRevisionData = {
+  body: {
+    accept: boolean
+  }
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}/revision/decision"
+}
+
+export type V2ProContractDecideRevisionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2ProContractDecideRevisionError =
+  V2ProContractDecideRevisionErrors[keyof V2ProContractDecideRevisionErrors]
+
+export type V2ProContractDecideRevisionResponses = {
+  /**
+   * ProContract.Receipt
+   */
+  200: ProContractReceipt
+}
+
+export type V2ProContractDecideRevisionResponse =
+  V2ProContractDecideRevisionResponses[keyof V2ProContractDecideRevisionResponses]
+
+export type V2ProContractReleaseData = {
+  body: {
+    reason: string
+  }
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}/release"
+}
+
+export type V2ProContractReleaseErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2ProContractReleaseError = V2ProContractReleaseErrors[keyof V2ProContractReleaseErrors]
+
+export type V2ProContractReleaseResponses = {
+  /**
+   * ProContract.Receipt
+   */
+  200: ProContractReceipt
+}
+
+export type V2ProContractReleaseResponse = V2ProContractReleaseResponses[keyof V2ProContractReleaseResponses]
+
+export type V2ProContractResumeData = {
+  body?: never
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}/resume"
+}
+
+export type V2ProContractResumeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2ProContractResumeError = V2ProContractResumeErrors[keyof V2ProContractResumeErrors]
+
+export type V2ProContractResumeResponses = {
+  /**
+   * ProContract.Receipt
+   */
+  200: ProContractReceipt
+}
+
+export type V2ProContractResumeResponse = V2ProContractResumeResponses[keyof V2ProContractResumeResponses]
 
 export type PtyConnectData = {
   body?: never

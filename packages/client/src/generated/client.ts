@@ -112,6 +112,26 @@ import type {
   ProjectCopiesRemoveOutput,
   ProjectCopiesRefreshInput,
   ProjectCopiesRefreshOutput,
+  ServerProContractIssueInput,
+  ServerProContractIssueOutput,
+  ServerProContractListInput,
+  ServerProContractListOutput,
+  ServerProContractQuietInput,
+  ServerProContractQuietOutput,
+  ServerProContractGetInput,
+  ServerProContractGetOutput,
+  ServerProContractExecutionInput,
+  ServerProContractExecutionOutput,
+  ServerProContractAttestInput,
+  ServerProContractAttestOutput,
+  ServerProContractChallengeInput,
+  ServerProContractChallengeOutput,
+  ServerProContractDecideRevisionInput,
+  ServerProContractDecideRevisionOutput,
+  ServerProContractReleaseInput,
+  ServerProContractReleaseOutput,
+  ServerProContractResumeInput,
+  ServerProContractResumeOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -983,6 +1003,138 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
+          },
+          requestOptions,
+        ),
+    },
+    "server.proContract": {
+      issue: (input: ServerProContractIssueInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractIssueOutput>(
+          {
+            method: "POST",
+            path: `/api/contract`,
+            body: {
+              id: input["id"],
+              scope: input["scope"],
+              goal: input["goal"],
+              brief: input["brief"],
+              requires: input["requires"],
+              location: input["location"],
+              model: input["model"],
+              trigger: input["trigger"],
+              authority: input["authority"],
+              budget: input["budget"],
+              evidence: input["evidence"],
+              resolution: input["resolution"],
+            },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      list: (input?: ServerProContractListInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerProContractListOutput }>(
+          {
+            method: "GET",
+            path: `/api/contract`,
+            query: { scope: input?.["scope"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      quiet: (input: ServerProContractQuietInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractQuietOutput>(
+          {
+            method: "GET",
+            path: `/api/contract/quiet`,
+            query: { scope: input["scope"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      get: (input: ServerProContractGetInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerProContractGetOutput }>(
+          {
+            method: "GET",
+            path: `/api/contract/${encodeURIComponent(input.contractID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      execution: (input: ServerProContractExecutionInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractExecutionOutput>(
+          {
+            method: "GET",
+            path: `/api/contract/${encodeURIComponent(input.contractID)}/execution`,
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      attest: (input: ServerProContractAttestInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractAttestOutput>(
+          {
+            method: "POST",
+            path: `/api/contract/${encodeURIComponent(input.contractID)}/attestation`,
+            body: { evidenceHash: input["evidenceHash"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      challenge: (input: ServerProContractChallengeInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractChallengeOutput>(
+          {
+            method: "POST",
+            path: `/api/contract/${encodeURIComponent(input.contractID)}/challenge`,
+            body: { evidenceHash: input["evidenceHash"], disclosure: input["disclosure"], summary: input["summary"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      decideRevision: (input: ServerProContractDecideRevisionInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractDecideRevisionOutput>(
+          {
+            method: "POST",
+            path: `/api/contract/${encodeURIComponent(input.contractID)}/revision/decision`,
+            body: { accept: input["accept"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      release: (input: ServerProContractReleaseInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractReleaseOutput>(
+          {
+            method: "POST",
+            path: `/api/contract/${encodeURIComponent(input.contractID)}/release`,
+            body: { reason: input["reason"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      resume: (input: ServerProContractResumeInput, requestOptions?: RequestOptions) =>
+        request<ServerProContractResumeOutput>(
+          {
+            method: "POST",
+            path: `/api/contract/${encodeURIComponent(input.contractID)}/resume`,
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
           },
           requestOptions,
         ),

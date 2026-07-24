@@ -101,6 +101,14 @@ export type ProjectCopyError = {
 export const isProjectCopyError = (value: unknown): value is ProjectCopyError =>
   typeof value === "object" && value !== null && "name" in value && value["name"] === "ProjectCopyError"
 
+export type ProContractNotFoundError = {
+  readonly _tag: "ProContractNotFoundError"
+  readonly contractID: string
+  readonly message: string
+}
+export const isProContractNotFoundError = (value: unknown): value is ProContractNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ProContractNotFoundError"
+
 export type HealthGetOutput = { readonly healthy: true }
 
 export type LocationGetInput = {
@@ -2805,3 +2813,416 @@ export type ProjectCopiesRefreshInput = {
 }
 
 export type ProjectCopiesRefreshOutput = void
+
+export type ServerProContractIssueInput = {
+  readonly id?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["id"]
+  readonly scope: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["scope"]
+  readonly goal: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["goal"]
+  readonly brief?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["brief"]
+  readonly requires?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["requires"]
+  readonly location: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["location"]
+  readonly model: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["model"]
+  readonly trigger?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["trigger"]
+  readonly authority?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["authority"]
+  readonly budget?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["budget"]
+  readonly evidence?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["evidence"]
+  readonly resolution?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: { readonly type: "principal" } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["resolution"]
+}
+
+export type ServerProContractIssueOutput = {
+  readonly data: {
+    readonly id: string
+    readonly scope: string
+    readonly spec: {
+      readonly trigger: { readonly type: "immediate" } | { readonly type: "time"; readonly at: number }
+      readonly goal: string
+      readonly brief: string
+      readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
+      readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+      readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+      readonly evidence: { readonly type: "principal" }
+      readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+    }
+    readonly issuer: string
+    readonly revision: number
+    readonly status: "dormant" | "active" | "discharged" | "released"
+    readonly specHash: string
+    readonly escalation?: { readonly reason: string; readonly time: number }
+    readonly handoff?: {
+      readonly summary: string
+      readonly uncertainties: ReadonlyArray<string>
+      readonly time: number
+    }
+    readonly challenge?: {
+      readonly evidenceHash: string
+      readonly disclosure: "executor" | "sealed"
+      readonly summary?: string
+      readonly time: number
+      readonly attestationID?: string
+    }
+    readonly pendingRevision?: {
+      readonly spec: {
+        readonly trigger: { readonly type: "immediate" } | { readonly type: "time"; readonly at: number }
+        readonly goal: string
+        readonly brief: string
+        readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
+        readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+        readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+        readonly evidence: { readonly type: "principal" }
+        readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+      }
+      readonly specHash: string
+      readonly reason: string
+    }
+    readonly attestationID?: string
+  }
+  readonly execution: {
+    readonly contractID: string
+    readonly revision: number
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly sessionID: string
+    readonly promptID: string
+    readonly dispatched: boolean
+    readonly attempts: number
+    readonly nextActionAt: number
+    readonly turnsUsed: number
+    readonly actionsUsed: number
+    readonly leaseOwner?: string
+    readonly leaseExpiresAt?: number
+  }
+  readonly receipt: { readonly frontier: number; readonly hash: string }
+}
+
+export type ServerProContractListInput = { readonly scope?: { readonly scope?: string | undefined }["scope"] }
+
+export type ServerProContractListOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly scope: string
+    readonly spec: {
+      readonly trigger: { readonly type: "immediate" } | { readonly type: "time"; readonly at: number }
+      readonly goal: string
+      readonly brief: string
+      readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
+      readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+      readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+      readonly evidence: { readonly type: "principal" }
+      readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+    }
+    readonly issuer: string
+    readonly revision: number
+    readonly status: "dormant" | "active" | "discharged" | "released"
+    readonly specHash: string
+    readonly escalation?: { readonly reason: string; readonly time: number }
+    readonly handoff?: {
+      readonly summary: string
+      readonly uncertainties: ReadonlyArray<string>
+      readonly time: number
+    }
+    readonly challenge?: {
+      readonly evidenceHash: string
+      readonly disclosure: "executor" | "sealed"
+      readonly summary?: string
+      readonly time: number
+      readonly attestationID?: string
+    }
+    readonly pendingRevision?: {
+      readonly spec: {
+        readonly trigger: { readonly type: "immediate" } | { readonly type: "time"; readonly at: number }
+        readonly goal: string
+        readonly brief: string
+        readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
+        readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+        readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+        readonly evidence: { readonly type: "principal" }
+        readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+      }
+      readonly specHash: string
+      readonly reason: string
+    }
+    readonly attestationID?: string
+  }>
+}["data"]
+
+export type ServerProContractQuietInput = { readonly scope: { readonly scope: string }["scope"] }
+
+export type ServerProContractQuietOutput = {
+  readonly scope: string
+  readonly quiet: boolean
+  readonly frontier: number
+  readonly ledgerHash: string
+  readonly stateHash: string
+  readonly outstanding: ReadonlyArray<string>
+}
+
+export type ServerProContractGetInput = { readonly contractID: { readonly contractID: string }["contractID"] }
+
+export type ServerProContractGetOutput = {
+  readonly data: {
+    readonly id: string
+    readonly scope: string
+    readonly spec: {
+      readonly trigger: { readonly type: "immediate" } | { readonly type: "time"; readonly at: number }
+      readonly goal: string
+      readonly brief: string
+      readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
+      readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+      readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+      readonly evidence: { readonly type: "principal" }
+      readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+    }
+    readonly issuer: string
+    readonly revision: number
+    readonly status: "dormant" | "active" | "discharged" | "released"
+    readonly specHash: string
+    readonly escalation?: { readonly reason: string; readonly time: number }
+    readonly handoff?: {
+      readonly summary: string
+      readonly uncertainties: ReadonlyArray<string>
+      readonly time: number
+    }
+    readonly challenge?: {
+      readonly evidenceHash: string
+      readonly disclosure: "executor" | "sealed"
+      readonly summary?: string
+      readonly time: number
+      readonly attestationID?: string
+    }
+    readonly pendingRevision?: {
+      readonly spec: {
+        readonly trigger: { readonly type: "immediate" } | { readonly type: "time"; readonly at: number }
+        readonly goal: string
+        readonly brief: string
+        readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
+        readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+        readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+        readonly evidence: { readonly type: "principal" }
+        readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+      }
+      readonly specHash: string
+      readonly reason: string
+    }
+    readonly attestationID?: string
+  }
+}["data"]
+
+export type ServerProContractExecutionInput = { readonly contractID: { readonly contractID: string }["contractID"] }
+
+export type ServerProContractExecutionOutput = {
+  readonly contractID: string
+  readonly revision: number
+  readonly location: { readonly directory: string; readonly workspaceID?: string }
+  readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+  readonly sessionID: string
+  readonly promptID: string
+  readonly dispatched: boolean
+  readonly attempts: number
+  readonly nextActionAt: number
+  readonly turnsUsed: number
+  readonly actionsUsed: number
+  readonly leaseOwner?: string
+  readonly leaseExpiresAt?: number
+}
+
+export type ServerProContractAttestInput = {
+  readonly contractID: { readonly contractID: string }["contractID"]
+  readonly evidenceHash: { readonly evidenceHash: string }["evidenceHash"]
+}
+
+export type ServerProContractAttestOutput = { readonly frontier: number; readonly hash: string }
+
+export type ServerProContractChallengeInput = {
+  readonly contractID: { readonly contractID: string }["contractID"]
+  readonly evidenceHash: {
+    readonly evidenceHash: string
+    readonly disclosure: "executor" | "sealed"
+    readonly summary?: string | undefined
+  }["evidenceHash"]
+  readonly disclosure: {
+    readonly evidenceHash: string
+    readonly disclosure: "executor" | "sealed"
+    readonly summary?: string | undefined
+  }["disclosure"]
+  readonly summary?: {
+    readonly evidenceHash: string
+    readonly disclosure: "executor" | "sealed"
+    readonly summary?: string | undefined
+  }["summary"]
+}
+
+export type ServerProContractChallengeOutput = { readonly frontier: number; readonly hash: string }
+
+export type ServerProContractDecideRevisionInput = {
+  readonly contractID: { readonly contractID: string }["contractID"]
+  readonly accept: { readonly accept: boolean }["accept"]
+}
+
+export type ServerProContractDecideRevisionOutput = { readonly frontier: number; readonly hash: string }
+
+export type ServerProContractReleaseInput = {
+  readonly contractID: { readonly contractID: string }["contractID"]
+  readonly reason: { readonly reason: string }["reason"]
+}
+
+export type ServerProContractReleaseOutput = { readonly frontier: number; readonly hash: string }
+
+export type ServerProContractResumeInput = { readonly contractID: { readonly contractID: string }["contractID"] }
+
+export type ServerProContractResumeOutput = { readonly frontier: number; readonly hash: string }

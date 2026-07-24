@@ -160,6 +160,12 @@ export const OpenAIPlugin = define({
     })
     yield* ctx.catalog.transform(
       Effect.fn(function* (evt) {
+        const openai = evt.provider.get(ProviderV2.ID.openai)
+        if (openai && process.env.OPENAI_BASE_URL) {
+          evt.provider.update(ProviderV2.ID.openai, (provider) => {
+            provider.request.body.baseURL = process.env.OPENAI_BASE_URL
+          })
+        }
         for (const item of evt.provider.list()) {
           if (item.provider.api.type !== "aisdk") continue
           if (item.provider.api.package !== "@ai-sdk/openai") continue

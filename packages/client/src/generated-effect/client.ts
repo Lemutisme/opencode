@@ -681,6 +681,129 @@ const adaptGroup17 = (raw: RawClient["server.projectCopy"]) => ({
   refresh: Endpoint17_2(raw),
 })
 
+type Endpoint18_0Request = Parameters<RawClient["server.proContract"]["proContract.issue"]>[0]
+type Endpoint18_0Input = {
+  readonly id?: Endpoint18_0Request["payload"]["id"]
+  readonly scope: Endpoint18_0Request["payload"]["scope"]
+  readonly goal: Endpoint18_0Request["payload"]["goal"]
+  readonly brief?: Endpoint18_0Request["payload"]["brief"]
+  readonly requires?: Endpoint18_0Request["payload"]["requires"]
+  readonly location: Endpoint18_0Request["payload"]["location"]
+  readonly model: Endpoint18_0Request["payload"]["model"]
+  readonly trigger?: Endpoint18_0Request["payload"]["trigger"]
+  readonly authority?: Endpoint18_0Request["payload"]["authority"]
+  readonly budget?: Endpoint18_0Request["payload"]["budget"]
+  readonly evidence?: Endpoint18_0Request["payload"]["evidence"]
+  readonly resolution?: Endpoint18_0Request["payload"]["resolution"]
+}
+const Endpoint18_0 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_0Input) =>
+  raw["proContract.issue"]({
+    payload: {
+      id: input["id"],
+      scope: input["scope"],
+      goal: input["goal"],
+      brief: input["brief"],
+      requires: input["requires"],
+      location: input["location"],
+      model: input["model"],
+      trigger: input["trigger"],
+      authority: input["authority"],
+      budget: input["budget"],
+      evidence: input["evidence"],
+      resolution: input["resolution"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_1Request = Parameters<RawClient["server.proContract"]["proContract.list"]>[0]
+type Endpoint18_1Input = { readonly scope?: Endpoint18_1Request["query"]["scope"] }
+const Endpoint18_1 = (raw: RawClient["server.proContract"]) => (input?: Endpoint18_1Input) =>
+  raw["proContract.list"]({ query: { scope: input?.["scope"] } }).pipe(
+    Effect.mapError(mapClientError),
+    Effect.map((value) => value.data),
+  )
+
+type Endpoint18_2Request = Parameters<RawClient["server.proContract"]["proContract.quiet"]>[0]
+type Endpoint18_2Input = { readonly scope: Endpoint18_2Request["query"]["scope"] }
+const Endpoint18_2 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_2Input) =>
+  raw["proContract.quiet"]({ query: { scope: input["scope"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_3Request = Parameters<RawClient["server.proContract"]["proContract.get"]>[0]
+type Endpoint18_3Input = { readonly contractID: Endpoint18_3Request["params"]["contractID"] }
+const Endpoint18_3 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_3Input) =>
+  raw["proContract.get"]({ params: { contractID: input["contractID"] } }).pipe(
+    Effect.mapError(mapClientError),
+    Effect.map((value) => value.data),
+  )
+
+type Endpoint18_4Request = Parameters<RawClient["server.proContract"]["proContract.execution"]>[0]
+type Endpoint18_4Input = { readonly contractID: Endpoint18_4Request["params"]["contractID"] }
+const Endpoint18_4 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_4Input) =>
+  raw["proContract.execution"]({ params: { contractID: input["contractID"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_5Request = Parameters<RawClient["server.proContract"]["proContract.attest"]>[0]
+type Endpoint18_5Input = {
+  readonly contractID: Endpoint18_5Request["params"]["contractID"]
+  readonly evidenceHash: Endpoint18_5Request["payload"]["evidenceHash"]
+}
+const Endpoint18_5 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_5Input) =>
+  raw["proContract.attest"]({
+    params: { contractID: input["contractID"] },
+    payload: { evidenceHash: input["evidenceHash"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_6Request = Parameters<RawClient["server.proContract"]["proContract.challenge"]>[0]
+type Endpoint18_6Input = {
+  readonly contractID: Endpoint18_6Request["params"]["contractID"]
+  readonly evidenceHash: Endpoint18_6Request["payload"]["evidenceHash"]
+  readonly disclosure: Endpoint18_6Request["payload"]["disclosure"]
+  readonly summary?: Endpoint18_6Request["payload"]["summary"]
+}
+const Endpoint18_6 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_6Input) =>
+  raw["proContract.challenge"]({
+    params: { contractID: input["contractID"] },
+    payload: { evidenceHash: input["evidenceHash"], disclosure: input["disclosure"], summary: input["summary"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_7Request = Parameters<RawClient["server.proContract"]["proContract.decideRevision"]>[0]
+type Endpoint18_7Input = {
+  readonly contractID: Endpoint18_7Request["params"]["contractID"]
+  readonly accept: Endpoint18_7Request["payload"]["accept"]
+}
+const Endpoint18_7 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_7Input) =>
+  raw["proContract.decideRevision"]({
+    params: { contractID: input["contractID"] },
+    payload: { accept: input["accept"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_8Request = Parameters<RawClient["server.proContract"]["proContract.release"]>[0]
+type Endpoint18_8Input = {
+  readonly contractID: Endpoint18_8Request["params"]["contractID"]
+  readonly reason: Endpoint18_8Request["payload"]["reason"]
+}
+const Endpoint18_8 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_8Input) =>
+  raw["proContract.release"]({
+    params: { contractID: input["contractID"] },
+    payload: { reason: input["reason"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_9Request = Parameters<RawClient["server.proContract"]["proContract.resume"]>[0]
+type Endpoint18_9Input = { readonly contractID: Endpoint18_9Request["params"]["contractID"] }
+const Endpoint18_9 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_9Input) =>
+  raw["proContract.resume"]({ params: { contractID: input["contractID"] } }).pipe(Effect.mapError(mapClientError))
+
+const adaptGroup18 = (raw: RawClient["server.proContract"]) => ({
+  issue: Endpoint18_0(raw),
+  list: Endpoint18_1(raw),
+  quiet: Endpoint18_2(raw),
+  get: Endpoint18_3(raw),
+  execution: Endpoint18_4(raw),
+  attest: Endpoint18_5(raw),
+  challenge: Endpoint18_6(raw),
+  decideRevision: Endpoint18_7(raw),
+  release: Endpoint18_8(raw),
+  resume: Endpoint18_9(raw),
+})
+
 const adaptClient = (raw: RawClient) => ({
   health: adaptGroup0(raw["server.health"]),
   location: adaptGroup1(raw["server.location"]),
@@ -700,6 +823,7 @@ const adaptClient = (raw: RawClient) => ({
   questions: adaptGroup15(raw["server.question"]),
   references: adaptGroup16(raw["server.reference"]),
   projectCopies: adaptGroup17(raw["server.projectCopy"]),
+  "server.proContract": adaptGroup18(raw["server.proContract"]),
 })
 
 export const make = (options?: { readonly baseUrl?: URL | string }) =>

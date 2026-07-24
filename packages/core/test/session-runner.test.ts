@@ -55,6 +55,8 @@ import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ProContract } from "@opencode-ai/core/pro-contract"
+import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
@@ -270,6 +272,8 @@ const it = testEffect(
       ReferenceGuidance.node,
       Config.node,
       Snapshot.node,
+      ProContract.node,
+      ProContractOpenCode.node,
       SessionRunnerLLM.node,
       SessionExecution.node,
       SessionV2.node,
@@ -652,6 +656,114 @@ describe("SessionRunnerLLM", () => {
         { role: "user", content: [{ type: "text", text: "Second" }] },
       ])
       expect(yield* session.messages({ sessionID })).toHaveLength(2)
+    }),
+  )
+
+  it.effect("injects active contracts and removes effectful tools", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const session = yield* SessionV2.Service
+      const dependencyID = ProContract.ID.make("pct_runner_dependency")
+      yield* contracts.issue({
+        id: dependencyID,
+        scope: "runner",
+        spec: ProContract.defaultSpec("Establish the runner prerequisite", Date.now()),
+        executor: "dependency",
+      })
+      yield* contracts.activate(dependencyID, 1, Date.now())
+      yield* contracts.reportReady({
+        contractID: dependencyID,
+        revision: 1,
+        summary: "dependency complete",
+        uncertainties: [],
+        time: Date.now(),
+      })
+      yield* contracts.principalAttest({ contractID: dependencyID, evidenceHash: "dependency-evidence" })
+      const spec = {
+        ...ProContract.defaultSpec("Inspect the repository without changing it", Date.now()),
+        brief: "The failing behavior is isolated to argument parsing.",
+        requires: [{ contractID: dependencyID, revision: 1 }],
+      }
+      const issued = yield* contracts.issue({
+        id: ProContract.ID.make("pct_runner"),
+        scope: "runner",
+        spec,
+        executor: "opencode",
+      })
+      const contract = issued.contract!
+      yield* bindings.create({
+        contractID: contract.id,
+        revision: contract.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: ModelV2.Ref.make({ id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") }),
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contract.id, contract.revision, Date.now())
+      const attempt = yield* bindings.claim(contract.id, Date.now())
+      expect(attempt).toBeDefined()
+      yield* session.create({ id: attempt!.sessionID, location: attempt!.location, model: attempt!.model })
+      yield* session.prompt({
+        id: attempt!.promptID,
+        sessionID: attempt!.sessionID,
+        prompt: Prompt.make({ text: "Reconcile the active contract and advance it within the delegated authority." }),
+        resume: false,
+      })
+      requests.length = 0
+      response = []
+
+      yield* session.resume(attempt!.sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.tools).toEqual([])
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "Inspect the repository without changing it",
+      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "The failing behavior is isolated to argument parsing.",
+      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Establish the runner prerequisite")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("dependency-evidence")
+
+      yield* contracts.reportReady({
+        contractID: contract.id,
+        revision: contract.revision,
+        summary: "candidate complete",
+        uncertainties: [],
+        time: Date.now(),
+      })
+      yield* contracts.challenge({
+        contractID: contract.id,
+        evidenceHash: "negative-witness",
+        disclosure: "executor",
+        summary: "Independent output mismatch",
+        time: Date.now(),
+      })
+      yield* contracts.activate(contract.id, contract.revision, Date.now())
+      yield* session.prompt({
+        sessionID: attempt!.sessionID,
+        prompt: Prompt.make({ text: "Address the verifier challenge" }),
+        resume: false,
+      })
+      response = []
+      yield* session.resume(attempt!.sessionID)
+
+      expect(requests).toHaveLength(2)
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Independent output mismatch")
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("negative-witness")
+
+      yield* contracts.release({ contractID: contract.id, reason: "test complete" })
+      yield* session.prompt({
+        sessionID: attempt!.sessionID,
+        prompt: Prompt.make({ text: "Continue after release" }),
+        resume: false,
+      })
+      response = []
+      yield* session.resume(attempt!.sessionID)
+
+      expect(requests).toHaveLength(2)
     }),
   )
 
