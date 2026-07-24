@@ -56,14 +56,11 @@ const layer = Layer.effect(
           Effect.gen(function* () {
             const contract = yield* contracts.get(binding.contractID)
             if (!contract || contract.status !== "active" || contract.escalation) return
-            if (now >= contract.spec.budget.deadline || binding.attempts >= contract.spec.resolution.maxAttempts) {
+            if (now >= contract.spec.budget.deadline) {
               yield* contracts.escalate({
                 contractID: contract.id,
                 revision: contract.revision,
-                reason:
-                  now >= contract.spec.budget.deadline
-                    ? "OpenCode deadline exhausted"
-                    : "OpenCode attempt budget exhausted",
+                reason: "OpenCode deadline exhausted",
                 time: now,
               })
               return
@@ -84,12 +81,13 @@ const layer = Layer.effect(
             }).pipe(
               Effect.catchCause((cause) =>
                 bindings
-                  .retry({
+                  .reschedule({
                     contractID: current.contractID,
                     revision: current.revision,
                     promptID: current.promptID,
                     reason: "OpenCode dispatch failed",
                     now,
+                    attempt: "same",
                   })
                   .pipe(
                     Effect.andThen(

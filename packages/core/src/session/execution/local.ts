@@ -37,12 +37,13 @@ const layer = Layer.effect(
           Effect.exit,
         )
         if (attempt)
-          yield* contracts.retry({
+          yield* contracts.reschedule({
             contractID: attempt.contractID,
             revision: attempt.revision,
             promptID: attempt.promptID,
             reason: Exit.isSuccess(exit) ? "OpenCode execution ended without settlement" : "OpenCode execution failed",
             now: yield* Clock.currentTimeMillis,
+            attempt: Exit.isSuccess(exit) ? "new" : "same",
           })
         if (Exit.isFailure(exit)) return yield* exit
         return undefined

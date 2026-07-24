@@ -54,12 +54,13 @@ const layer = Layer.effectDiscard(
             Effect.gen(function* () {
               const binding = yield* bindings.forSession(context.sessionID)
               if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
-              yield* bindings.retry({
+              yield* bindings.reschedule({
                 contractID: binding.contractID,
                 revision: binding.revision,
                 promptID: binding.promptID,
                 reason: input.reason,
                 now: yield* Clock.currentTimeMillis,
+                attempt: "new",
               })
               return { recorded: true }
             }).pipe(

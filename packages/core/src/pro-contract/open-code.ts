@@ -26,6 +26,8 @@ export type Binding = {
   readonly actionsUsed: number
   readonly leaseOwner?: string
   readonly leaseExpiresAt?: number
+  readonly attemptKey?: string
+  readonly retiredSessionIDs?: ReadonlyArray<SessionSchema.ID>
 }
 
 export interface Interface {
@@ -42,12 +44,13 @@ export interface Interface {
   readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<Binding | undefined>
   readonly due: (now: number) => Effect.Effect<ReadonlyArray<Binding>>
   readonly heartbeat: (sessionIDs: ReadonlySet<SessionSchema.ID>, now: number) => Effect.Effect<void>
-  readonly retry: (input: {
+  readonly reschedule: (input: {
     readonly contractID: Schema.ID
     readonly revision: number
     readonly promptID: SessionMessage.ID
     readonly reason: string
     readonly now: number
+    readonly attempt: "same" | "new"
   }) => Effect.Effect<void>
   readonly reserveTurn: (sessionID: SessionSchema.ID, now: number) => Effect.Effect<boolean>
   readonly reserveAction: (sessionID: SessionSchema.ID, now: number) => Effect.Effect<boolean>
@@ -76,7 +79,34 @@ const layer = Layer.effect(
         )
     })
 
+    const forSession = Effect.fn("ProContractOpenCode.forSession")(function* (sessionID: SessionSchema.ID) {
+      const current = yield* db
+        .select({ data: ProContractOpenCodeTable.data })
+        .from(ProContractOpenCodeTable)
+        .where(eq(ProContractOpenCodeTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (current) return current.data
+      // Rotated Sessions stay reserved; otherwise their old IDs regain ordinary Session permissions.
+      const retired = (yield* db
+        .select({ data: ProContractOpenCodeTable.data })
+        .from(ProContractOpenCodeTable)
+        .all()
+        .pipe(Effect.orDie)).find((row) => row.data.retiredSessionIDs?.includes(sessionID))
+      if (!retired) return undefined
+      return {
+        ...retired.data,
+        sessionID,
+        dispatched: false,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+      }
+    })
+
     const reserve = Effect.fnUntraced(function* (sessionID: SessionSchema.ID, now: number, kind: "turn" | "action") {
+      const binding = yield* forSession(sessionID)
+      if (!binding) return true
+      if (!binding.dispatched) return false
       const decision = yield* db
         .transaction(
           (tx) =>
@@ -88,7 +118,7 @@ const layer = Layer.effect(
                 .where(eq(ProContractOpenCodeTable.session_id, sessionID))
                 .get()
                 .pipe(Effect.orDie)
-              if (!row) return { allowed: true }
+              if (!row) return { allowed: false }
               if (
                 !row.binding.dispatched ||
                 row.binding.leaseOwner !== owner ||
@@ -155,6 +185,7 @@ const layer = Layer.effect(
           nextActionAt: input.nextActionAt,
           turnsUsed: 0,
           actionsUsed: 0,
+          attemptKey: `${input.revision}:`,
         }
         yield* db
           .insert(ProContractOpenCodeTable)
@@ -165,7 +196,7 @@ const layer = Layer.effect(
         return (yield* get(input.contractID)) ?? binding
       }),
       claim: Effect.fn("ProContractOpenCode.claim")(function* (contractID, now) {
-        return yield* db
+        const result = yield* db
           .transaction(
             (tx) =>
               Effect.gen(function* () {
@@ -176,50 +207,66 @@ const layer = Layer.effect(
                   .where(eq(ProContractOpenCodeTable.contract_id, contractID))
                   .get()
                   .pipe(Effect.orDie)
-                if (!row || row.contract.status !== "active" || row.contract.escalation) return undefined
-                const revised = row.binding.revision !== row.contract.revision
-                if (!revised && row.binding.dispatched && (row.binding.leaseExpiresAt ?? 0) > now) return undefined
-                if (!revised && !row.binding.dispatched && row.binding.nextActionAt > now) return undefined
-                if (
-                  row.binding.attempts >= row.contract.spec.resolution.maxAttempts ||
-                  now >= row.contract.spec.budget.deadline
-                )
-                  return undefined
+                if (!row || row.contract.status !== "active" || row.contract.escalation) return {}
+                // Transport retries preserve this key; authoritative context changes replace the Session.
+                const attemptKey = `${row.contract.revision}:${
+                  row.contract.challenge?.disclosure === "executor"
+                    ? `${row.contract.challenge.time}:${row.contract.challenge.evidenceHash}`
+                    : ""
+                }`
+                const attemptChanged =
+                  row.binding.attemptKey === undefined
+                    ? row.binding.revision !== row.contract.revision ||
+                      row.contract.challenge?.disclosure === "executor"
+                    : row.binding.attemptKey !== attemptKey
+                const newAttempt =
+                  row.binding.attempts === 0 ||
+                  attemptChanged ||
+                  (row.binding.dispatched && (row.binding.leaseExpiresAt ?? 0) <= now)
+                if (!newAttempt && row.binding.dispatched) return {}
+                if (!newAttempt && row.binding.nextActionAt > now) return {}
+                if (now >= row.contract.spec.budget.deadline) return {}
+                if (newAttempt && row.binding.attempts >= row.contract.spec.resolution.maxAttempts)
+                  return { exhausted: row.contract }
+                const rotate = newAttempt && row.binding.attempts > 0
                 const leaseExpiresAt = Math.min(now + LEASE_MS, row.contract.spec.budget.deadline)
                 const next = {
                   ...row.binding,
                   revision: row.contract.revision,
-                  promptID: revised || row.binding.dispatched ? SessionMessage.ID.create() : row.binding.promptID,
+                  sessionID: rotate ? SessionSchema.ID.create() : row.binding.sessionID,
+                  promptID: rotate ? SessionMessage.ID.create() : row.binding.promptID,
                   dispatched: true,
-                  attempts: row.binding.attempts + 1,
+                  attempts: row.binding.attempts + Number(newAttempt),
                   nextActionAt: leaseExpiresAt,
                   leaseOwner: owner,
                   leaseExpiresAt,
+                  attemptKey,
+                  retiredSessionIDs: rotate
+                    ? [...(row.binding.retiredSessionIDs ?? []), row.binding.sessionID]
+                    : row.binding.retiredSessionIDs,
                 }
                 yield* tx
                   .update(ProContractOpenCodeTable)
-                  .set({ data: next })
+                  .set({ session_id: next.sessionID, data: next })
                   .where(eq(ProContractOpenCodeTable.contract_id, contractID))
                   .run()
                   .pipe(Effect.orDie)
-                return next
+                return { binding: next }
               }),
             { behavior: "immediate" },
           )
           .pipe(Effect.orDie)
+        if (result.exhausted)
+          yield* contracts.escalate({
+            contractID: result.exhausted.id,
+            revision: result.exhausted.revision,
+            reason: "OpenCode attempt budget exhausted",
+            time: now,
+          })
+        return result.binding
       }),
       get,
-      forSession: Effect.fn("ProContractOpenCode.forSession")(function* (sessionID) {
-        return yield* db
-          .select({ data: ProContractOpenCodeTable.data })
-          .from(ProContractOpenCodeTable)
-          .where(eq(ProContractOpenCodeTable.session_id, sessionID))
-          .get()
-          .pipe(
-            Effect.orDie,
-            Effect.map((row) => row?.data),
-          )
-      }),
+      forSession,
       due: Effect.fn("ProContractOpenCode.due")(function* (now) {
         const rows = yield* db
           .select({ binding: ProContractOpenCodeTable.data, contract: ProContractTable.data })
@@ -232,7 +279,11 @@ const layer = Layer.effect(
             (row) =>
               row.contract.status === "active" &&
               !row.contract.escalation &&
-              (row.binding.revision !== row.contract.revision || row.binding.nextActionAt <= now),
+              (row.binding.revision !== row.contract.revision ||
+                (row.contract.challenge?.disclosure === "executor" &&
+                  row.binding.attemptKey !==
+                    `${row.contract.revision}:${row.contract.challenge.time}:${row.contract.challenge.evidenceHash}`) ||
+                row.binding.nextActionAt <= now),
           )
           .map((row) => row.binding)
       }),
@@ -273,7 +324,7 @@ const layer = Layer.effect(
           )
           .pipe(Effect.orDie)
       }),
-      retry: Effect.fn("ProContractOpenCode.retry")(function* (input) {
+      reschedule: Effect.fn("ProContractOpenCode.reschedule")(function* (input) {
         const escalation = yield* db
           .transaction(
             (tx) =>
@@ -297,7 +348,7 @@ const layer = Layer.effect(
                 )
                   return undefined
                 if (
-                  row.binding.attempts >= row.contract.spec.resolution.maxAttempts ||
+                  (input.attempt === "new" && row.binding.attempts >= row.contract.spec.resolution.maxAttempts) ||
                   input.now >= row.contract.spec.budget.deadline
                 )
                   return { contractID: row.contract.id, revision: row.contract.revision }
@@ -306,11 +357,12 @@ const layer = Layer.effect(
                   .set({
                     data: {
                       ...row.binding,
-                      promptID: SessionMessage.ID.create(),
+                      promptID: input.attempt === "same" ? SessionMessage.ID.create() : row.binding.promptID,
                       dispatched: false,
                       nextActionAt: input.now + row.contract.spec.resolution.retryDelay,
                       leaseOwner: undefined,
                       leaseExpiresAt: undefined,
+                      attemptKey: input.attempt === "new" ? "" : row.binding.attemptKey,
                     },
                   })
                   .where(eq(ProContractOpenCodeTable.contract_id, input.contractID))

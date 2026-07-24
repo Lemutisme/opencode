@@ -689,6 +689,95 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
+  schedulerIt.effect("reuses one semantic attempt for transport retries", () =>
+    Effect.gen(function* () {
+      wakeCalls.length = 0
+      activeSessions.clear()
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const scheduler = yield* ProContractScheduler.Service
+      const limited = { ...spec, resolution: { ...spec.resolution, maxAttempts: 1 } }
+      const retryAt = 1 + limited.resolution.retryDelay
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec: limited, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* scheduler.runOnce()
+      const first = yield* bindings.get(contractID)
+      yield* bindings.reschedule({
+        contractID,
+        revision: 1,
+        promptID: first!.promptID,
+        reason: "provider unavailable",
+        now: 1,
+        attempt: "same",
+      })
+      yield* TestClock.setTime(retryAt)
+      yield* scheduler.runOnce()
+      const second = yield* bindings.get(contractID)
+
+      expect(second).toMatchObject({
+        sessionID: first?.sessionID,
+        attempts: 1,
+      })
+      expect(second?.promptID).not.toBe(first?.promptID)
+      expect(wakeCalls).toEqual([first!.sessionID, first!.sessionID])
+    }),
+  )
+
+  schedulerIt.effect("starts verification challenges in a fresh fenced Session", () =>
+    Effect.gen(function* () {
+      wakeCalls.length = 0
+      activeSessions.clear()
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const scheduler = yield* ProContractScheduler.Service
+      const sessions = yield* SessionV2.Service
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* scheduler.runOnce()
+      const first = yield* bindings.get(contractID)
+      yield* contracts.reportReady({
+        contractID,
+        revision: 1,
+        summary: "candidate complete",
+        uncertainties: [],
+        time: 1,
+      })
+      yield* contracts.challenge({
+        contractID,
+        evidenceHash: "negative-witness",
+        disclosure: "executor",
+        summary: "Independent output mismatch",
+        time: 2,
+      })
+      yield* scheduler.runOnce()
+      const second = yield* bindings.get(contractID)
+
+      expect(second?.sessionID).not.toBe(first?.sessionID)
+      expect(second?.promptID).not.toBe(first?.promptID)
+      expect(second).toMatchObject({ revision: 1, attempts: 2 })
+      expect(yield* sessions.get(first!.sessionID)).toMatchObject({ id: first?.sessionID })
+      expect(yield* sessions.get(second!.sessionID)).toMatchObject({ id: second?.sessionID })
+      expect(wakeCalls).toEqual([first!.sessionID, second!.sessionID])
+      expect(yield* bindings.forSession(first!.sessionID)).toMatchObject({
+        sessionID: first?.sessionID,
+        dispatched: false,
+      })
+      expect(yield* bindings.reserveAction(first!.sessionID, 2)).toBe(false)
+    }),
+  )
+
   schedulerIt.effect("escalates a due OpenCode contract with no execution binding", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
@@ -773,12 +862,13 @@ describe("OpenCode Contract binding", () => {
       yield* contracts.activate(contractID, 1, 0)
       const claimed = yield* bindings.claim(contractID, 0)
       expect(claimed).toBeDefined()
-      yield* bindings.retry({
+      yield* bindings.reschedule({
         contractID,
         revision: 1,
         promptID: claimed!.promptID,
         reason: "blocked",
         now: 1,
+        attempt: "new",
       })
 
       expect(yield* contracts.get(contractID)).toMatchObject({ escalation: { reason: "blocked", time: 1 } })
@@ -807,12 +897,13 @@ describe("OpenCode Contract binding", () => {
         uncertainties: [],
         time: 1,
       })
-      yield* bindings.retry({
+      yield* bindings.reschedule({
         contractID,
         revision: 1,
         promptID: attempt!.promptID,
         reason: "OpenCode execution ended without settlement",
         now: 2,
+        attempt: "new",
       })
 
       expect(yield* contracts.get(contractID)).toMatchObject({
@@ -838,13 +929,15 @@ describe("OpenCode Contract binding", () => {
       const first = yield* bindings.claim(contractID, 0)
       const second = yield* bindings.claim(contractID, 30_000)
       expect(second?.promptID).not.toBe(first?.promptID)
+      expect(second?.sessionID).not.toBe(first?.sessionID)
 
-      yield* bindings.retry({
+      yield* bindings.reschedule({
         contractID,
         revision: first!.revision,
         promptID: first!.promptID,
         reason: "stale completion",
         now: 30_001,
+        attempt: "new",
       })
       expect(yield* bindings.get(contractID)).toMatchObject({
         promptID: second?.promptID,
@@ -871,12 +964,13 @@ describe("OpenCode Contract binding", () => {
       yield* bindings.heartbeat(new Set([binding.sessionID]), 29_000)
       expect(yield* bindings.claim(contractID, 30_000)).toBeUndefined()
 
-      yield* bindings.retry({
+      yield* bindings.reschedule({
         contractID,
         revision: attempt!.revision,
         promptID: attempt!.promptID,
         reason: "wait for input",
         now: 30_000,
+        attempt: "new",
       })
       expect(yield* bindings.get(contractID)).toMatchObject({
         dispatched: false,
@@ -884,6 +978,9 @@ describe("OpenCode Contract binding", () => {
         nextActionAt: 90_000,
       })
       expect(yield* bindings.reserveTurn(binding.sessionID, 30_000)).toBe(false)
+      const next = yield* bindings.claim(contractID, 90_000)
+      expect(next?.sessionID).not.toBe(binding.sessionID)
+      expect(next).toMatchObject({ attempts: 2 })
     }),
   )
 
@@ -966,6 +1063,7 @@ describe("OpenCode Contract binding", () => {
 
       expect(second).toMatchObject({ revision: 2, turnsUsed: 1, actionsUsed: 1 })
       expect(second?.promptID).not.toBe(first?.promptID)
+      expect(second?.sessionID).not.toBe(first?.sessionID)
       expect(yield* bindings.reserveTurn(binding.sessionID, 2)).toBe(false)
     }),
   )

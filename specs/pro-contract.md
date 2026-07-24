@@ -582,21 +582,23 @@ The intended flow is:
 ```text
 plane activates duty
   -> OpenCode binding reserves a bounded attempt
-  -> adapter creates or adopts a dedicated read-only Session
+  -> adapter creates a dedicated Session for that semantic attempt
   -> active contract is rendered as privileged System Context
   -> adapter claims a durable lease fenced by revision and prompt ID
   -> tool effect points validate the process owner and current fence
   -> executor reports ready or blocked work, or submits a revision petition
   -> ready work records a structured handoff and pauses for verification
   -> failed verification records a visible or sealed challenge
-  -> visible challenge wakes the same bounded Session with the negative witness
+  -> visible challenge closes the old attempt and wakes a fresh Session from authoritative state
   -> plane adjudicates and records the transition
   -> principal submits evidence
 ```
 
-The contract Session is an execution venue. Deleting, reverting, compacting, or
-ending it cannot settle the duty. Contract authority never appears in model
-input or tool arguments.
+Each contract Session is a replaceable execution venue. Provider retries reuse
+the current Session; challenges, revisions, lost leases, and execution that ends
+without handoff start a fresh semantic attempt. Deleting, reverting, compacting,
+or ending any Session cannot settle the duty. Contract authority never appears
+in model input or tool arguments.
 
 The execution binding must name its model explicitly. A proactive attempt may
 fail closed when that model or credential is unavailable, but it must never
@@ -636,9 +638,10 @@ workflow framework.
    stored separately; accepted duties are bound idempotently and rejected
    issues cannot leave orphan bindings. A crash between those writes leaves a
    visible missing-binding escalation for explicit recovery. Durable
-   leases, explicit model binding, revision/prompt fencing, startup reclamation,
+   leases, explicit model binding, semantic-attempt Session rotation,
+   revision/prompt fencing, startup reclamation,
    privileged context, explicit read/write/process capability mediation,
-   cumulative turn/action budgets, bounded retry, escalation, Contract-only
+   cumulative turn/action budgets, bounded semantic attempts, escalation, Contract-only
    control tools, and legacy execution rejection are enforced.
 4. A ProgramBench adapter may later own candidate cleanrooms, submissions, and
    frozen evaluator attestations. None of those concepts belong in Contract
@@ -655,8 +658,8 @@ workflow framework.
 7. A second harness adapter to test that the protocol is not OpenCode-specific.
 
 The current slice provides the explicit eight-part Spec, a durable institution,
-a separate OpenCode binding, a one-second lease scheduler, a dedicated bounded
-Session whose effects require explicit authority, generated clients, CLI
+a separate OpenCode binding, a one-second lease scheduler, bounded per-attempt
+Sessions whose effects require explicit authority, generated clients, CLI
 commands, structured handoff, challenge, and a TUI Contract inspection and
 principal-decision flow. HTTP follows the server's normal auth
 boundary: with a password, authenticated callers are the principal; an
