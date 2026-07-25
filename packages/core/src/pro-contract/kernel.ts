@@ -16,6 +16,7 @@ export type Contract = Draft & {
   readonly revision: number
   readonly status: ProContract.Status
   readonly escalation?: { readonly reason: string; readonly time: number }
+  readonly blocked?: ProContract.Blocked
   readonly handoff?: ProContract.Handoff
   readonly challenge?: ProContract.Challenge
   readonly pendingRevision?: {
@@ -74,6 +75,14 @@ export type Command =
       readonly revision: number
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
+      readonly time: number
+    }
+  | {
+      readonly type: "report-blocked"
+      readonly actor: "institution"
+      readonly contractID: ProContract.ID
+      readonly revision: number
+      readonly reason: string
       readonly time: number
     }
   | {
@@ -176,6 +185,7 @@ export function transition(state: State, command: Command): Result {
               ? { reason: "Verification challenged; evidence is sealed", time: command.challenge.time }
               : undefined,
           challenge: { ...command.challenge, attestationID: contract.attestationID },
+          blocked: undefined,
           handoff: undefined,
           attestationID: undefined,
         },
@@ -203,8 +213,23 @@ export function transition(state: State, command: Command): Result {
         [contract.id]: {
           ...contract,
           escalation: { reason: "Ready for verification", time: command.time },
+          blocked: undefined,
           handoff: { summary: command.summary, uncertainties: command.uncertainties, time: command.time },
         },
+      },
+    })
+  }
+
+  if (command.type === "report-blocked") {
+    if (contract.status !== "active") return reject("contract is not active")
+    if (command.revision !== contract.revision) return reject("contract revision does not match")
+    if (contract.escalation) return reject("contract is escalated")
+    if (contract.pendingRevision) return reject("blocked work cannot be reported while a revision is pending")
+    return accept({
+      ...state,
+      contracts: {
+        ...state.contracts,
+        [contract.id]: { ...contract, blocked: { reason: command.reason, time: command.time } },
       },
     })
   }
@@ -244,6 +269,7 @@ export function transition(state: State, command: Command): Result {
               revision: contract.revision + 1,
               status: "dormant",
               escalation: undefined,
+              blocked: undefined,
               handoff: undefined,
               pendingRevision: undefined,
               attestationID: undefined,
@@ -264,6 +290,7 @@ export function transition(state: State, command: Command): Result {
           ...contract,
           status: "released",
           escalation: undefined,
+          blocked: undefined,
           handoff: undefined,
           challenge: undefined,
           pendingRevision: undefined,
@@ -344,6 +371,7 @@ export function transition(state: State, command: Command): Result {
           ...contract,
           status: "discharged",
           escalation: undefined,
+          blocked: undefined,
           pendingRevision: undefined,
           challenge: undefined,
           attestationID: command.attestation.id,

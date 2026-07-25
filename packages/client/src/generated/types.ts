@@ -3004,6 +3004,7 @@ export type ServerProContractIssueOutput = {
     readonly status: "dormant" | "active" | "discharged" | "released"
     readonly specHash: string
     readonly escalation?: { readonly reason: string; readonly time: number }
+    readonly blocked?: { readonly reason: string; readonly time: number }
     readonly handoff?: {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
@@ -3071,6 +3072,7 @@ export type ServerProContractListOutput = {
     readonly status: "dormant" | "active" | "discharged" | "released"
     readonly specHash: string
     readonly escalation?: { readonly reason: string; readonly time: number }
+    readonly blocked?: { readonly reason: string; readonly time: number }
     readonly handoff?: {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
@@ -3133,6 +3135,7 @@ export type ServerProContractGetOutput = {
     readonly status: "dormant" | "active" | "discharged" | "released"
     readonly specHash: string
     readonly escalation?: { readonly reason: string; readonly time: number }
+    readonly blocked?: { readonly reason: string; readonly time: number }
     readonly handoff?: {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>

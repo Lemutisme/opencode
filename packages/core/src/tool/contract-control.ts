@@ -54,6 +54,14 @@ const layer = Layer.effectDiscard(
             Effect.gen(function* () {
               const binding = yield* bindings.forSession(context.sessionID)
               if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
+              const receipt = yield* contracts.reportBlocked({
+                contractID: binding.contractID,
+                revision: binding.revision,
+                reason: input.reason,
+                time: yield* Clock.currentTimeMillis,
+              })
+              if (receipt.decision.type === "rejected")
+                return yield* new ToolFailure({ message: receipt.decision.reason })
               yield* bindings.reschedule({
                 contractID: binding.contractID,
                 revision: binding.revision,

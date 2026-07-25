@@ -604,6 +604,10 @@ Every current and retired Contract Session has an indexed durable reservation.
 Rotation changes the active binding without returning an old Session ID to the
 ordinary OpenCode permission domain.
 
+Blocked work is an institutional event, not a transient tool result. Its reason
+is retained in the ledger, changes the semantic-attempt context, and is supplied
+to the fresh Session that resumes the obligation.
+
 The execution binding must name its model explicitly. A proactive attempt may
 fail closed when that model or credential is unavailable, but it must never
 silently select another provider. Contract Sessions are permanently reserved

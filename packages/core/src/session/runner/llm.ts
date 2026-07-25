@@ -270,6 +270,7 @@ const layer = Layer.effect(
                 `<pro_contract id="${contract.id}" revision="${contract.revision}">`,
                 contract.spec.goal,
                 ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
+                ...(contract.blocked ? ["Previous attempt blocked:", contract.blocked.reason] : []),
                 ...(contract.challenge?.disclosure === "executor"
                   ? [
                       "Verifier challenge:",

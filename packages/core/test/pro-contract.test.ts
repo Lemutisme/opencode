@@ -342,6 +342,40 @@ describe("ProContract kernel", () => {
     expect(released.state.contracts[contractID]).toMatchObject({ status: "released", escalation: undefined })
   })
 
+  test("carries blocked work into the next institutional attempt", () => {
+    const issued = ProContract.transition(ProContract.empty, issue)
+    const activated = ProContract.transition(issued.state, {
+      type: "activate",
+      actor: "institution",
+      contractID,
+      revision: 1,
+      time: 0,
+    })
+    const blocked = ProContract.transition(activated.state, {
+      type: "report-blocked",
+      actor: "institution",
+      contractID,
+      revision: 1,
+      reason: "waiting for external input",
+      time: 1,
+    })
+
+    expect(blocked.state.contracts[contractID]?.blocked).toEqual({
+      reason: "waiting for external input",
+      time: 1,
+    })
+    const ready = ProContract.transition(blocked.state, {
+      type: "report-ready",
+      actor: "institution",
+      contractID,
+      revision: 1,
+      summary: "input received",
+      uncertainties: [],
+      time: 2,
+    })
+    expect(ready.state.contracts[contractID]?.blocked).toBeUndefined()
+  })
+
   test("turns challenged evidence into renewed duty without erasing history", () => {
     const issued = ProContract.transition(ProContract.empty, issue)
     const activated = ProContract.transition(issued.state, {
@@ -964,6 +998,12 @@ describe("OpenCode Contract binding", () => {
       yield* bindings.heartbeat(new Set([binding.sessionID]), 29_000)
       expect(yield* bindings.claim(contractID, 30_000)).toBeUndefined()
 
+      yield* contracts.reportBlocked({
+        contractID,
+        revision: attempt!.revision,
+        reason: "wait for input",
+        time: 30_000,
+      })
       yield* bindings.reschedule({
         contractID,
         revision: attempt!.revision,
@@ -976,6 +1016,13 @@ describe("OpenCode Contract binding", () => {
         dispatched: false,
         attempts: 1,
         nextActionAt: 90_000,
+      })
+      expect(yield* contracts.get(contractID)).toMatchObject({
+        blocked: { reason: "wait for input", time: 30_000 },
+      })
+      expect((yield* contracts.history({ contractID })).at(-1)?.command).toMatchObject({
+        type: "report-blocked",
+        reason: "wait for input",
       })
       expect(yield* bindings.reserveTurn(binding.sessionID, 30_000)).toBe(false)
       const next = yield* bindings.claim(contractID, 90_000)

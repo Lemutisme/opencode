@@ -61,6 +61,12 @@ export const Handoff = Schema.Struct({
 }).annotate({ identifier: "ProContract.Handoff" })
 export interface Handoff extends Schema.Schema.Type<typeof Handoff> {}
 
+export const Blocked = Schema.Struct({
+  reason: Schema.NonEmptyString,
+  time: NonNegativeInt,
+}).annotate({ identifier: "ProContract.Blocked" })
+export interface Blocked extends Schema.Schema.Type<typeof Blocked> {}
+
 export const Resolution = Schema.Struct({
   maxAttempts: PositiveInt,
   retryDelay: NonNegativeInt,
@@ -93,6 +99,7 @@ export const Info = Schema.Struct({
   status: Status,
   specHash: Schema.String,
   escalation: Schema.Struct({ reason: Schema.String, time: NonNegativeInt }).pipe(optional),
+  blocked: Blocked.pipe(optional),
   handoff: Handoff.pipe(optional),
   challenge: Challenge.pipe(optional),
   pendingRevision: Schema.Struct({ spec: Spec, specHash: Schema.String, reason: Schema.String }).pipe(optional),

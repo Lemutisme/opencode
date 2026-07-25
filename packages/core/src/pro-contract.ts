@@ -3,6 +3,7 @@ export * from "./pro-contract/kernel"
 export {
   Attestation,
   AttestationID,
+  Blocked,
   Capability,
   Challenge,
   Evidence,
@@ -54,6 +55,12 @@ export interface Interface {
     readonly revision: number
     readonly summary: string
     readonly uncertainties: ReadonlyArray<string>
+    readonly time: number
+  }) => Effect.Effect<Receipt>
+  readonly reportBlocked: (input: {
+    readonly contractID: Schema.ID
+    readonly revision: number
+    readonly reason: string
     readonly time: number
   }) => Effect.Effect<Receipt>
   readonly activate: (contractID: Schema.ID, revision: number, now: number) => Effect.Effect<Receipt>
@@ -120,6 +127,7 @@ export function info(contract: ProContractKernel.Contract): Schema.Info {
     status: contract.status,
     specHash: contract.specHash,
     escalation: contract.escalation,
+    blocked: contract.blocked,
     handoff: contract.handoff,
     challenge: contract.challenge,
     pendingRevision: contract.pendingRevision,
@@ -276,6 +284,7 @@ const layer = Layer.effect(
           },
         }),
       reportReady: (input) => execute({ type: "report-ready", actor: "institution", ...input }),
+      reportBlocked: (input) => execute({ type: "report-blocked", actor: "institution", ...input }),
       activate: (contractID, revision, time) =>
         execute({ type: "activate", actor: "institution", contractID, revision, time }),
       resume: (contractID) => execute({ type: "resume", actor: "local-owner", contractID }),

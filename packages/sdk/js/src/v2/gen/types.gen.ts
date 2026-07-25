@@ -6197,6 +6197,11 @@ export type ProContractSpec = {
 
 export type ProContractStatus = "dormant" | "active" | "discharged" | "released"
 
+export type ProContractBlocked = {
+  reason: string
+  time: number
+}
+
 export type ProContractHandoff = {
   summary: string
   uncertainties: Array<string>
@@ -6223,6 +6228,7 @@ export type ProContractInfo = {
     reason: string
     time: number
   }
+  blocked?: ProContractBlocked
   handoff?: ProContractHandoff
   challenge?: ProContractChallenge
   pendingRevision?: {

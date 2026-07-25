@@ -222,12 +222,15 @@ const layer = Layer.effect(
                 const attemptKey = `${row.contract.revision}:${
                   row.contract.challenge?.disclosure === "executor"
                     ? `${row.contract.challenge.time}:${row.contract.challenge.evidenceHash}`
-                    : ""
+                    : row.contract.blocked
+                      ? `${row.contract.blocked.time}:${row.contract.blocked.reason}`
+                      : ""
                 }`
                 const attemptChanged =
                   row.binding.attemptKey === undefined
                     ? row.binding.revision !== row.contract.revision ||
-                      row.contract.challenge?.disclosure === "executor"
+                      row.contract.challenge?.disclosure === "executor" ||
+                      row.contract.blocked !== undefined
                     : row.binding.attemptKey !== attemptKey
                 const newAttempt =
                   row.binding.attempts === 0 ||

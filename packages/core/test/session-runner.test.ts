@@ -710,6 +710,12 @@ describe("SessionRunnerLLM", () => {
         prompt: Prompt.make({ text: "Reconcile the active contract and advance it within the delegated authority." }),
         resume: false,
       })
+      yield* contracts.reportBlocked({
+        contractID: contract.id,
+        revision: contract.revision,
+        reason: "waiting for a reproducible input",
+        time: Date.now(),
+      })
       requests.length = 0
       response = []
 
@@ -726,6 +732,7 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Establish the runner prerequisite")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("dependency-evidence")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("waiting for a reproducible input")
 
       yield* contracts.reportReady({
         contractID: contract.id,
