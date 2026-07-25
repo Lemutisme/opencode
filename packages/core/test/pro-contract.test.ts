@@ -16,6 +16,7 @@ import { testEffect } from "./lib/effect"
 const contractID = ProContract.ID.make("pct_test")
 const executionModel = ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") })
 const spec = ProContract.defaultSpec("Ship the verified change", 0)
+const subjectHash = "subject-1"
 const draft = {
   id: contractID,
   scope: "project-1",
@@ -48,6 +49,7 @@ describe("ProContract kernel", () => {
         id: attestationID,
         revision: 1,
         specHash: draft.specHash,
+        subjectHash,
         evidenceHash: "evidence-1",
         verifierID: draft.issuer,
         class: "principal",
@@ -64,8 +66,19 @@ describe("ProContract kernel", () => {
       revision: 1,
       summary: "candidate complete",
       uncertainties: [],
+      subjectHash,
       time: 0,
     })
+    expect(
+      ProContract.transition(handedOff.state, {
+        ...discharge,
+        attestation: {
+          ...discharge.attestation,
+          id: ProContract.AttestationID.make("pca_wrong_subject"),
+          subjectHash: "different-subject",
+        },
+      }).decision,
+    ).toEqual({ type: "rejected", reason: "attestation subject does not match" })
     const discharged = ProContract.transition(handedOff.state, discharge)
 
     expect(discharged.state.contracts[contractID]).toMatchObject({ status: "discharged", attestationID })
@@ -191,6 +204,7 @@ describe("ProContract kernel", () => {
       revision: 1,
       summary: "candidate complete",
       uncertainties: [],
+      subjectHash,
       time: 0,
     })
     const command = {
@@ -201,6 +215,7 @@ describe("ProContract kernel", () => {
         id: ProContract.AttestationID.make("pca_forged"),
         revision: 1,
         specHash: draft.specHash,
+        subjectHash,
         evidenceHash: "forged",
         verifierID: draft.executor,
         class: "principal",
@@ -293,6 +308,7 @@ describe("ProContract kernel", () => {
         revision: 1,
         summary: "candidate complete",
         uncertainties: [],
+        subjectHash,
         time: 1,
       }).decision,
     ).toEqual({ type: "rejected", reason: "contract is escalated" })
@@ -315,6 +331,7 @@ describe("ProContract kernel", () => {
       revision: 2,
       summary: "candidate complete",
       uncertainties: [],
+      subjectHash,
       time: 2,
     })
     const discharged = ProContract.transition(handedOff.state, {
@@ -325,6 +342,7 @@ describe("ProContract kernel", () => {
         id: ProContract.AttestationID.make("pca_escalated"),
         revision: 2,
         specHash: draft.specHash,
+        subjectHash,
         evidenceHash: "reviewed",
         verifierID: draft.issuer,
         class: "principal",
@@ -371,6 +389,7 @@ describe("ProContract kernel", () => {
       revision: 1,
       summary: "input received",
       uncertainties: [],
+      subjectHash,
       time: 2,
     })
     expect(ready.state.contracts[contractID]?.blocked).toBeUndefined()
@@ -392,6 +411,7 @@ describe("ProContract kernel", () => {
       revision: 1,
       summary: "candidate complete",
       uncertainties: [],
+      subjectHash,
       time: 0,
     })
     const attestationID = ProContract.AttestationID.make("pca_challenged")
@@ -403,6 +423,7 @@ describe("ProContract kernel", () => {
         id: attestationID,
         revision: 1,
         specHash: draft.specHash,
+        subjectHash,
         evidenceHash: "original-evidence",
         verifierID: draft.issuer,
         class: "principal",
@@ -442,6 +463,7 @@ describe("ProContract kernel", () => {
       revision: 1,
       summary: "candidate repaired",
       uncertainties: [],
+      subjectHash,
       time: 2,
     })
     const reaffirmed = ProContract.transition(rehandedOff.state, {
@@ -452,6 +474,7 @@ describe("ProContract kernel", () => {
         id: ProContract.AttestationID.make("pca_reaffirmed"),
         revision: 1,
         specHash: draft.specHash,
+        subjectHash,
         evidenceHash: "reaffirmed-evidence",
         verifierID: draft.issuer,
         class: "principal",
@@ -479,6 +502,7 @@ describe("ProContract kernel", () => {
       revision: 1,
       summary: "candidate complete",
       uncertainties: ["holdout result is sealed"],
+      subjectHash,
       time: 1,
     })
     const challenged = ProContract.transition(ready.state, {
@@ -534,6 +558,7 @@ describe("ProContract ledger", () => {
         revision: 1,
         summary: "candidate complete",
         uncertainties: [],
+        subjectHash,
         time: 0,
       })
       const principal = yield* contracts.principalAttest({
@@ -544,6 +569,7 @@ describe("ProContract ledger", () => {
       const attestationID = principal.state.contracts[contractID]?.attestationID
       expect(attestationID ? yield* contracts.getAttestation(attestationID) : undefined).toMatchObject({
         evidenceHash: "principal-evidence",
+        subjectHash,
         verifierID: "local-owner",
       })
     }),
@@ -559,6 +585,7 @@ describe("ProContract ledger", () => {
         revision: 1,
         summary: "candidate complete",
         uncertainties: [],
+        subjectHash,
         time: 1,
       })
 
@@ -641,6 +668,7 @@ describe("ProContract ledger", () => {
         revision: 1,
         summary: "upstream complete",
         uncertainties: [],
+        subjectHash,
         time: 0,
       })
       yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
@@ -786,6 +814,7 @@ describe("OpenCode Contract binding", () => {
         revision: 1,
         summary: "candidate complete",
         uncertainties: [],
+        subjectHash,
         time: 1,
       })
       yield* contracts.challenge({
@@ -929,6 +958,7 @@ describe("OpenCode Contract binding", () => {
         revision: 1,
         summary: "reviewed",
         uncertainties: [],
+        subjectHash,
         time: 1,
       })
       yield* bindings.reschedule({
@@ -942,7 +972,7 @@ describe("OpenCode Contract binding", () => {
 
       expect(yield* contracts.get(contractID)).toMatchObject({
         escalation: { reason: "Ready for verification", time: 1 },
-        handoff: { summary: "reviewed", uncertainties: [] },
+        handoff: { summary: "reviewed", uncertainties: [], subjectHash },
       })
     }),
   )

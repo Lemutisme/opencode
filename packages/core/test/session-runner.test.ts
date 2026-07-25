@@ -678,6 +678,7 @@ describe("SessionRunnerLLM", () => {
         revision: 1,
         summary: "dependency complete",
         uncertainties: [],
+        subjectHash: "dependency-subject",
         time: Date.now(),
       })
       yield* contracts.principalAttest({ contractID: dependencyID, evidenceHash: "dependency-evidence" })
@@ -732,6 +733,7 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Establish the runner prerequisite")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("dependency-evidence")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("dependency-subject")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("waiting for a reproducible input")
 
       yield* contracts.reportReady({
@@ -739,6 +741,7 @@ describe("SessionRunnerLLM", () => {
         revision: contract.revision,
         summary: "candidate complete",
         uncertainties: [],
+        subjectHash: "candidate-subject",
         time: Date.now(),
       })
       yield* contracts.challenge({

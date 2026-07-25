@@ -307,7 +307,7 @@ reconciliation-context failures rather than silently attributed to planning.
 ### Handoff and justification artifacts
 
 An executor handoff contains a concise claim, known unresolved assumptions, and
-time. Larger task artifacts remain adapter-owned and should form a
+an institution-captured subject hash. Larger task artifacts remain adapter-owned and should form a
 content-addressed justification bundle:
 
 ```text
@@ -607,6 +607,12 @@ ordinary OpenCode permission domain.
 Blocked work is an institutional event, not a transient tool result. Its reason
 is retained in the ledger, changes the semantic-attempt context, and is supplied
 to the fresh Session that resumes the obligation.
+
+Ready work captures the Location snapshot before recording handoff. Principal
+evidence can discharge only when its attestation names that exact subject hash;
+later workspace mutations do not change what was accepted.
+OpenCode therefore fails handoff closed when the Location cannot produce a
+content-addressed snapshot.
 
 The execution binding must name its model explicitly. A proactive attempt may
 fail closed when that model or credential is unavailable, but it must never

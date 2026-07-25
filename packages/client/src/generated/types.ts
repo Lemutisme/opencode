@@ -3008,6 +3008,7 @@ export type ServerProContractIssueOutput = {
     readonly handoff?: {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
+      readonly subjectHash: string
       readonly time: number
     }
     readonly challenge?: {
@@ -3076,6 +3077,7 @@ export type ServerProContractListOutput = {
     readonly handoff?: {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
+      readonly subjectHash: string
       readonly time: number
     }
     readonly challenge?: {
@@ -3139,6 +3141,7 @@ export type ServerProContractGetOutput = {
     readonly handoff?: {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
+      readonly subjectHash: string
       readonly time: number
     }
     readonly challenge?: {

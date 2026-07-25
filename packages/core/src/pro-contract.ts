@@ -55,6 +55,7 @@ export interface Interface {
     readonly revision: number
     readonly summary: string
     readonly uncertainties: ReadonlyArray<string>
+    readonly subjectHash: string
     readonly time: number
   }) => Effect.Effect<Receipt>
   readonly reportBlocked: (input: {
@@ -231,6 +232,7 @@ const layer = Layer.effect(
           id: Schema.AttestationID.create(),
           revision: contract.revision,
           specHash: contract.specHash,
+          subjectHash: contract.handoff?.subjectHash ?? "",
           evidenceHash,
           verifierID: contract.issuer,
           class: "principal",

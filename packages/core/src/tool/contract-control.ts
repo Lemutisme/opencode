@@ -5,6 +5,7 @@ import { Clock, Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { ProContract } from "../pro-contract"
 import { ProContractOpenCode } from "../pro-contract/open-code"
+import { Snapshot } from "../snapshot"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -14,6 +15,7 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
+    const snapshots = yield* Snapshot.Service
 
     yield* tools
       .register({
@@ -29,11 +31,14 @@ const layer = Layer.effectDiscard(
             Effect.gen(function* () {
               const binding = yield* bindings.forSession(context.sessionID)
               if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
+              const subjectHash = yield* snapshots.capture()
+              if (!subjectHash) return yield* new ToolFailure({ message: "Contract handoff requires a snapshot" })
               const receipt = yield* contracts.reportReady({
                 contractID: binding.contractID,
                 revision: binding.revision,
                 summary: input.summary,
                 uncertainties: input.uncertainties,
+                subjectHash,
                 time: yield* Clock.currentTimeMillis,
               })
               if (receipt.decision.type === "rejected")
@@ -114,5 +119,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/contract-control",
   layer,
-  deps: [ToolRegistry.node, ProContract.node, ProContractOpenCode.node],
+  deps: [ToolRegistry.node, ProContract.node, ProContractOpenCode.node, Snapshot.node],
 })

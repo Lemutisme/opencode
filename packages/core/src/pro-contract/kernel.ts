@@ -75,6 +75,7 @@ export type Command =
       readonly revision: number
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
+      readonly subjectHash: string
       readonly time: number
     }
   | {
@@ -214,7 +215,12 @@ export function transition(state: State, command: Command): Result {
           ...contract,
           escalation: { reason: "Ready for verification", time: command.time },
           blocked: undefined,
-          handoff: { summary: command.summary, uncertainties: command.uncertainties, time: command.time },
+          handoff: {
+            summary: command.summary,
+            uncertainties: command.uncertainties,
+            subjectHash: command.subjectHash,
+            time: command.time,
+          },
         },
       },
     })
@@ -361,6 +367,8 @@ export function transition(state: State, command: Command): Result {
     if (state.attestations[command.attestation.id]) return reject("attestation already exists")
     if (command.attestation.revision !== contract.revision) return reject("attestation revision does not match")
     if (command.attestation.specHash !== contract.specHash) return reject("attestation specification does not match")
+    if (command.attestation.subjectHash !== contract.handoff.subjectHash)
+      return reject("attestation subject does not match")
     if (command.actor !== contract.issuer || command.attestation.verifierID !== contract.issuer)
       return reject("principal evidence requires issuer attestation")
     return accept({

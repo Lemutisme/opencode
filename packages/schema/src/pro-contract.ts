@@ -57,6 +57,7 @@ export interface Challenge extends Schema.Schema.Type<typeof Challenge> {}
 export const Handoff = Schema.Struct({
   summary: Schema.NonEmptyString,
   uncertainties: Schema.Array(Schema.NonEmptyString),
+  subjectHash: Schema.NonEmptyString,
   time: NonNegativeInt,
 }).annotate({ identifier: "ProContract.Handoff" })
 export interface Handoff extends Schema.Schema.Type<typeof Handoff> {}
@@ -112,6 +113,7 @@ export const Attestation = Schema.Struct({
   contractID: ID,
   revision: PositiveInt,
   specHash: Schema.String,
+  subjectHash: Schema.NonEmptyString,
   evidenceHash: Schema.NonEmptyString,
   verifierID: Schema.NonEmptyString,
   class: Schema.Literal("principal"),

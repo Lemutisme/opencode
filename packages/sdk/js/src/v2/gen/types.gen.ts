@@ -6205,6 +6205,7 @@ export type ProContractBlocked = {
 export type ProContractHandoff = {
   summary: string
   uncertainties: Array<string>
+  subjectHash: string
   time: number
 }
 

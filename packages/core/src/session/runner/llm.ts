@@ -288,6 +288,7 @@ const layer = Layer.effect(
                         (item) =>
                           `${item.dependency.id}@${item.dependency.revision}: ${item.dependency.spec.goal} ` +
                           `(attestation ${item.attestation.id}, evidence ${item.attestation.evidenceHash}, ` +
+                          `subject ${item.attestation.subjectHash}, ` +
                           `verifier ${item.attestation.verifierID}/${item.attestation.class})` +
                           (item.dependency.handoff ? `; handoff: ${item.dependency.handoff.summary}` : ""),
                       ),
