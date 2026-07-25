@@ -599,6 +599,9 @@ the current Session; challenges, revisions, lost leases, and execution that ends
 without handoff start a fresh semantic attempt. Deleting, reverting, compacting,
 or ending any Session cannot settle the duty. Contract authority never appears
 in model input or tool arguments.
+Durable message or context-snapshot decode failures also replace the Session;
+provider, model-availability, and transient infrastructure failures retry the
+current semantic attempt.
 
 Every current and retired Contract Session has an indexed durable reservation.
 Rotation changes the active binding without returning an old Session ID to the

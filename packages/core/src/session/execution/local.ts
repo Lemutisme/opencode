@@ -1,10 +1,11 @@
-import { Cause, Clock, Effect, Exit, Layer } from "effect"
+import { Cause, Clock, Effect, Exit, Layer, Option } from "effect"
 import { LocationServiceMap } from "../../location-service-map"
 import { makeGlobalNode } from "../../effect/app-node"
 import { SessionRunCoordinator } from "../run-coordinator"
 import { SessionRunner } from "../runner"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
+import { ContextSnapshotDecodeError, MessageDecodeError } from "../error"
 import { SessionExecution } from "../execution"
 import { ProContractOpenCode } from "../../pro-contract/open-code"
 
@@ -36,6 +37,9 @@ const layer = Layer.effect(
           ),
           Effect.exit,
         )
+        const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        const replaceSession =
+          Exit.isSuccess(exit) || error instanceof MessageDecodeError || error instanceof ContextSnapshotDecodeError
         if (attempt)
           yield* contracts.reschedule({
             contractID: attempt.contractID,
@@ -43,7 +47,7 @@ const layer = Layer.effect(
             promptID: attempt.promptID,
             reason: Exit.isSuccess(exit) ? "OpenCode execution ended without settlement" : "OpenCode execution failed",
             now: yield* Clock.currentTimeMillis,
-            attempt: Exit.isSuccess(exit) ? "new" : "same",
+            attempt: replaceSession ? "new" : "same",
           })
         if (Exit.isFailure(exit)) return yield* exit
         return undefined
