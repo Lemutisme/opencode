@@ -469,6 +469,28 @@ an external API that validates the capability.
 Hash-chained logs and externally retained checkpoints provide witnessed-prefix
 integrity. They do not provide complete mediation or host integrity.
 
+### Principal isolation
+
+Local in-process mode is cooperative. A server password in the executor's
+environment, an unsecured loopback endpoint, or a writable plane database does
+not separate principal authority from a shell-capable executor. In that mode
+the enforced claim is limited to normal tool-path transitions.
+
+Adversarial non-bypass requires a deployment boundary with all of the following:
+
+- the plane database and principal credential are absent from the executor
+  filesystem, environment, and process namespace;
+- executor effects run through a worker identity that can present attempt
+  capabilities but cannot authenticate principal commands;
+- the principal endpoint rejects that worker identity even when it can reach
+  the endpoint over the network;
+- only finite handoff subjects and verifier testimony cross back into the
+  plane.
+
+These are deployment invariants, not prompt rules. OpenCode must not claim
+strong principal/executor separation until an adapter declares and tests that
+authority-domain boundary.
+
 ## Benefits and limits
 
 ProContract does not improve local coding ability or scientific taste. It
@@ -673,6 +695,8 @@ workflow framework.
    dependency invalidation, supersession lineage, typed epistemic edges, and
    remediation closure remain future work.
 7. A second harness adapter to test that the protocol is not OpenCode-specific.
+8. A separate plane/worker deployment must isolate principal credentials and
+   storage before OpenCode claims adversarial executor non-bypass.
 
 The current slice provides the explicit eight-part Spec, a durable institution,
 a separate OpenCode binding, a one-second lease scheduler, bounded per-attempt
