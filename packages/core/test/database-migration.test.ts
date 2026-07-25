@@ -15,6 +15,7 @@ import eventSourcedSessionInputMigration from "@opencode-ai/core/database/migrat
 import contextEpochAgentMigration from "@opencode-ai/core/database/migration/20260605042240_add_context_epoch_agent"
 import simplifyIntegrationCredentialsMigration from "@opencode-ai/core/database/migration/20260611192811_lush_chimera"
 import simplifySessionInputMigration from "@opencode-ai/core/database/migration/20260622202450_simplify_session_input"
+import contractPhasesMigration from "@opencode-ai/core/database/migration/20260725235000_contract_phases"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -94,6 +95,38 @@ describe("DatabaseMigration", () => {
           { name: "session_message_session_seq_idx" },
           { name: "session_message_session_time_created_id_idx" },
           { name: "session_message_session_type_seq_idx" },
+        ])
+      }),
+    )
+  })
+
+  test("makes implicit Contract phases explicit", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`CREATE TABLE pro_contract (id text PRIMARY KEY, status text NOT NULL, data text NOT NULL)`)
+        yield* db.run(sql`
+          INSERT INTO pro_contract (id, status, data) VALUES
+            ('ready', 'active', ${JSON.stringify({ status: "active", escalation: { reason: "Ready for verification" }, handoff: {} })}),
+            ('failed', 'dormant', ${JSON.stringify({ status: "dormant", escalation: { reason: "Verification challenged" } })}),
+            ('running', 'active', ${JSON.stringify({ status: "active" })})
+        `)
+
+        yield* DatabaseMigration.applyOnly(db, [contractPhasesMigration])
+
+        expect(
+          yield* db.all(
+            sql`
+              SELECT id, status, json_extract(data, '$.status') as data_status,
+                json_type(data, '$.escalation') as escalation_type
+              FROM pro_contract
+              ORDER BY id
+            `,
+          ),
+        ).toEqual([
+          { id: "failed", status: "escalated", data_status: "escalated", escalation_type: "object" },
+          { id: "ready", status: "verification", data_status: "verification", escalation_type: null },
+          { id: "running", status: "active", data_status: "active", escalation_type: null },
         ])
       }),
     )

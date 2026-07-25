@@ -201,6 +201,8 @@ escalated    -> dormant
 
 `released` is the issuer-authorized terminal alternative. Only `active`
 authorizes executor effects; verification is a normal phase, not an escalation.
+The database migration converts the earlier implicit escalation combinations
+once, so runtime authorization does not carry compatibility branches.
 
 Quiescence is relative to an immutable ledger frontier, never a permanent
 claim. The current API returns an unsigned snapshot containing the scope,
