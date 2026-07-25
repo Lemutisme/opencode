@@ -225,8 +225,10 @@ contract ID + revision + specification hash + artifact hash + verifier identity
 The issuer attestation and discharge are one atomic institutional transition.
 The executor cannot submit evidence or discharge the contract.
 
-Failed verification is also an institutional transition. A challenge binds a
-negative witness to the current claim and keeps the obligation outstanding:
+Failed verification is also an institutional transition. The challenger names
+the evaluated revision and handoff subject; the kernel rejects a mismatch
+instead of inferring the target from arrival order. An accepted challenge binds
+its negative witness to that exact claim and keeps the obligation outstanding:
 
 ```text
 executor-visible challenge -> dormant -> wake with feedback

@@ -122,6 +122,8 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
           return yield* contracts
             .challenge({
               contractID: ctx.params.contractID,
+              revision: ctx.payload.revision,
+              subjectHash: ctx.payload.subjectHash,
               evidenceHash: ctx.payload.evidenceHash,
               disclosure: ctx.payload.disclosure,
               summary: ctx.payload.summary,

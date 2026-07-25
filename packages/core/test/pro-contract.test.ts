@@ -434,17 +434,32 @@ describe("ProContract kernel", () => {
         class: "principal",
       },
     })
-    const challenged = ProContract.transition(discharged.state, {
+    const challenge = {
       type: "challenge",
       actor: draft.issuer,
       contractID,
       challenge: {
+        revision: 1,
+        subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Output diverges on an independent check",
         time: 1,
       },
-    })
+    } as const
+    expect(
+      ProContract.transition(discharged.state, {
+        ...challenge,
+        challenge: { ...challenge.challenge, revision: 2 },
+      }).decision,
+    ).toEqual({ type: "rejected", reason: "challenge revision does not match" })
+    expect(
+      ProContract.transition(discharged.state, {
+        ...challenge,
+        challenge: { ...challenge.challenge, subjectHash: "different-subject" },
+      }).decision,
+    ).toEqual({ type: "rejected", reason: "challenge subject does not match" })
+    const challenged = ProContract.transition(discharged.state, challenge)
 
     expect(challenged.state.attestations[attestationID]).toBe(discharged.state.attestations[attestationID])
     expect(challenged.state.contracts[contractID]).toMatchObject({
@@ -514,7 +529,7 @@ describe("ProContract kernel", () => {
       type: "challenge",
       actor: draft.issuer,
       contractID,
-      challenge: { evidenceHash: "sealed-witness", disclosure: "sealed", time: 2 },
+      challenge: { revision: 1, subjectHash, evidenceHash: "sealed-witness", disclosure: "sealed", time: 2 },
     })
     const activation = ProContract.transition(challenged.state, {
       type: "activate",
@@ -596,6 +611,8 @@ describe("ProContract ledger", () => {
 
       const challenged = yield* contracts.challenge({
         contractID,
+        revision: 1,
+        subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Independent output mismatch",
@@ -824,6 +841,8 @@ describe("OpenCode Contract binding", () => {
       })
       yield* contracts.challenge({
         contractID,
+        revision: 1,
+        subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Independent output mismatch",

@@ -6210,6 +6210,8 @@ export type ProContractHandoff = {
 }
 
 export type ProContractChallenge = {
+  revision: number
+  subjectHash: string
   evidenceHash: string
   disclosure: "executor" | "sealed"
   summary?: string
@@ -13931,6 +13933,8 @@ export type V2ProContractAttestResponse = V2ProContractAttestResponses[keyof V2P
 
 export type V2ProContractChallengeData = {
   body: {
+    revision: number
+    subjectHash: string
     evidenceHash: string
     disclosure: "executor" | "sealed"
     summary?: string

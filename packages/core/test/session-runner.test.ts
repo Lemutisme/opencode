@@ -746,6 +746,8 @@ describe("SessionRunnerLLM", () => {
       })
       yield* contracts.challenge({
         contractID: contract.id,
+        revision: contract.revision,
+        subjectHash: "candidate-subject",
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Independent output mismatch",

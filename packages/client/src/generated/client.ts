@@ -1096,7 +1096,13 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/contract/${encodeURIComponent(input.contractID)}/challenge`,
-            body: { evidenceHash: input["evidenceHash"], disclosure: input["disclosure"], summary: input["summary"] },
+            body: {
+              revision: input["revision"],
+              subjectHash: input["subjectHash"],
+              evidenceHash: input["evidenceHash"],
+              disclosure: input["disclosure"],
+              summary: input["summary"],
+            },
             successStatus: 200,
             declaredStatuses: [409, 404, 401, 400],
             empty: false,

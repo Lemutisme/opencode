@@ -40,6 +40,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
         ...(contract.challenge
           ? [
               `Challenge: ${contract.challenge.disclosure === "sealed" ? "sealed" : (contract.challenge.summary ?? "verification failed")}`,
+              `Rejected subject: ${contract.challenge.subjectHash}`,
               `Negative witness: ${contract.challenge.evidenceHash}`,
             ]
           : []),

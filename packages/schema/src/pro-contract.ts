@@ -46,6 +46,8 @@ export const Evidence = Schema.Struct({ type: Schema.Literal("principal") }).ann
 export type Evidence = typeof Evidence.Type
 
 export const Challenge = Schema.Struct({
+  revision: PositiveInt,
+  subjectHash: Schema.NonEmptyString,
   evidenceHash: Schema.NonEmptyString,
   disclosure: Schema.Literals(["executor", "sealed"]),
   summary: Schema.NonEmptyString.pipe(optional),

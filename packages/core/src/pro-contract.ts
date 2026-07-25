@@ -45,6 +45,8 @@ export interface Interface {
   readonly release: (input: { readonly contractID: Schema.ID; readonly reason: string }) => Effect.Effect<Receipt>
   readonly challenge: (input: {
     readonly contractID: Schema.ID
+    readonly revision: number
+    readonly subjectHash: string
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string
@@ -279,6 +281,8 @@ const layer = Layer.effect(
           actor: "local-owner",
           contractID: input.contractID,
           challenge: {
+            revision: input.revision,
+            subjectHash: input.subjectHash,
             evidenceHash: input.evidenceHash,
             disclosure: input.disclosure,
             summary: input.summary,

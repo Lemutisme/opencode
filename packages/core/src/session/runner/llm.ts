@@ -275,6 +275,7 @@ const layer = Layer.effect(
                   ? [
                       "Verifier challenge:",
                       contract.challenge.summary ?? "Verification failed",
+                      `Rejected subject: ${contract.challenge.subjectHash}`,
                       `Negative witness: ${contract.challenge.evidenceHash}`,
                       ...(contract.challenge.attestationID
                         ? [`Challenged attestation: ${contract.challenge.attestationID}`]

@@ -7180,6 +7180,8 @@ export class ProContract extends HeyApiClient {
   public challenge<ThrowOnError extends boolean = false>(
     parameters: {
       contractID: string
+      revision?: number
+      subjectHash?: string
       evidenceHash?: string
       disclosure?: "executor" | "sealed"
       summary?: string
@@ -7192,6 +7194,8 @@ export class ProContract extends HeyApiClient {
         {
           args: [
             { in: "path", key: "contractID" },
+            { in: "body", key: "revision" },
+            { in: "body", key: "subjectHash" },
             { in: "body", key: "evidenceHash" },
             { in: "body", key: "disclosure" },
             { in: "body", key: "summary" },

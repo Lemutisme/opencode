@@ -3012,6 +3012,8 @@ export type ServerProContractIssueOutput = {
       readonly time: number
     }
     readonly challenge?: {
+      readonly revision: number
+      readonly subjectHash: string
       readonly evidenceHash: string
       readonly disclosure: "executor" | "sealed"
       readonly summary?: string
@@ -3081,6 +3083,8 @@ export type ServerProContractListOutput = {
       readonly time: number
     }
     readonly challenge?: {
+      readonly revision: number
+      readonly subjectHash: string
       readonly evidenceHash: string
       readonly disclosure: "executor" | "sealed"
       readonly summary?: string
@@ -3145,6 +3149,8 @@ export type ServerProContractGetOutput = {
       readonly time: number
     }
     readonly challenge?: {
+      readonly revision: number
+      readonly subjectHash: string
       readonly evidenceHash: string
       readonly disclosure: "executor" | "sealed"
       readonly summary?: string
@@ -3196,17 +3202,37 @@ export type ServerProContractAttestOutput = { readonly frontier: number; readonl
 
 export type ServerProContractChallengeInput = {
   readonly contractID: { readonly contractID: string }["contractID"]
+  readonly revision: {
+    readonly revision: number
+    readonly subjectHash: string
+    readonly evidenceHash: string
+    readonly disclosure: "executor" | "sealed"
+    readonly summary?: string | undefined
+  }["revision"]
+  readonly subjectHash: {
+    readonly revision: number
+    readonly subjectHash: string
+    readonly evidenceHash: string
+    readonly disclosure: "executor" | "sealed"
+    readonly summary?: string | undefined
+  }["subjectHash"]
   readonly evidenceHash: {
+    readonly revision: number
+    readonly subjectHash: string
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined
   }["evidenceHash"]
   readonly disclosure: {
+    readonly revision: number
+    readonly subjectHash: string
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined
   }["disclosure"]
   readonly summary?: {
+    readonly revision: number
+    readonly subjectHash: string
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined

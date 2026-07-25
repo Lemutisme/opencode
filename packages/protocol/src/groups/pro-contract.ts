@@ -102,6 +102,8 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
     HttpApiEndpoint.post("proContract.challenge", "/api/contract/:contractID/challenge", {
       params: { contractID: ProContract.ID },
       payload: Schema.Struct({
+        revision: PositiveInt,
+        subjectHash: Schema.NonEmptyString,
         evidenceHash: Schema.NonEmptyString,
         disclosure: Schema.Literals(["executor", "sealed"]),
         summary: Schema.NonEmptyString.pipe(Schema.optional),
