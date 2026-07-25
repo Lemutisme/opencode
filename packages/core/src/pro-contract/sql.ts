@@ -27,6 +27,15 @@ export const ProContractOpenCodeTable = sqliteTable(
   (table) => [uniqueIndex("pro_contract_opencode_session_idx").on(table.session_id)],
 )
 
+export const ProContractOpenCodeSessionTable = sqliteTable(
+  "pro_contract_opencode_session",
+  {
+    session_id: text().primaryKey(),
+    contract_id: text().notNull(),
+  },
+  (table) => [index("pro_contract_opencode_session_contract_idx").on(table.contract_id)],
+)
+
 export const ProContractAttestationTable = sqliteTable(
   "pro_contract_attestation",
   {

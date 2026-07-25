@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "07dc4d15-07d4-4344-9d83-139e95c0e5cf",
+  "id": "58d24b69-5d15-4935-9fb8-a362484dbd6f",
   "prevIds": [
-    "08c0ae98-e3b1-41ea-85c9-66df1d657965"
+    "07dc4d15-07d4-4344-9d83-139e95c0e5cf"
   ],
   "ddl": [
     {
@@ -52,6 +52,10 @@
     },
     {
       "name": "pro_contract_ledger",
+      "entityType": "tables"
+    },
+    {
+      "name": "pro_contract_opencode_session",
       "entityType": "tables"
     },
     {
@@ -761,6 +765,26 @@
       "name": "head_hash",
       "entityType": "columns",
       "table": "pro_contract_ledger"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "pro_contract_opencode_session"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "contract_id",
+      "entityType": "columns",
+      "table": "pro_contract_opencode_session"
     },
     {
       "type": "text",
@@ -2078,6 +2102,15 @@
     },
     {
       "columns": [
+        "session_id"
+      ],
+      "nameExplicit": false,
+      "name": "pro_contract_opencode_session_pk",
+      "table": "pro_contract_opencode_session",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
         "contract_id"
       ],
       "nameExplicit": false,
@@ -2259,6 +2292,20 @@
       "name": "pro_contract_event_contract_seq_idx",
       "entityType": "indexes",
       "table": "pro_contract_event"
+    },
+    {
+      "columns": [
+        {
+          "value": "contract_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "pro_contract_opencode_session_contract_idx",
+      "entityType": "indexes",
+      "table": "pro_contract_opencode_session"
     },
     {
       "columns": [

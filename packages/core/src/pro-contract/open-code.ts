@@ -10,7 +10,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { ProContract } from "../pro-contract"
-import { ProContractOpenCodeTable, ProContractTable } from "./sql"
+import { ProContractOpenCodeSessionTable, ProContractOpenCodeTable, ProContractTable } from "./sql"
 
 export type Binding = {
   readonly contractID: Schema.ID
@@ -27,7 +27,6 @@ export type Binding = {
   readonly leaseOwner?: string
   readonly leaseExpiresAt?: number
   readonly attemptKey?: string
-  readonly retiredSessionIDs?: ReadonlyArray<SessionSchema.ID>
 }
 
 export interface Interface {
@@ -87,12 +86,16 @@ const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       if (current) return current.data
-      // Rotated Sessions stay reserved; otherwise their old IDs regain ordinary Session permissions.
-      const retired = (yield* db
+      const retired = yield* db
         .select({ data: ProContractOpenCodeTable.data })
-        .from(ProContractOpenCodeTable)
-        .all()
-        .pipe(Effect.orDie)).find((row) => row.data.retiredSessionIDs?.includes(sessionID))
+        .from(ProContractOpenCodeSessionTable)
+        .innerJoin(
+          ProContractOpenCodeTable,
+          eq(ProContractOpenCodeTable.contract_id, ProContractOpenCodeSessionTable.contract_id),
+        )
+        .where(eq(ProContractOpenCodeSessionTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
       if (!retired) return undefined
       return {
         ...retired.data,
@@ -193,7 +196,14 @@ const layer = Layer.effect(
           .onConflictDoNothing()
           .run()
           .pipe(Effect.orDie)
-        return (yield* get(input.contractID)) ?? binding
+        const stored = (yield* get(input.contractID)) ?? binding
+        yield* db
+          .insert(ProContractOpenCodeSessionTable)
+          .values({ session_id: stored.sessionID, contract_id: stored.contractID })
+          .onConflictDoNothing()
+          .run()
+          .pipe(Effect.orDie)
+        return stored
       }),
       claim: Effect.fn("ProContractOpenCode.claim")(function* (contractID, now) {
         const result = yield* db
@@ -241,14 +251,17 @@ const layer = Layer.effect(
                   leaseOwner: owner,
                   leaseExpiresAt,
                   attemptKey,
-                  retiredSessionIDs: rotate
-                    ? [...(row.binding.retiredSessionIDs ?? []), row.binding.sessionID]
-                    : row.binding.retiredSessionIDs,
                 }
                 yield* tx
                   .update(ProContractOpenCodeTable)
                   .set({ session_id: next.sessionID, data: next })
                   .where(eq(ProContractOpenCodeTable.contract_id, contractID))
+                  .run()
+                  .pipe(Effect.orDie)
+                yield* tx
+                  .insert(ProContractOpenCodeSessionTable)
+                  .values({ session_id: next.sessionID, contract_id: next.contractID })
+                  .onConflictDoNothing()
                   .run()
                   .pipe(Effect.orDie)
                 return { binding: next }

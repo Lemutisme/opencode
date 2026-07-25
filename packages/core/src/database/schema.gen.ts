@@ -124,6 +124,12 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`pro_contract_opencode_session\` (
+          \`session_id\` text PRIMARY KEY,
+          \`contract_id\` text NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`pro_contract_opencode\` (
           \`contract_id\` text PRIMARY KEY,
           \`session_id\` text NOT NULL,
@@ -291,6 +297,9 @@ export default {
       )
       yield* tx.run(
         `CREATE INDEX \`pro_contract_event_contract_seq_idx\` ON \`pro_contract_event\` (\`contract_id\`,\`seq\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`pro_contract_opencode_session_contract_idx\` ON \`pro_contract_opencode_session\` (\`contract_id\`);`,
       )
       yield* tx.run(
         `CREATE UNIQUE INDEX \`pro_contract_opencode_session_idx\` ON \`pro_contract_opencode\` (\`session_id\`);`,

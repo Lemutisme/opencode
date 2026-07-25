@@ -600,6 +600,10 @@ without handoff start a fresh semantic attempt. Deleting, reverting, compacting,
 or ending any Session cannot settle the duty. Contract authority never appears
 in model input or tool arguments.
 
+Every current and retired Contract Session has an indexed durable reservation.
+Rotation changes the active binding without returning an old Session ID to the
+ordinary OpenCode permission domain.
+
 The execution binding must name its model explicitly. A proactive attempt may
 fail closed when that model or credential is unavailable, but it must never
 silently select another provider. Contract Sessions are permanently reserved
