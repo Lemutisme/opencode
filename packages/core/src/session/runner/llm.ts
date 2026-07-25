@@ -186,6 +186,17 @@ const layer = Layer.effect(
       const agent = yield* agents.select(session.agent)
       const contractBinding = yield* contractBindings.forSession(session.id)
       const contract = contractBinding ? yield* contracts.get(contractBinding.contractID) : undefined
+      const contractChallenges =
+        contract?.status === "active" && contract.challenge?.disclosure === "executor"
+          ? (yield* contracts.history({ contractID: contract.id })).flatMap((entry) =>
+              entry.decision.type === "accepted" &&
+              entry.command.type === "challenge" &&
+              entry.command.challenge.revision === contract.revision &&
+              entry.command.challenge.disclosure === "executor"
+                ? [entry.command.challenge]
+                : [],
+            )
+          : []
       const contractDependencies =
         contract?.status === "active"
           ? (yield* Effect.forEach(
@@ -271,13 +282,14 @@ const layer = Layer.effect(
                 contract.spec.goal,
                 ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
                 ...(contract.blocked ? ["Previous attempt blocked:", contract.blocked.reason] : []),
-                ...(contract.challenge?.disclosure === "executor"
+                ...(contractChallenges.length
                   ? [
-                      "Verifier challenge:",
-                      contract.challenge.summary ?? "Verification failed",
-                      `Rejected subject: ${contract.challenge.subjectHash}`,
-                      `Negative witness: ${contract.challenge.evidenceHash}`,
-                      ...(contract.challenge.attestationID
+                      "Rejected attempts from this revision; these are diagnostic history, not new terms:",
+                      ...contractChallenges.map(
+                        (challenge) =>
+                          `${challenge.summary ?? "Verification failed"}\nRejected subject: ${challenge.subjectHash}\nNegative witness: ${challenge.evidenceHash}`,
+                      ),
+                      ...(contract.challenge?.attestationID
                         ? [`Challenged attestation: ${contract.challenge.attestationID}`]
                         : []),
                     ]

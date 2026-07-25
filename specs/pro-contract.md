@@ -648,6 +648,11 @@ Blocked work is an institutional event, not a transient tool result. Its reason
 is retained in the ledger, changes the semantic-attempt context, and is supplied
 to the fresh Session that resumes the obligation.
 
+Visible verifier feedback uses that same ledger rather than a second memory
+store. An active attempt receives the accepted challenge summaries for its
+current revision in event order. They are labeled as diagnostic history; only
+the Contract specification defines authoritative terms.
+
 Ready work captures the Location snapshot before recording handoff. Principal
 evidence can discharge only when its attestation names that exact subject hash;
 later workspace mutations do not change what was accepted.

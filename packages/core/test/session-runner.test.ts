@@ -754,6 +754,24 @@ describe("SessionRunnerLLM", () => {
         time: Date.now(),
       })
       yield* contracts.activate(contract.id, contract.revision, Date.now())
+      yield* contracts.reportReady({
+        contractID: contract.id,
+        revision: contract.revision,
+        summary: "parser repaired",
+        uncertainties: [],
+        subjectHash: "candidate-subject-2",
+        time: Date.now(),
+      })
+      yield* contracts.challenge({
+        contractID: contract.id,
+        revision: contract.revision,
+        subjectHash: "candidate-subject-2",
+        evidenceHash: "offline-witness",
+        disclosure: "executor",
+        summary: "Offline build regressed",
+        time: Date.now(),
+      })
+      yield* contracts.activate(contract.id, contract.revision, Date.now())
       yield* session.prompt({
         sessionID: attempt!.sessionID,
         prompt: Prompt.make({ text: "Address the verifier challenge" }),
@@ -765,6 +783,10 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(2)
       expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Independent output mismatch")
       expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("negative-witness")
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("candidate-subject")
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Offline build regressed")
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("offline-witness")
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("candidate-subject-2")
 
       yield* contracts.release({ contractID: contract.id, reason: "test complete" })
       yield* session.prompt({
