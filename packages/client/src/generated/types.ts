@@ -3001,7 +3001,7 @@ export type ServerProContractIssueOutput = {
     }
     readonly issuer: string
     readonly revision: number
-    readonly status: "dormant" | "active" | "discharged" | "released"
+    readonly status: "dormant" | "active" | "verification" | "escalated" | "discharged" | "released"
     readonly specHash: string
     readonly escalation?: { readonly reason: string; readonly time: number }
     readonly blocked?: { readonly reason: string; readonly time: number }
@@ -3070,7 +3070,7 @@ export type ServerProContractListOutput = {
     }
     readonly issuer: string
     readonly revision: number
-    readonly status: "dormant" | "active" | "discharged" | "released"
+    readonly status: "dormant" | "active" | "verification" | "escalated" | "discharged" | "released"
     readonly specHash: string
     readonly escalation?: { readonly reason: string; readonly time: number }
     readonly blocked?: { readonly reason: string; readonly time: number }
@@ -3134,7 +3134,7 @@ export type ServerProContractGetOutput = {
     }
     readonly issuer: string
     readonly revision: number
-    readonly status: "dormant" | "active" | "discharged" | "released"
+    readonly status: "dormant" | "active" | "verification" | "escalated" | "discharged" | "released"
     readonly specHash: string
     readonly escalation?: { readonly reason: string; readonly time: number }
     readonly blocked?: { readonly reason: string; readonly time: number }

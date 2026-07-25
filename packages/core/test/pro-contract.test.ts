@@ -57,7 +57,7 @@ describe("ProContract kernel", () => {
     } as const
     expect(ProContract.transition(activated.state, discharge).decision).toEqual({
       type: "rejected",
-      reason: "contract has not been handed off for verification",
+      reason: "contract is not awaiting verification",
     })
     const handedOff = ProContract.transition(activated.state, {
       type: "report-ready",
@@ -69,6 +69,8 @@ describe("ProContract kernel", () => {
       subjectHash,
       time: 0,
     })
+    expect(handedOff.state.contracts[contractID]).toMatchObject({ status: "verification", escalation: undefined })
+    expect(ProContract.quiet(handedOff.state, draft.scope)).toBe(false)
     expect(
       ProContract.transition(handedOff.state, {
         ...discharge,
@@ -298,7 +300,10 @@ describe("ProContract kernel", () => {
       reason: "capacity exhausted",
       time: 1,
     })
-    expect(escalated.state.contracts[contractID]?.escalation).toEqual({ reason: "capacity exhausted", time: 1 })
+    expect(escalated.state.contracts[contractID]).toMatchObject({
+      status: "escalated",
+      escalation: { reason: "capacity exhausted", time: 1 },
+    })
     expect(ProContract.quiet(escalated.state, draft.scope)).toBe(false)
     expect(
       ProContract.transition(escalated.state, {
@@ -311,7 +316,7 @@ describe("ProContract kernel", () => {
         subjectHash,
         time: 1,
       }).decision,
-    ).toEqual({ type: "rejected", reason: "contract is escalated" })
+    ).toEqual({ type: "rejected", reason: "contract is not active" })
     const resumed = ProContract.transition(escalated.state, {
       type: "resume",
       actor: draft.issuer,
@@ -520,11 +525,11 @@ describe("ProContract kernel", () => {
     })
 
     expect(challenged.state.contracts[contractID]).toMatchObject({
-      status: "dormant",
+      status: "escalated",
       escalation: { reason: "Verification challenged; evidence is sealed", time: 2 },
       challenge: { disclosure: "sealed", evidenceHash: "sealed-witness" },
     })
-    expect(activation.decision).toEqual({ type: "rejected", reason: "contract is escalated" })
+    expect(activation.decision).toEqual({ type: "rejected", reason: "contract is not dormant" })
   })
 })
 
@@ -850,7 +855,7 @@ describe("OpenCode Contract binding", () => {
       yield* scheduler.runOnce()
 
       expect(yield* contracts.get(contractID)).toMatchObject({
-        status: "dormant",
+        status: "escalated",
         escalation: { reason: "OpenCode execution binding is missing", time: 0 },
       })
     }),
@@ -877,7 +882,7 @@ describe("OpenCode Contract binding", () => {
       yield* scheduler.runOnce()
 
       expect(yield* contracts.get(contractID)).toMatchObject({
-        status: "dormant",
+        status: "escalated",
         escalation: { reason: "OpenCode deadline exhausted while waiting", time: 11 },
       })
       yield* scheduler.runOnce()
@@ -934,7 +939,10 @@ describe("OpenCode Contract binding", () => {
         attempt: "new",
       })
 
-      expect(yield* contracts.get(contractID)).toMatchObject({ escalation: { reason: "blocked", time: 1 } })
+      expect(yield* contracts.get(contractID)).toMatchObject({
+        status: "escalated",
+        escalation: { reason: "blocked", time: 1 },
+      })
       expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: false, outstanding: [contractID] })
     }),
   )
@@ -971,7 +979,7 @@ describe("OpenCode Contract binding", () => {
       })
 
       expect(yield* contracts.get(contractID)).toMatchObject({
-        escalation: { reason: "Ready for verification", time: 1 },
+        status: "verification",
         handoff: { summary: "reviewed", uncertainties: [], subjectHash },
       })
     }),

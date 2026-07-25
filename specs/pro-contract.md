@@ -190,6 +190,18 @@ Escalation is routing, not settlement. It does not make a scope quiet. A
 transfer remains `handoff_pending` until the receiving ledger acknowledges the
 new duty.
 
+The status names the lifecycle directly:
+
+```text
+dormant      -> active
+active       -> verification | escalated
+verification -> discharged | dormant | escalated
+escalated    -> dormant
+```
+
+`released` is the issuer-authorized terminal alternative. Only `active`
+authorizes executor effects; verification is a normal phase, not an escalation.
+
 Quiescence is relative to an immutable ledger frontier, never a permanent
 claim. The current API returns an unsigned snapshot containing the scope,
 frontier, ledger hash, and scoped state hash. A portable certificate would add:
@@ -218,7 +230,7 @@ negative witness to the current claim and keeps the obligation outstanding:
 
 ```text
 executor-visible challenge -> dormant -> wake with feedback
-sealed challenge           -> dormant + escalation, no automatic wake
+sealed challenge           -> escalated, no automatic wake
 ```
 
 Sealed challenges let a confirmation evaluator reject completion without
@@ -231,7 +243,8 @@ invalidation and remediation closure remain future truth-maintenance work.
 Executor completion is a petition, not an attestation. `report-ready` records a
 structured handoff containing the claimed result, every known unresolved
 assumption, and its time. It pauses execution for adjudication but cannot make
-the scope quiet. The kernel rejects discharge unless that handoff exists;
+the scope quiet. `report-ready` moves `active` to `verification`; the kernel
+rejects discharge unless that handoff exists;
 principal evidence alone cannot bypass the executor-to-verifier boundary.
 Successful discharge retains the accepted handoff for downstream readers. A
 challenge clears current handoff support while immutable ledger history keeps
@@ -609,7 +622,7 @@ plane activates duty
   -> adapter claims a durable lease fenced by revision and prompt ID
   -> tool effect points validate the process owner and current fence
   -> executor reports ready or blocked work, or submits a revision petition
-  -> ready work records a structured handoff and pauses for verification
+  -> ready work records a structured handoff and enters verification
   -> failed verification records a visible or sealed challenge
   -> visible challenge closes the old attempt and wakes a fresh Session from authoritative state
   -> plane adjudicates and records the transition

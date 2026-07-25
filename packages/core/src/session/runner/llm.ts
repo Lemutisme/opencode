@@ -205,8 +205,7 @@ const layer = Layer.effect(
         (!contractBinding.dispatched ||
           contractBinding.leaseOwner !== contractBindings.owner ||
           (contractBinding.leaseExpiresAt ?? 0) <= now ||
-          contractBinding.revision !== contract?.revision ||
-          contract?.escalation)
+          contractBinding.revision !== contract?.revision)
       )
         return { needsContinuation: false, step }
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
@@ -223,6 +222,7 @@ const layer = Layer.effect(
         }
         if (promoted > 0) currentStep = 1
       }
+      if (contractBinding && contract?.status !== "active") return { needsContinuation: false, step: currentStep }
       const system =
         initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
       const model = yield* models.resolve(session)

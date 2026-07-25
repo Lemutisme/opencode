@@ -318,7 +318,7 @@ const layer = Layer.effect(
         return rows
           .map((row) => row.data)
           .filter((contract) => {
-            if (contract.status !== "dormant" || contract.escalation) return false
+            if (contract.status !== "dormant") return false
             if (contract.spec.budget.deadline <= now) return true
             return (
               ProContractKernel.transition(state, {

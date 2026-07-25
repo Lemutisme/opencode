@@ -6195,7 +6195,7 @@ export type ProContractSpec = {
   resolution: ProContractResolution
 }
 
-export type ProContractStatus = "dormant" | "active" | "discharged" | "released"
+export type ProContractStatus = "dormant" | "active" | "verification" | "escalated" | "discharged" | "released"
 
 export type ProContractBlocked = {
   reason: string

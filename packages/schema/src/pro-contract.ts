@@ -86,7 +86,14 @@ export const Spec = Schema.Struct({
 }).annotate({ identifier: "ProContract.Spec" })
 export interface Spec extends Schema.Schema.Type<typeof Spec> {}
 
-export const Status = Schema.Literals(["dormant", "active", "discharged", "released"]).annotate({
+export const Status = Schema.Literals([
+  "dormant",
+  "active",
+  "verification",
+  "escalated",
+  "discharged",
+  "released",
+]).annotate({
   identifier: "ProContract.Status",
 })
 export type Status = typeof Status.Type

@@ -29,7 +29,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
     (contracts() ?? []).map((contract) => ({
       title: contract.spec.goal,
       value: contract,
-      description: `${contract.status !== "active" ? contract.status : contract.escalation ? "escalated" : contract.pendingRevision ? "revision pending" : "active"} · ${contract.scope}`,
+      description: `${contract.pendingRevision ? "revision pending" : contract.status} · ${contract.scope}`,
       details: [
         `Contract: ${contract.id}`,
         `Brief: ${contract.spec.brief ? "provided" : "none"}`,
@@ -58,7 +58,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
       <DialogSelect
         title={contract.spec.goal}
         options={[
-          ...(contract.status === "active" && contract.handoff && contract.spec.evidence.type === "principal"
+          ...(contract.status === "verification" && contract.handoff && contract.spec.evidence.type === "principal"
             ? [
                 {
                   title: "Attest completion",
@@ -90,7 +90,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
                 },
               ]
             : []),
-          ...(contract.escalation
+          ...(contract.status === "escalated" && contract.escalation
             ? [
                 {
                   title: "Resume escalated contract",

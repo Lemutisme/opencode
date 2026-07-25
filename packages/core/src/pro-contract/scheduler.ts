@@ -55,7 +55,7 @@ const layer = Layer.effect(
         (binding) =>
           Effect.gen(function* () {
             const contract = yield* contracts.get(binding.contractID)
-            if (!contract || contract.status !== "active" || contract.escalation) return
+            if (!contract || contract.status !== "active") return
             if (now >= contract.spec.budget.deadline) {
               yield* contracts.escalate({
                 contractID: contract.id,

@@ -158,7 +158,7 @@ export function transition(state: State, command: Command): Result {
   if (command.type === "challenge") {
     if (command.actor !== contract.issuer) return reject("only the issuer may challenge verification")
     if (contract.pendingRevision) return reject("verification cannot be challenged while a revision is pending")
-    if (contract.status !== "discharged" && (contract.status !== "active" || !contract.handoff))
+    if (contract.status !== "discharged" && contract.status !== "verification")
       return reject("contract is not awaiting adjudication")
     if (command.challenge.disclosure === "executor" && !command.challenge.summary)
       return reject("executor-visible challenge requires a summary")
@@ -180,7 +180,7 @@ export function transition(state: State, command: Command): Result {
         ...state.contracts,
         [contract.id]: {
           ...contract,
-          status: "dormant",
+          status: command.challenge.disclosure === "sealed" ? "escalated" : "dormant",
           escalation:
             command.challenge.disclosure === "sealed"
               ? { reason: "Verification challenged; evidence is sealed", time: command.challenge.time }
@@ -205,7 +205,6 @@ export function transition(state: State, command: Command): Result {
   if (command.type === "report-ready") {
     if (contract.status !== "active") return reject("contract is not active")
     if (command.revision !== contract.revision) return reject("contract revision does not match")
-    if (contract.escalation) return reject("contract is escalated")
     if (contract.pendingRevision) return reject("handoff is blocked while a revision petition is pending")
     return accept({
       ...state,
@@ -213,7 +212,8 @@ export function transition(state: State, command: Command): Result {
         ...state.contracts,
         [contract.id]: {
           ...contract,
-          escalation: { reason: "Ready for verification", time: command.time },
+          status: "verification",
+          escalation: undefined,
           blocked: undefined,
           handoff: {
             summary: command.summary,
@@ -229,7 +229,6 @@ export function transition(state: State, command: Command): Result {
   if (command.type === "report-blocked") {
     if (contract.status !== "active") return reject("contract is not active")
     if (command.revision !== contract.revision) return reject("contract revision does not match")
-    if (contract.escalation) return reject("contract is escalated")
     if (contract.pendingRevision) return reject("blocked work cannot be reported while a revision is pending")
     return accept({
       ...state,
@@ -306,10 +305,9 @@ export function transition(state: State, command: Command): Result {
   }
 
   if (command.type === "activate") {
-    if (contract.status !== "dormant") return reject("contract is already active")
+    if (contract.status !== "dormant") return reject("contract is not dormant")
     if (command.revision !== contract.revision) return reject("contract revision does not match")
     if (contract.pendingRevision) return reject("contract has a pending revision")
-    if (contract.escalation) return reject("contract is escalated")
     if (command.time >= contract.spec.budget.deadline) return reject("contract deadline has passed")
     if (contract.spec.trigger.type === "time" && contract.spec.trigger.at > command.time)
       return reject("contract trigger is not ready")
@@ -331,7 +329,7 @@ export function transition(state: State, command: Command): Result {
 
   if (command.type === "resume") {
     if (command.actor !== contract.issuer) return reject("only the issuer may resume the contract")
-    if (!contract.escalation) return reject("contract is not escalated")
+    if (contract.status !== "escalated") return reject("contract is not escalated")
     if (contract.pendingRevision) return reject("contract has a pending revision")
     if (dependent) return reject(`contract is required by outstanding contract: ${dependent.id}`)
     return accept({
@@ -355,13 +353,17 @@ export function transition(state: State, command: Command): Result {
       ...state,
       contracts: {
         ...state.contracts,
-        [contract.id]: { ...contract, escalation: { reason: command.reason, time: command.time } },
+        [contract.id]: {
+          ...contract,
+          status: "escalated",
+          escalation: { reason: command.reason, time: command.time },
+        },
       },
     })
   }
 
   if (command.type === "discharge") {
-    if (contract.status !== "active") return reject("contract is not active")
+    if (contract.status !== "verification") return reject("contract is not awaiting verification")
     if (!contract.handoff) return reject("contract has not been handed off for verification")
     if (contract.pendingRevision) return reject("discharge is blocked while a revision petition is pending")
     if (state.attestations[command.attestation.id]) return reject("attestation already exists")

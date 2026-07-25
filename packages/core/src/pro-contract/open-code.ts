@@ -127,8 +127,7 @@ const layer = Layer.effect(
                 row.binding.leaseOwner !== owner ||
                 (row.binding.leaseExpiresAt ?? 0) <= now ||
                 row.binding.revision !== row.contract.revision ||
-                row.contract.status !== "active" ||
-                row.contract.escalation
+                row.contract.status !== "active"
               )
                 return { allowed: false }
               if (now >= row.contract.spec.budget.deadline)
@@ -217,7 +216,7 @@ const layer = Layer.effect(
                   .where(eq(ProContractOpenCodeTable.contract_id, contractID))
                   .get()
                   .pipe(Effect.orDie)
-                if (!row || row.contract.status !== "active" || row.contract.escalation) return {}
+                if (!row || row.contract.status !== "active") return {}
                 // Transport retries preserve this key; authoritative context changes replace the Session.
                 const attemptKey = `${row.contract.revision}:${
                   row.contract.challenge?.disclosure === "executor"
@@ -294,7 +293,6 @@ const layer = Layer.effect(
           .filter(
             (row) =>
               row.contract.status === "active" &&
-              !row.contract.escalation &&
               (row.binding.revision !== row.contract.revision ||
                 (row.contract.challenge?.disclosure === "executor" &&
                   row.binding.attemptKey !==
@@ -321,8 +319,7 @@ const layer = Layer.effect(
                       row.binding.leaseOwner === owner &&
                       sessionIDs.has(row.binding.sessionID) &&
                       row.binding.revision === row.contract.revision &&
-                      row.contract.status === "active" &&
-                      !row.contract.escalation,
+                      row.contract.status === "active",
                   ),
                   (row) => {
                     const expires = Math.min(now + LEASE_MS, row.contract.spec.budget.deadline)
@@ -355,7 +352,6 @@ const layer = Layer.effect(
                 if (
                   !row ||
                   row.contract.status !== "active" ||
-                  row.contract.escalation ||
                   row.contract.revision !== input.revision ||
                   row.binding.revision !== input.revision ||
                   row.binding.promptID !== input.promptID ||
