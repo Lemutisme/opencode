@@ -321,6 +321,12 @@ and assumptions that a future executor can reconcile without reconstructing the
 entire conversation. Failures caused by an insufficient brief are measured as
 reconciliation-context failures rather than silently attributed to planning.
 
+OpenCode exposes that compiler as `contract_propose`. The model supplies an
+existing Contract specification; `PermissionV2` binds approval to its exact
+hash before the shared issuer path persists it. Normal sessions ask the user,
+while an explicit auto-permission mode supplies standing approval. Rejection
+creates no obligation, and the executor never receives direct issue authority.
+
 ### Handoff and justification artifacts
 
 An executor handoff contains a concise claim, known unresolved assumptions, and

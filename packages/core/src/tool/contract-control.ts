@@ -3,9 +3,13 @@ export * as ContractControlTools from "./contract-control"
 import { ToolFailure } from "@opencode-ai/llm"
 import { Clock, Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
+import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
 import { ProContractOpenCode } from "../pro-contract/open-code"
+import { SessionSchema } from "../session/schema"
+import { SessionStore } from "../session/store"
 import { Snapshot } from "../snapshot"
+import { Hash } from "../util/hash"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -15,10 +19,57 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
+    const permissions = yield* PermissionV2.Service
+    const sessions = yield* SessionStore.Service
     const snapshots = yield* Snapshot.Service
 
     yield* tools
       .register({
+        contract_propose: Tool.make({
+          description:
+            "Propose a persistent Contract when the user's intent requires a future trigger, asynchronous or multi-Session work, durable follow-up, or evidence-gated completion. Do not contract ordinary local work. The exact draft requires principal approval before it is issued.",
+          input: Schema.Struct({ spec: ProContract.Spec }),
+          output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
+          execute: (input, context) =>
+            Effect.gen(function* () {
+              const session = yield* sessions.get(context.sessionID)
+              if (!session) return yield* new ToolFailure({ message: "Session not found" })
+              if (!session.model)
+                return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
+              const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
+              const contractID = ProContract.ID.make(`pct_${key}`)
+              const specHash = ProContract.hashSpec(input.spec)
+              yield* permissions.assert({
+                id: PermissionV2.ID.create(`per_${key}`),
+                action: "contract_issue",
+                resources: [specHash],
+                metadata: { contractID, specHash },
+                sessionID: context.sessionID,
+                agent: context.agent,
+                source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+              })
+              const issued = yield* bindings.issue({
+                id: contractID,
+                scope: session.projectID,
+                spec: input.spec,
+                location: session.location,
+                model: session.model,
+                now: yield* Clock.currentTimeMillis,
+              })
+              if (issued.decision.type === "rejected")
+                return yield* new ToolFailure({ message: issued.decision.reason })
+              if (!issued.execution) return yield* new ToolFailure({ message: "Contract execution was not created" })
+              return { contractID, sessionID: issued.execution.sessionID }
+            }).pipe(
+              Effect.mapError((error) =>
+                error instanceof ToolFailure
+                  ? error
+                  : new ToolFailure({
+                      message: error instanceof PermissionV2.CorrectedError ? error.feedback : String(error),
+                    }),
+              ),
+            ),
+        }),
         contract_report_ready: Tool.make({
           description:
             "Hand off the active contract for independent verification. State completed checks and every known unresolved assumption; use contract_report_blocked instead when an uncertainty prevents meaningful verification.",
@@ -119,5 +170,12 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/contract-control",
   layer,
-  deps: [ToolRegistry.node, ProContract.node, ProContractOpenCode.node, Snapshot.node],
+  deps: [
+    ToolRegistry.node,
+    PermissionV2.node,
+    ProContract.node,
+    ProContractOpenCode.node,
+    SessionStore.node,
+    Snapshot.node,
+  ],
 })
