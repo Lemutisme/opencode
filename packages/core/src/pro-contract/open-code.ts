@@ -31,6 +31,14 @@ export type Binding = {
 
 export interface Interface {
   readonly owner: string
+  readonly issue: (input: {
+    readonly id: Schema.ID
+    readonly scope: string
+    readonly spec: Schema.Spec
+    readonly location: Location.Ref
+    readonly model: Model.Ref
+    readonly now: number
+  }) => Effect.Effect<ProContract.IssueReceipt & { readonly execution?: Binding }>
   readonly create: (input: {
     readonly contractID: Schema.ID
     readonly revision: number
@@ -172,38 +180,63 @@ const layer = Layer.effect(
       return decision.allowed
     })
 
+    const create = Effect.fn("ProContractOpenCode.create")(function* (input: {
+      readonly contractID: Schema.ID
+      readonly revision: number
+      readonly location: Location.Ref
+      readonly model: Model.Ref
+      readonly nextActionAt: number
+    }) {
+      const binding: Binding = {
+        contractID: input.contractID,
+        revision: input.revision,
+        location: input.location,
+        model: input.model,
+        sessionID: SessionSchema.ID.create(),
+        promptID: SessionMessage.ID.create(),
+        dispatched: false,
+        attempts: 0,
+        nextActionAt: input.nextActionAt,
+        turnsUsed: 0,
+        actionsUsed: 0,
+        attemptKey: `${input.revision}:`,
+      }
+      yield* db
+        .insert(ProContractOpenCodeTable)
+        .values({ contract_id: binding.contractID, session_id: binding.sessionID, data: binding })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      const stored = (yield* get(input.contractID)) ?? binding
+      yield* db
+        .insert(ProContractOpenCodeSessionTable)
+        .values({ session_id: stored.sessionID, contract_id: stored.contractID })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      return stored
+    })
+
     return Service.of({
       owner,
-      create: Effect.fn("ProContractOpenCode.create")(function* (input) {
-        const binding: Binding = {
-          contractID: input.contractID,
-          revision: input.revision,
+      issue: Effect.fn("ProContractOpenCode.issue")(function* (input) {
+        const receipt = yield* contracts.issue({
+          id: input.id,
+          scope: input.scope,
+          spec: input.spec,
+          executor: "opencode",
+        })
+        if (receipt.decision.type === "rejected" || !receipt.contract) return receipt
+        const execution = yield* create({
+          contractID: receipt.contract.id,
+          revision: receipt.contract.revision,
           location: input.location,
           model: input.model,
-          sessionID: SessionSchema.ID.create(),
-          promptID: SessionMessage.ID.create(),
-          dispatched: false,
-          attempts: 0,
-          nextActionAt: input.nextActionAt,
-          turnsUsed: 0,
-          actionsUsed: 0,
-          attemptKey: `${input.revision}:`,
-        }
-        yield* db
-          .insert(ProContractOpenCodeTable)
-          .values({ contract_id: binding.contractID, session_id: binding.sessionID, data: binding })
-          .onConflictDoNothing()
-          .run()
-          .pipe(Effect.orDie)
-        const stored = (yield* get(input.contractID)) ?? binding
-        yield* db
-          .insert(ProContractOpenCodeSessionTable)
-          .values({ session_id: stored.sessionID, contract_id: stored.contractID })
-          .onConflictDoNothing()
-          .run()
-          .pipe(Effect.orDie)
-        return stored
+          nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
+        })
+        return { ...receipt, execution }
       }),
+      create,
       claim: Effect.fn("ProContractOpenCode.claim")(function* (contractID, now) {
         const result = yield* db
           .transaction(

@@ -54,22 +54,19 @@ const IssueCommand = effectCmd({
       id: model.modelID,
       variant: args.variant ? ModelV2.VariantID.make(args.variant) : undefined,
     })
-    const receipt = yield* contracts.issue({
+    const receipt = yield* bindings.issue({
       id,
       scope: args.scope,
       spec,
-      executor: "opencode",
+      location: { directory: AbsolutePath.make(process.cwd()) },
+      model: executionModel,
+      now,
     })
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
     const contract = receipt.contract
     if (!contract) return yield* Effect.die("Accepted contract was not loaded")
-    const execution = yield* bindings.create({
-      contractID: id,
-      revision: contract.revision,
-      location: { directory: AbsolutePath.make(process.cwd()) },
-      model: executionModel,
-      nextActionAt: spec.trigger.type === "time" ? spec.trigger.at : now,
-    })
+    const execution = receipt.execution
+    if (!execution) return yield* Effect.die("Accepted contract execution was not created")
     if (
       execution.location.directory !== process.cwd() ||
       execution.model.providerID !== executionModel.providerID ||

@@ -667,6 +667,10 @@ silently select another provider. Contract Sessions are permanently reserved
 for the current Session runner; legacy prompt, command, and shell entrypoints
 must reject them before recording input or producing effects.
 
+OpenCode issuer entrypoints share one adapter operation that issues the
+normative Contract before creating its execution binding. A rejected issue
+never creates a binding; an accepted retry reconciles both records idempotently.
+
 ### Candidate promotion
 
 Candidate state belongs to the harness adapter, not the normative Contract.

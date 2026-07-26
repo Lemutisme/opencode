@@ -43,23 +43,20 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             evidence: ctx.payload.evidence ?? defaults.evidence,
             resolution: ctx.payload.resolution ?? defaults.resolution,
           }
-          const issued = yield* contracts.issue({
+          const issued = yield* bindings.issue({
             id,
             scope: ctx.payload.scope,
             spec,
-            executor: "opencode",
+            location: ctx.payload.location,
+            model: ctx.payload.model,
+            now,
           })
           if (issued.decision.type === "rejected")
             return yield* new ConflictError({ message: issued.decision.reason, resource: ctx.payload.id })
           const contract = issued.contract
           if (!contract) return yield* Effect.die("Accepted contract was not loaded")
-          const execution = yield* bindings.create({
-            contractID: id,
-            revision: contract.revision,
-            location: ctx.payload.location,
-            model: ctx.payload.model,
-            nextActionAt: spec.trigger.type === "time" ? spec.trigger.at : now,
-          })
+          const execution = issued.execution
+          if (!execution) return yield* Effect.die("Accepted contract execution was not created")
           if (
             execution.location.directory !== ctx.payload.location.directory ||
             execution.location.workspaceID !== ctx.payload.location.workspaceID ||
