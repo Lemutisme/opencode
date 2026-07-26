@@ -246,7 +246,6 @@ const layer = Layer.effect(
             { action: "contract_report_ready", resource: "*", effect: "allow" as const },
             { action: "contract_report_blocked", resource: "*", effect: "allow" as const },
             { action: "contract_propose_revision", resource: "*", effect: "allow" as const },
-            { action: "question", resource: "*", effect: "allow" as const },
             { action: "todowrite", resource: "*", effect: "allow" as const },
             ...(contract?.status === "active" && contract.spec.authority.includes("filesystem.read")
               ? [
@@ -309,7 +308,7 @@ const layer = Layer.effect(
                     ]
                   : []),
                 `Delegated authority: ${contract.spec.authority.join(", ")}.`,
-                "Work toward the goal using only that authority. Ask the user when a real choice is required. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
+                "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
                 "After completing the prescribed checks, call contract_report_ready with all known unresolved assumptions. A final answer alone does not hand work to the verifier.",
                 "</pro_contract>",
               ].join("\n")

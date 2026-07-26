@@ -329,6 +329,8 @@ creates no obligation, and the executor never receives direct issue authority.
 The existing permission UI shows the exact goal, delegated authority, budget,
 dependencies, evidence policy, and specification hash. Headless `--auto` uses
 the same permission event and issuer path; it does not bypass adjudication.
+After issuance, process-local questions remain fenced; blocked work and proposed
+term changes use the durable Contract channels instead.
 
 ### Handoff and justification artifacts
 
