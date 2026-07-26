@@ -116,6 +116,22 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
     stage: "permission" as PermissionStage,
   })
   const pathFormatter = usePathFormatter()
+  const reply = (value: "once" | "always" | "reject", message?: string) => {
+    if (props.request.metadata?.__v2 === true)
+      return sdk.client.v2.session.permission.reply({
+        sessionID: props.request.sessionID,
+        requestID: props.request.id,
+        reply: value,
+        message,
+      })
+    return sdk.client.permission.reply({
+      reply: value,
+      requestID: props.request.id,
+      directory: props.directory,
+      message,
+      workspace: project.workspace.current(),
+    })
+  }
 
   const session = createMemo(() => sync.data.session.find((s) => s.id === props.request.sessionID))
 
@@ -135,6 +151,32 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
 
   return (
     <Switch>
+      <Match when={store.stage === "permission" && props.request.permission === "contract_issue"}>
+        <Prompt
+          title="Start persistent Contract"
+          body={
+            <box flexDirection="column" gap={1} paddingLeft={1}>
+              <text fg={theme.textMuted}>Goal</text>
+              <text fg={theme.text}>
+                {typeof props.request.metadata?.goal === "string" ? props.request.metadata.goal : ""}
+              </text>
+              <text fg={theme.textMuted}>
+                {typeof props.request.metadata?.details === "string" ? props.request.metadata.details : ""}
+              </text>
+              <text fg={theme.textMuted}>Spec hash: {props.request.patterns[0]}</text>
+            </box>
+          }
+          options={{ once: "Confirm and start", revise: "Revise", reject: "Continue normally" }}
+          escapeKey="reject"
+          onSelect={(option) => {
+            if (option === "revise") {
+              setStore("stage", "reject")
+              return
+            }
+            void reply(option, option === "reject" ? "Continue without a Contract" : undefined)
+          }}
+        />
+      </Match>
       <Match when={store.stage === "always"}>
         <Prompt
           title="Always allow"
@@ -165,25 +207,14 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           onSelect={(option) => {
             setStore("stage", "permission")
             if (option === "cancel") return
-            void sdk.client.permission.reply({
-              reply: "always",
-              requestID: props.request.id,
-              directory: props.directory,
-              workspace: project.workspace.current(),
-            })
+            void reply("always")
           }}
         />
       </Match>
       <Match when={store.stage === "reject"}>
         <RejectPrompt
           onConfirm={(message) => {
-            void sdk.client.permission.reply({
-              reply: "reject",
-              requestID: props.request.id,
-              directory: props.directory,
-              message: message || undefined,
-              workspace: project.workspace.current(),
-            })
+            void reply("reject", message || undefined)
           }}
           onCancel={() => {
             setStore("stage", "permission")
@@ -415,20 +446,10 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
                     setStore("stage", "reject")
                     return
                   }
-                  void sdk.client.permission.reply({
-                    reply: "reject",
-                    requestID: props.request.id,
-                    directory: props.directory,
-                    workspace: project.workspace.current(),
-                  })
+                  void reply("reject")
                   return
                 }
-                void sdk.client.permission.reply({
-                  reply: "once",
-                  requestID: props.request.id,
-                  directory: props.directory,
-                  workspace: project.workspace.current(),
-                })
+                void reply("once")
               }}
             />
           )

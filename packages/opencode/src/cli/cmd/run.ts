@@ -814,6 +814,24 @@ export const RunCommand = effectCmd({
                 })
               }
             }
+
+            if (event.type === "permission.v2.asked") {
+              const permission = event.properties
+              if (permission.sessionID !== sessionID) continue
+
+              if (!auto) {
+                UI.println(
+                  UI.Style.TEXT_WARNING_BOLD + "!",
+                  UI.Style.TEXT_NORMAL +
+                    `permission requested: ${permission.action} (${permission.resources.join(", ")}); auto-rejecting`,
+                )
+              }
+              await client.v2.session.permission.reply({
+                sessionID,
+                requestID: permission.id,
+                reply: auto ? "once" : "reject",
+              })
+            }
           }
           return error
         }

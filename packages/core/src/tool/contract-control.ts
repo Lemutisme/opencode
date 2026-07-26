@@ -43,7 +43,22 @@ const layer = Layer.effectDiscard(
                 id: PermissionV2.ID.create(`per_${key}`),
                 action: "contract_issue",
                 resources: [specHash],
-                metadata: { contractID, specHash },
+                metadata: {
+                  contractID,
+                  specHash,
+                  goal: input.spec.goal,
+                  details: [
+                    input.spec.brief ? `Brief: ${input.spec.brief}` : undefined,
+                    `Trigger: ${JSON.stringify(input.spec.trigger)}`,
+                    `Authority: ${input.spec.authority.join(", ")}`,
+                    `Budget: ${input.spec.budget.turns} turns, ${input.spec.budget.actions} actions, deadline ${input.spec.budget.deadline}`,
+                    `Requires: ${input.spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
+                    `Evidence: ${input.spec.evidence.type}`,
+                    `Resolution: ${input.spec.resolution.maxAttempts} attempts, ${input.spec.resolution.retryDelay} ms retry delay`,
+                  ]
+                    .filter((item) => item !== undefined)
+                    .join("\n"),
+                },
                 sessionID: context.sessionID,
                 agent: context.agent,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },

@@ -62,4 +62,53 @@ describe("tui sync", () => {
       app.renderer.destroy()
     }
   })
+
+  test("projects V2 Contract approval into the existing permission UI", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const { app, emit, sync } = await mount(undefined, tmp.path)
+
+    try {
+      emit({
+        directory: "/tmp/opencode/packages/tui",
+        project: "proj_test",
+        payload: {
+          id: "evt_contract_permission",
+          type: "permission.v2.asked",
+          properties: {
+            id: "per_contract",
+            sessionID: "ses_contract",
+            action: "contract_issue",
+            resources: ["spec-hash"],
+            metadata: { goal: "Continue later", details: "Authority: filesystem.read" },
+            source: { type: "tool", messageID: "msg_contract", callID: "call_contract" },
+          },
+        },
+      })
+      await wait(() => sync.data.permission.ses_contract?.length === 1)
+
+      expect(sync.data.permission.ses_contract?.[0]).toEqual({
+        id: "per_contract",
+        sessionID: "ses_contract",
+        permission: "contract_issue",
+        patterns: ["spec-hash"],
+        always: [],
+        metadata: { goal: "Continue later", details: "Authority: filesystem.read", __v2: true },
+        tool: { messageID: "msg_contract", callID: "call_contract" },
+      })
+
+      emit({
+        directory: "/tmp/opencode/packages/tui",
+        project: "proj_test",
+        payload: {
+          id: "evt_contract_permission_reply",
+          type: "permission.v2.replied",
+          properties: { sessionID: "ses_contract", requestID: "per_contract", reply: "once" },
+        },
+      })
+      await wait(() => sync.data.permission.ses_contract?.length === 0)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
 })

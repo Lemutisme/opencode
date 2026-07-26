@@ -187,6 +187,21 @@ export const {
           break
         }
 
+        case "permission.v2.replied": {
+          const requests = store.permission[event.properties.sessionID]
+          if (!requests) break
+          const match = search(requests, event.properties.requestID, (request) => request.id)
+          if (!match.found) break
+          setStore(
+            "permission",
+            event.properties.sessionID,
+            produce((draft) => {
+              draft.splice(match.index, 1)
+            }),
+          )
+          break
+        }
+
         case "permission.asked": {
           const request = event.properties
           if (permission.mode === "auto") {
@@ -204,6 +219,48 @@ export const {
             break
           }
           const match = search(requests, request.id, (r) => r.id)
+          if (match.found) {
+            setStore("permission", request.sessionID, match.index, reconcile(request))
+            break
+          }
+          setStore(
+            "permission",
+            request.sessionID,
+            produce((draft) => {
+              draft.splice(match.index, 0, request)
+            }),
+          )
+          break
+        }
+
+        case "permission.v2.asked": {
+          const input = event.properties
+          if (permission.mode === "auto") {
+            void sdk.client.v2.session.permission.reply({
+              sessionID: input.sessionID,
+              requestID: input.id,
+              reply: "once",
+            })
+            break
+          }
+          const request: PermissionRequest = {
+            id: input.id,
+            sessionID: input.sessionID,
+            permission: input.action,
+            patterns: [...input.resources],
+            always: [...(input.save ?? [])],
+            metadata: { ...input.metadata, __v2: true },
+            tool:
+              input.source?.type === "tool"
+                ? { messageID: input.source.messageID, callID: input.source.callID }
+                : undefined,
+          }
+          const requests = store.permission[request.sessionID]
+          if (!requests) {
+            setStore("permission", request.sessionID, [request])
+            break
+          }
+          const match = search(requests, request.id, (item) => item.id)
           if (match.found) {
             setStore("permission", request.sessionID, match.index, reconcile(request))
             break
