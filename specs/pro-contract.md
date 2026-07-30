@@ -1,5 +1,8 @@
 # ProContract
 
+Operational commands for building OpenCode and running ProContract with
+MLE-bench or ProgramBench are in [`pro-contract-runbook.md`](pro-contract-runbook.md).
+
 ## Thesis
 
 An agent is a sequence of short-lived executors. Context compaction, process
