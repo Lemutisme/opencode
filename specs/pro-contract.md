@@ -335,7 +335,10 @@ separate lifecycle semantics.
 Legacy primary Sessions persist one formation decision before their first
 effectful tool: `contract_propose` delegates the work, while
 `contract_continue` records why it is ordinary single-Session work. Read-only
-exploration remains available before that decision.
+exploration remains available before that decision. Work whose artifact is
+evaluated after the Session is Contract work even when execution itself is
+synchronous; `contract_continue` requires both work and validation to finish in
+the current Session.
 The existing permission UI shows the exact goal, delegated authority, budget,
 dependencies, evidence policy, and specification hash. Headless `--auto` uses
 the same permission event and issuer path; it does not bypass adjudication.

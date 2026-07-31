@@ -74,7 +74,7 @@ const layer = Layer.effect(
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
           ].join("\n"),
-          "Before using effectful tools, decide Contract formation. Call contract_propose when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or evidence-gated completion; otherwise call contract_continue and state why the work is ordinary and single-Session.",
+          "Before using effectful tools, decide Contract formation. Call contract_propose when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Call contract_continue only when both the work and its validation can finish in this Session. When unsure, propose.",
           references.length === 0
             ? undefined
             : [

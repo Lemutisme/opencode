@@ -349,7 +349,7 @@ const layer = Layer.effect(
                         if (decision === "contract")
                           return Effect.die("This obligation moved to a dedicated Contract Session")
                         return Effect.die(
-                          "Decide Contract formation before effectful work: call contract_propose for future-triggered, asynchronous, durable, or evidence-gated work; otherwise call contract_continue.",
+                          "Decide Contract formation before effectful work: call contract_propose if work or validation extends beyond this Session; call contract_continue only when both finish here. When unsure, propose.",
                         )
                       }),
                     )

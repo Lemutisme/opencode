@@ -139,7 +139,8 @@ dependencies, evidence policy, and `specHash`.
 
 Primary Sessions must record formation before their first effectful tool. For
 ordinary single-Session work the model calls `contract_continue` with a reason;
-read-only exploration is allowed before this decision.
+read-only exploration is allowed before this decision. Later external review or
+evaluation makes a task Contract work even when its execution is synchronous.
 
 The human choices are:
 

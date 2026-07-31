@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the user's intent requires a future trigger, asynchronous or multi-Session work, durable follow-up, or evidence-gated completion. Do not contract ordinary local work. The exact draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. When unsure, propose. The exact draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -104,7 +104,7 @@ export const ContractContinueTool = Tool.define<
 
     return {
       description:
-        "Declare that the current request is ordinary single-Session work and does not need a persistent Contract. Use only when there is no future trigger, asynchronous work, durable follow-up, or evidence-gated completion.",
+        "Declare that both the work and its validation can finish in this Session. Do not use when an artifact will be evaluated or reviewed later; when unsure, propose a Contract.",
       parameters: ContinueParameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
