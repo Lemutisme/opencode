@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. budget.deadline is a Unix timestamp in milliseconds; past values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; past values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {

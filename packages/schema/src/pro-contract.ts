@@ -34,9 +34,13 @@ export const Capability = Schema.Literals(["filesystem.read", "filesystem.write"
 export type Capability = typeof Capability.Type
 
 export const Budget = Schema.Struct({
-  turns: PositiveInt,
-  actions: PositiveInt,
-  deadline: NonNegativeInt,
+  turns: PositiveInt.annotate({
+    description: "Total provider turns shared by every attempt. Use 1000 when the principal gives no tighter limit.",
+  }),
+  actions: PositiveInt.annotate({
+    description: "Total tool actions shared by every attempt. Use 10000 when the principal gives no tighter limit.",
+  }),
+  deadline: NonNegativeInt.annotate({ description: "Absolute Unix timestamp in milliseconds." }),
 }).annotate({ identifier: "ProContract.Budget" })
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}
 

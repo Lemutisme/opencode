@@ -342,7 +342,9 @@ evaluated after the Session is Contract work even when execution itself is
 synchronous; `contract_continue` requires both work and validation to finish in
 the current Session and cannot replace an issued Contract. Proposal deadlines
 are absolute Unix timestamps; past drafts receive the standard 24-hour deadline
-before the exact normalized specification is ratified.
+before the exact normalized specification is ratified. Turn and action budgets
+are total across all attempts, so autonomous proposals without a tighter
+principal limit reserve ample verification and remediation headroom.
 The existing permission UI shows the exact goal, delegated authority, budget,
 dependencies, evidence policy, and specification hash. Headless `--auto` uses
 the same permission event and issuer path; it does not bypass adjudication.
