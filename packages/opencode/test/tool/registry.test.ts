@@ -25,6 +25,7 @@ import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { Session } from "@/session/session"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 
 const configLayer = TestConfig.layer({
   directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
@@ -123,7 +124,7 @@ describe("tool.registry", () => {
     }),
   )
 
-  it.instance("issues the exact approved Contract proposal", () =>
+  it.instance("preserves the issuing request in the approved Contract", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const sessions = yield* Session.Service
@@ -134,6 +135,7 @@ describe("tool.registry", () => {
       })
       expect((yield* sessions.get(session.id)).id).toBe(session.id)
       const proposal = ProContract.defaultSpec("Continue after this Session", Date.now())
+      const approved = { ...proposal, brief: "Original request:\nUse the prepared data at /home/data" }
       const tool =
         (yield* registry.all()).find((item) => item.id === "contract_propose") ??
         (yield* Effect.die("contract_propose not found"))
@@ -147,7 +149,9 @@ describe("tool.registry", () => {
           agent: "build",
           abort: new AbortController().signal,
           callID: "call_contract_proposal",
-          messages: [],
+          messages: [
+            { info: { role: "user" }, parts: [{ type: "text", text: "Use the prepared data at /home/data" }] },
+          ] as unknown as SessionV1.WithParts[],
           metadata: () => Effect.void,
           ask: (input) =>
             Effect.sync(() => {
@@ -156,8 +160,8 @@ describe("tool.registry", () => {
         },
       )
 
-      expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(proposal)] }])
-      expect(yield* contracts.get(result.metadata.contractID)).toMatchObject({ spec: proposal })
+      expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(approved)] }])
+      expect(yield* contracts.get(result.metadata.contractID)).toMatchObject({ spec: approved })
       expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({
         sessionID: result.metadata.sessionID,
         model: { id: "test", providerID: "test" },

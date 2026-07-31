@@ -47,9 +47,17 @@ const layer = Layer.effectDiscard(
                 return yield* new ToolFailure({
                   message: "Contract deadline must be a future Unix timestamp in milliseconds",
                 })
+              const request = (yield* sessions.context(context.sessionID)).findLast((item) => item.type === "user")
+                ?.text
+              const spec = request
+                ? {
+                    ...input.spec,
+                    brief: [input.spec.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
+                  }
+                : input.spec
               const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
               const contractID = ProContract.ID.make(`pct_${key}`)
-              const specHash = ProContract.hashSpec(input.spec)
+              const specHash = ProContract.hashSpec(spec)
               yield* permissions.assert({
                 id: PermissionV2.ID.create(`per_${key}`),
                 action: "contract_issue",
@@ -57,15 +65,15 @@ const layer = Layer.effectDiscard(
                 metadata: {
                   contractID,
                   specHash,
-                  goal: input.spec.goal,
+                  goal: spec.goal,
                   details: [
-                    input.spec.brief ? `Brief: ${input.spec.brief}` : undefined,
-                    `Trigger: ${JSON.stringify(input.spec.trigger)}`,
-                    `Authority: ${input.spec.authority.join(", ")}`,
-                    `Budget: ${input.spec.budget.turns} turns, ${input.spec.budget.actions} actions, deadline ${input.spec.budget.deadline}`,
-                    `Requires: ${input.spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
-                    `Evidence: ${input.spec.evidence.type}`,
-                    `Resolution: ${input.spec.resolution.maxAttempts} attempts, ${input.spec.resolution.retryDelay} ms retry delay`,
+                    spec.brief ? `Brief: ${spec.brief}` : undefined,
+                    `Trigger: ${JSON.stringify(spec.trigger)}`,
+                    `Authority: ${spec.authority.join(", ")}`,
+                    `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
+                    `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
+                    `Evidence: ${spec.evidence.type}`,
+                    `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
                   ]
                     .filter((item) => item !== undefined)
                     .join("\n"),
@@ -77,7 +85,7 @@ const layer = Layer.effectDiscard(
               const issued = yield* bindings.issue({
                 id: contractID,
                 scope: session.projectID,
-                spec: input.spec,
+                spec,
                 location: session.location,
                 model: session.model,
                 now,

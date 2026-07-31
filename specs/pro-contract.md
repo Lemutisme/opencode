@@ -323,6 +323,8 @@ all issuance-time context, so the issuer chooses a goal, brief, evidence policy,
 and assumptions that a future executor can reconcile without reconstructing the
 entire conversation. Failures caused by an insufficient brief are measured as
 reconciliation-context failures rather than silently attributed to planning.
+OpenCode preserves the latest user request verbatim in the approved brief, so a
+model-authored summary can compress context but cannot erase its source intent.
 
 OpenCode exposes that compiler as `contract_propose`. The model supplies an
 existing Contract specification; the Session permission boundary binds
