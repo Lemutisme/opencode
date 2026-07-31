@@ -30,6 +30,12 @@ const layer = Layer.effectDiscard(
             "Propose a persistent Contract when the user's intent requires a future trigger, asynchronous or multi-Session work, durable follow-up, or evidence-gated completion. Do not contract ordinary local work. The exact draft requires principal approval before it is issued.",
           input: Schema.Struct({ spec: ProContract.Spec }),
           output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
+          toModelOutput: ({ output }) => [
+            {
+              type: "text",
+              text: `Contract ${output.contractID} was approved and scheduled in Session ${output.sessionID}. Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
+            },
+          ],
           execute: (input, context) =>
             Effect.gen(function* () {
               const session = yield* sessions.get(context.sessionID)

@@ -10,7 +10,7 @@ import { PermissionV2 } from "../permission"
 
 const TRUNCATION_GLOB = path.join(Global.Path.data, "tool-output", "*")
 const BUILD_SYSTEM =
-  "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions."
+  "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions. Before using effectful tools, call contract_propose when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or evidence-gated completion. Proceed normally for ordinary single-Session work."
 
 const PROMPT_EXPLORE = `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 
@@ -112,6 +112,7 @@ export const Plugin = define({
     const defaults: PermissionV2.Ruleset = [
       { action: "*", resource: "*", effect: "allow" },
       { action: "contract_issue", resource: "*", effect: "ask" },
+      { action: "contract_propose", resource: "*", effect: "deny" },
       ...readonlyExternalDirectory,
       { action: "question", resource: "*", effect: "deny" },
       { action: "plan_enter", resource: "*", effect: "deny" },
@@ -129,6 +130,7 @@ export const Plugin = define({
         item.mode = "primary"
         item.permissions.push(
           ...PermissionV2.merge(defaults, [
+            { action: "contract_propose", resource: "*", effect: "allow" },
             { action: "question", resource: "*", effect: "allow" },
             { action: "plan_enter", resource: "*", effect: "allow" },
           ]),
@@ -140,6 +142,7 @@ export const Plugin = define({
         item.mode = "primary"
         item.permissions.push(
           ...PermissionV2.merge(defaults, [
+            { action: "contract_propose", resource: "*", effect: "allow" },
             { action: "question", resource: "*", effect: "allow" },
             { action: "plan_exit", resource: "*", effect: "allow" },
             { action: "external_directory", resource: path.join(Global.Path.data, "plans", "*"), effect: "allow" },

@@ -21,6 +21,10 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { MCP } from "@/mcp"
 import type { Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
+import { ProContract } from "@opencode-ai/core/pro-contract"
+import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { Session } from "@/session/session"
+import { SessionProjector } from "@opencode-ai/core/session/projector"
 
 const configLayer = TestConfig.layer({
   directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
@@ -50,7 +54,14 @@ const brokenPluginLayer = Layer.succeed(
   }),
 )
 
-const root = LayerNode.group([ToolRegistry.node, Agent.node])
+const root = LayerNode.group([
+  ToolRegistry.node,
+  Agent.node,
+  ProContract.node,
+  ProContractOpenCode.node,
+  SessionProjector.node,
+  Session.node,
+])
 const replacements = [
   [Config.node, configLayer],
   [RuntimeFlags.node, RuntimeFlags.layer()],
@@ -100,6 +111,59 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
+  it.instance("exposes Contract formation to ordinary sessions", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const build = yield* agents.get("build")
+      if (!build) yield* Effect.die("build agent not found")
+      const ref = { providerID: ProviderV2.ID.opencode, modelID: ModelV2.ID.make("test") }
+
+      expect((yield* registry.tools({ ...ref, agent: build })).map((tool) => tool.id)).toContain("contract_propose")
+    }),
+  )
+
+  it.instance("issues the exact approved Contract proposal", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const sessions = yield* Session.Service
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const session = yield* sessions.create({
+        model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") },
+      })
+      expect((yield* sessions.get(session.id)).id).toBe(session.id)
+      const proposal = ProContract.defaultSpec("Continue after this Session", Date.now())
+      const tool = (yield* registry.all()).find((item) => item.id === "contract_propose")
+      if (!tool) yield* Effect.die("contract_propose not found")
+      const asked: Array<{ permission: string; patterns: string[] }> = []
+
+      const result = yield* tool.execute(
+        { spec: proposal },
+        {
+          sessionID: session.id,
+          messageID: MessageID.make("msg_contract_proposal"),
+          agent: "build",
+          abort: new AbortController().signal,
+          callID: "call_contract_proposal",
+          messages: [],
+          metadata: () => Effect.void,
+          ask: (input) =>
+            Effect.sync(() => {
+              asked.push({ permission: input.permission, patterns: [...input.patterns] })
+            }),
+        },
+      )
+
+      expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(proposal)] }])
+      expect(yield* contracts.get(result.metadata.contractID)).toMatchObject({ spec: proposal })
+      expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({
+        sessionID: result.metadata.sessionID,
+        model: { id: "test", providerID: "test" },
+      })
+    }),
+  )
+
   it.instance("does not expose task_status", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

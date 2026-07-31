@@ -74,6 +74,7 @@ const layer = Layer.effect(
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
           ].join("\n"),
+          "Before using effectful tools, call contract_propose when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or evidence-gated completion. Proceed normally for ordinary single-Session work.",
           references.length === 0
             ? undefined
             : [

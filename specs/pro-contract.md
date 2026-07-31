@@ -325,10 +325,13 @@ entire conversation. Failures caused by an insufficient brief are measured as
 reconciliation-context failures rather than silently attributed to planning.
 
 OpenCode exposes that compiler as `contract_propose`. The model supplies an
-existing Contract specification; `PermissionV2` binds approval to its exact
-hash before the shared issuer path persists it. Normal sessions ask the user,
+existing Contract specification; the Session permission boundary binds
+approval to its exact hash before the shared issuer path persists it. Normal sessions ask the user,
 while an explicit auto-permission mode supplies standing approval. Rejection
 creates no obligation, and the executor never receives direct issue authority.
+Legacy and V2 Session registries expose the same proposal name and converge on
+the same `ProContractOpenCode.issue` operation; the legacy adapter carries no
+separate lifecycle semantics.
 The existing permission UI shows the exact goal, delegated authority, budget,
 dependencies, evidence policy, and specification hash. Headless `--auto` uses
 the same permission event and issuer path; it does not bypass adjudication.

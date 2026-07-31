@@ -118,6 +118,8 @@ const layer = Layer.effect(
 
         const defaults = Permission.fromConfig({
           "*": "allow",
+          contract_issue: "ask",
+          contract_propose: "deny",
           doom_loop: "ask",
           external_directory: {
             "*": "ask",
@@ -145,6 +147,7 @@ const layer = Layer.effect(
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
+                contract_propose: "allow",
                 question: "allow",
                 plan_enter: "allow",
               }),
@@ -160,6 +163,7 @@ const layer = Layer.effect(
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
+                contract_propose: "allow",
                 question: "allow",
                 plan_exit: "allow",
                 task: {
