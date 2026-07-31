@@ -73,7 +73,9 @@ const layer = Layer.effect(
               const prompt = {
                 id: current.promptID,
                 sessionID: current.sessionID,
-                prompt: { text: "Reconcile the active contract and advance it within the delegated authority." },
+                prompt: {
+                  text: "Reconcile the active contract against the existing candidate state. Inspect and reuse valid files, artifacts, and completed checks before new exploration, then advance within the delegated authority.",
+                },
                 delivery: "queue" as const,
               }
               yield* sessions.prompt({ ...prompt, resume: false })

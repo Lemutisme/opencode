@@ -9,7 +9,10 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionInputTable } from "@opencode-ai/core/session/sql"
+import { Database } from "@opencode-ai/core/database/database"
 import { Duration, Effect, Layer } from "effect"
+import { eq } from "drizzle-orm"
 import * as TestClock from "effect/testing/TestClock"
 import { testEffect } from "./lib/effect"
 
@@ -712,7 +715,7 @@ const execution = Layer.succeed(
 )
 const schedulerIt = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([ProContract.node, ProContractOpenCode.node, SessionV2.node, ProContractScheduler.node]),
+    LayerNode.group([Database.node, ProContract.node, ProContractOpenCode.node, SessionV2.node, ProContractScheduler.node]),
     [[SessionExecution.node, execution]],
   ),
 )
@@ -769,6 +772,19 @@ describe("OpenCode Contract binding", () => {
       expect(yield* contracts.get(contractID)).toMatchObject({ status: "active" })
       expect(yield* bindings.get(contractID)).toMatchObject({ dispatched: true })
       expect(yield* sessions.get(binding.sessionID)).toMatchObject({ model: executionModel })
+      const { db } = yield* Database.Service
+      expect(
+        yield* db
+          .select({ prompt: SessionInputTable.prompt })
+          .from(SessionInputTable)
+          .where(eq(SessionInputTable.session_id, binding.sessionID))
+          .get()
+          .pipe(Effect.orDie),
+      ).toMatchObject({
+        prompt: {
+          text: "Reconcile the active contract against the existing candidate state. Inspect and reuse valid files, artifacts, and completed checks before new exploration, then advance within the delegated authority.",
+        },
+      })
       expect(wakeCalls).toEqual([binding.sessionID])
     }),
   )
