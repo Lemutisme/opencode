@@ -399,6 +399,14 @@ agent in the same container:
 ```bash
 until docker exec "$RUN_ID" curl -fsS http://localhost:5000/health >/dev/null; do sleep 1; done
 
+# ProContract handoff snapshots the entire candidate Location, including the
+# later /home/submission artifact. Initialize it before OpenCode discovers it.
+docker exec -u nonroot -w /home "$RUN_ID" git init
+docker exec -u nonroot -w /home "$RUN_ID" git config user.email benchmark@localhost
+docker exec -u nonroot -w /home "$RUN_ID" git config user.name "MLE-bench"
+docker exec -u nonroot -w /home "$RUN_ID" git add instructions.txt data
+docker exec -u nonroot -w /home "$RUN_ID" git commit -m "Initialize public benchmark input"
+
 docker exec -d -u nonroot -w /home "$RUN_ID" \
   /usr/local/bin/opencode serve --hostname 0.0.0.0 --port 4096
 
