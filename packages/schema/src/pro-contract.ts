@@ -83,7 +83,10 @@ export interface Resolution extends Schema.Schema.Type<typeof Resolution> {}
 export const Spec = Schema.Struct({
   trigger: Trigger,
   goal: Schema.NonEmptyString,
-  brief: Schema.String,
+  brief: Schema.String.annotate({
+    description:
+      "Self-contained handoff brief. Preserve user-stated quality criteria. For open-ended optimization, state the evaluation protocol, required exploration, known quality floor, stopping rule, and assumptions; expose missing criteria instead of inventing them.",
+  }),
   requires: Schema.Array(Requirement),
   authority: Schema.Array(Capability),
   budget: Budget,

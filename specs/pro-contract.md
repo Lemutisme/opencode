@@ -325,6 +325,10 @@ entire conversation. Failures caused by an insufficient brief are measured as
 reconciliation-context failures rather than silently attributed to planning.
 OpenCode preserves the latest user request verbatim in the approved brief, so a
 model-authored summary can compress context but cannot erase its source intent.
+For open-ended optimization, that brief also names the evaluation protocol,
+required exploration, any user-provided quality floor, the stopping rule, and
+known assumptions. Missing quality criteria remain visible for principal
+approval rather than being replaced with an executor-invented proxy.
 
 OpenCode exposes that compiler as `contract_propose`. The model supplies an
 existing Contract specification; the Session permission boundary binds
