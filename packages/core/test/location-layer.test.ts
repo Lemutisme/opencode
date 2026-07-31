@@ -204,7 +204,16 @@ describe("LocationServiceMap", () => {
                 agent.permissions.push({ action: "contract_issue", resource: "*", effect: "ask" })
               }),
             )
-            const proposal = ProContract.defaultSpec("Continue after this Session", Date.now())
+            const defaults = ProContract.defaultSpec("Continue after this Session", Date.now())
+            const proposal = {
+              ...defaults,
+              budget: {
+                ...defaults.budget,
+                turns: 1_000,
+                actions: 10_000,
+                deadline: defaults.budget.deadline + 24 * 60 * 60 * 1_000,
+              },
+            }
             expect((yield* registry.materialize()).definitions.map((item) => item.name)).toContain("contract_propose")
             const execution = yield* settleTool(registry, {
               sessionID,

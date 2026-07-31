@@ -163,6 +163,8 @@ describe("tool.registry", () => {
       const contract = yield* contracts.get(result.metadata.contractID)
       if (!contract) return yield* Effect.die("Contract was not issued")
       expect(contract.spec.brief).toBe("Original request:\nUse the prepared data at /home/data")
+      expect(contract.spec.budget.turns).toBe(1_000)
+      expect(contract.spec.budget.actions).toBe(10_000)
       expect(contract.spec.budget.deadline).toBeGreaterThan(Date.now())
       expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec)] }])
       expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({

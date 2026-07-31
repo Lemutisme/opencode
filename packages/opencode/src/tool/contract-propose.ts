@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; past values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -39,10 +39,14 @@ export const ContractProposeTool = Tool.define<
           const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
-          const draft =
-            input.spec.budget.deadline > now
-              ? input.spec
-              : { ...input.spec, budget: { ...input.spec.budget, deadline: now + 24 * 60 * 60 * 1_000 } }
+          const draft = {
+            ...input.spec,
+            budget: {
+              turns: Math.max(input.spec.budget.turns, 1_000),
+              actions: Math.max(input.spec.budget.actions, 10_000),
+              deadline: Math.max(input.spec.budget.deadline, now + 24 * 60 * 60 * 1_000),
+            },
+          }
           const request = ctx.messages
             .findLast((item) => item.info.role === "user")
             ?.parts.flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
