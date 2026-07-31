@@ -9,6 +9,7 @@ import { Session } from "@/session/session"
 import * as Tool from "./tool"
 
 export const Parameters = Schema.Struct({ spec: ProContract.Spec })
+export const formationMetadataKey = "procontractFormation"
 
 type Metadata = {
   contractID: ProContract.ID
@@ -75,10 +76,50 @@ export const ContractProposeTool = Tool.define<
           })
           if (issued.decision.type === "rejected") return yield* Effect.die(issued.decision.reason)
           if (!issued.execution) return yield* Effect.die("Contract execution was not created")
+          yield* sessions.setMetadata({
+            sessionID: session.id,
+            metadata: { ...session.metadata, [formationMetadataKey]: "contract" },
+          })
           return {
             title: "Contract issued",
             output: `Contract ${contractID} was approved and scheduled in Session ${issued.execution.sessionID}. Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
             metadata: { contractID, sessionID: issued.execution.sessionID },
+          }
+        }),
+    }
+  }),
+)
+
+const ContinueParameters = Schema.Struct({ reason: Schema.NonEmptyString })
+
+export const ContractContinueTool = Tool.define<
+  typeof ContinueParameters,
+  Record<string, never>,
+  Agent.Service | Session.Service
+>(
+  "contract_continue",
+  Effect.gen(function* () {
+    const agents = yield* Agent.Service
+    const sessions = yield* Session.Service
+
+    return {
+      description:
+        "Declare that the current request is ordinary single-Session work and does not need a persistent Contract. Use only when there is no future trigger, asynchronous work, durable follow-up, or evidence-gated completion.",
+      parameters: ContinueParameters,
+      execute: (input, ctx) =>
+        Effect.gen(function* () {
+          const agent = yield* agents.get(ctx.agent)
+          if (!agent || agent.mode !== "primary")
+            return yield* Effect.die("Only a primary agent may decide Contract formation")
+          const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
+          yield* sessions.setMetadata({
+            sessionID: session.id,
+            metadata: { ...session.metadata, [formationMetadataKey]: "ordinary" },
+          })
+          return {
+            title: "Continuing without Contract",
+            output: `Formation decision recorded: ${input.reason}`,
+            metadata: {},
           }
         }),
     }

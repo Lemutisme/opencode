@@ -137,6 +137,10 @@ durable-follow-up, or evidence-gated work, the model can call
 `contract_propose`. OpenCode displays the exact goal, authority, budget,
 dependencies, evidence policy, and `specHash`.
 
+Primary Sessions must record formation before their first effectful tool. For
+ordinary single-Session work the model calls `contract_continue` with a reason;
+read-only exploration is allowed before this decision.
+
 The human choices are:
 
 ```text

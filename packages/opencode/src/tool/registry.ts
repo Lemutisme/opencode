@@ -56,7 +56,9 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
-import { ContractProposeTool } from "./contract-propose"
+import { ContractContinueTool, ContractProposeTool, formationMetadataKey } from "./contract-propose"
+
+const formationGatedTools = new Set(["apply_patch", "bash", "edit", "task", "webfetch", "websearch", "write"])
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return providerID === ProviderV2.ID.opencode || flags.exa || flags.parallel
@@ -92,6 +94,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const plugin = yield* Plugin.Service
     const agents = yield* Agent.Service
+    const sessions = yield* Session.Service
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
     const mcp = yield* MCP.Service
@@ -113,6 +116,7 @@ const layer = Layer.effect(
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
     const contractPropose = yield* ContractProposeTool
+    const contractContinue = yield* ContractContinueTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -219,6 +223,7 @@ const layer = Layer.effect(
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
           contractPropose: Tool.init(contractPropose),
+          contractContinue: Tool.init(contractContinue),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -231,6 +236,7 @@ const layer = Layer.effect(
           builtin: [
             tool.invalid,
             tool.contractPropose,
+            tool.contractContinue,
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
             tool.read,
@@ -332,7 +338,22 @@ const layer = Layer.effect(
               .join("\n"),
             parameters: output.parameters,
             jsonSchema,
-            execute: tool.execute,
+            execute:
+              input.agent.mode === "primary" && formationGatedTools.has(tool.id)
+                ? (args: unknown, ctx: Tool.Context) =>
+                    sessions.get(ctx.sessionID).pipe(
+                      Effect.orDie,
+                      Effect.flatMap((session) => {
+                        const decision = session.metadata?.[formationMetadataKey]
+                        if (decision === "ordinary") return tool.execute(args, ctx)
+                        if (decision === "contract")
+                          return Effect.die("This obligation moved to a dedicated Contract Session")
+                        return Effect.die(
+                          "Decide Contract formation before effectful work: call contract_propose for future-triggered, asynchronous, durable, or evidence-gated work; otherwise call contract_continue.",
+                        )
+                      }),
+                    )
+                : tool.execute,
             formatValidationError: tool.formatValidationError,
           }
         }),
