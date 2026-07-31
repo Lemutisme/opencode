@@ -27,7 +27,7 @@ const layer = Layer.effectDiscard(
       .register({
         contract_propose: Tool.make({
           description:
-            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. When unsure, propose. The exact draft requires principal approval before it is issued.",
+            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. budget.deadline must be a future Unix timestamp in milliseconds, not a duration. When unsure, propose. The exact draft requires principal approval before it is issued.",
           input: Schema.Struct({ spec: ProContract.Spec }),
           output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
           toModelOutput: ({ output }) => [
@@ -42,6 +42,11 @@ const layer = Layer.effectDiscard(
               if (!session) return yield* new ToolFailure({ message: "Session not found" })
               if (!session.model)
                 return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
+              const now = yield* Clock.currentTimeMillis
+              if (input.spec.budget.deadline <= now)
+                return yield* new ToolFailure({
+                  message: "Contract deadline must be a future Unix timestamp in milliseconds",
+                })
               const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
               const contractID = ProContract.ID.make(`pct_${key}`)
               const specHash = ProContract.hashSpec(input.spec)
@@ -75,7 +80,7 @@ const layer = Layer.effectDiscard(
                 spec: input.spec,
                 location: session.location,
                 model: session.model,
-                now: yield* Clock.currentTimeMillis,
+                now,
               })
               if (issued.decision.type === "rejected")
                 return yield* new ToolFailure({ message: issued.decision.reason })

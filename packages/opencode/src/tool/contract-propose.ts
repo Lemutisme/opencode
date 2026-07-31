@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. When unsure, propose. The exact draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. budget.deadline must be a future Unix timestamp in milliseconds, not a duration. When unsure, propose. The exact draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -38,6 +38,9 @@ export const ContractProposeTool = Tool.define<
             return yield* Effect.die("Only a primary agent may propose a Contract")
           const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
+          const now = yield* Clock.currentTimeMillis
+          if (input.spec.budget.deadline <= now)
+            return yield* Effect.die("Contract deadline must be a future Unix timestamp in milliseconds")
           const key = Hash.sha256(`${ctx.sessionID}:${ctx.messageID}:${ctx.callID ?? ""}`)
           const contractID = ProContract.ID.make(`pct_${key}`)
           const specHash = ProContract.hashSpec(input.spec)
@@ -72,7 +75,7 @@ export const ContractProposeTool = Tool.define<
               providerID: session.model.providerID,
               variant: session.model.variant ? ModelV2.VariantID.make(session.model.variant) : undefined,
             }),
-            now: yield* Clock.currentTimeMillis,
+            now,
           })
           if (issued.decision.type === "rejected") return yield* Effect.die(issued.decision.reason)
           if (!issued.execution) return yield* Effect.die("Contract execution was not created")
@@ -112,6 +115,8 @@ export const ContractContinueTool = Tool.define<
           if (!agent || agent.mode !== "primary")
             return yield* Effect.die("Only a primary agent may decide Contract formation")
           const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
+          if (session.metadata?.[formationMetadataKey] === "contract")
+            return yield* Effect.die("A signed Contract cannot be replaced by an ordinary-work decision")
           yield* sessions.setMetadata({
             sessionID: session.id,
             metadata: { ...session.metadata, [formationMetadataKey]: "ordinary" },

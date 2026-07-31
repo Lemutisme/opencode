@@ -199,6 +199,10 @@ describe("tool.registry", () => {
       yield* continuation.execute({ reason: "This is a local one-step check" }, context)
       expect((yield* sessions.get(session.id)).metadata?.procontractFormation).toBe("ordinary")
       expect((yield* bash.execute({ command: "true" }, context).pipe(Effect.exit))._tag).toBe("Success")
+
+      yield* sessions.setMetadata({ sessionID: session.id, metadata: { procontractFormation: "contract" } })
+      expect((yield* continuation.execute({ reason: "Take it back" }, context).pipe(Effect.exit))._tag).toBe("Failure")
+      expect((yield* sessions.get(session.id)).metadata?.procontractFormation).toBe("contract")
     }),
   )
 
