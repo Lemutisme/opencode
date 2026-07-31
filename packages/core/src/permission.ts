@@ -10,6 +10,8 @@ import { SessionV2 } from "./session"
 import { SessionStore } from "./session/store"
 import { Wildcard } from "./util/wildcard"
 import { PermissionSaved } from "./permission/saved"
+import { ProContract } from "./pro-contract"
+import { ProContractOpenCode } from "./pro-contract/open-code"
 
 export { Effect, Rule, Ruleset } from "@opencode-ai/schema/permission"
 const missingAgentPermissions: Permission.Ruleset = [{ action: "*", resource: "*", effect: "deny" }]
@@ -114,6 +116,8 @@ const layer = Layer.effect(
     const agents = yield* AgentV2.Service
     const sessions = yield* SessionStore.Service
     const saved = yield* PermissionSaved.Service
+    const contracts = yield* ProContract.Service
+    const bindings = yield* ProContractOpenCode.Service
     const pending = new Map<ID, Pending>()
 
     yield* EffectRuntime.addFinalizer(() =>
@@ -141,7 +145,13 @@ const layer = Layer.effect(
       const session = yield* sessions.get(sessionID)
       if (!session) return yield* new SessionV2.NotFoundError({ sessionID })
       const agent = yield* agents.resolve(agentID ?? session.agent)
-      return agent?.permissions ?? missingAgentPermissions
+      const rules = agent?.permissions ?? missingAgentPermissions
+      const binding = yield* bindings.forSession(sessionID)
+      if (!binding?.dispatched) return rules
+      const contract = yield* contracts.get(binding.contractID)
+      if (contract?.status !== "active" || contract.revision !== binding.revision) return rules
+      if (!contract.spec.authority.some((capability) => capability.startsWith("filesystem."))) return rules
+      return [...rules, { action: "external_directory", resource: "*", effect: "allow" as const }]
     })
 
     function denied(input: AssertInput, rules: Permission.Ruleset) {
@@ -306,5 +316,13 @@ export const locationLayer = layer.pipe(Layer.provideMerge(AgentV2.locationLayer
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [EventV2.node, Location.node, AgentV2.node, SessionStore.node, PermissionSaved.node],
+  deps: [
+    EventV2.node,
+    Location.node,
+    AgentV2.node,
+    SessionStore.node,
+    PermissionSaved.node,
+    ProContract.node,
+    ProContractOpenCode.node,
+  ],
 })

@@ -9,6 +9,10 @@ import { Location } from "@opencode-ai/core/location"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { PermissionTable } from "@opencode-ai/core/permission/sql"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProContract } from "@opencode-ai/core/pro-contract"
+import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -31,6 +35,8 @@ const it = testEffect(
       SessionStore.node,
       PermissionSaved.node,
       AgentV2.node,
+      ProContract.node,
+      ProContractOpenCode.node,
       PermissionV2.node,
     ]),
     [[Location.node, current]],
@@ -165,6 +171,52 @@ describe("PermissionV2", () => {
       expect(
         yield* service.ask(assertion({ action: "external_directory", resources: ["/tmp/tool-output/*"] })),
       ).toMatchObject({ effect: "deny" })
+    }),
+  )
+
+  it.effect("honors Contract filesystem authority at the effect point", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "external_directory", resource: "*", effect: "ask" }])
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const now = Date.now()
+      const contractID = ProContract.ID.make("pct_permission")
+      yield* bindings.issue({
+        id: contractID,
+        scope: "permission",
+        spec: ProContract.defaultSpec("Read external data", now),
+        location: { directory: AbsolutePath.make("/project") },
+        model: ModelV2.Ref.make({ id: ModelV2.ID.make("test"), providerID: ProviderV2.ID.make("test") }),
+        now,
+      })
+      yield* contracts.activate(contractID, 1, now)
+      const binding = yield* bindings.claim(contractID, now)
+      if (!binding) return yield* Effect.die("Contract binding was not created")
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: binding.sessionID,
+          project_id: Project.ID.global,
+          slug: "contract",
+          directory: "/project",
+          title: "contract",
+          version: "test",
+          agent: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const service = yield* PermissionV2.Service
+      expect(
+        yield* service.ask(
+          assertion({
+            sessionID: binding.sessionID,
+            action: "external_directory",
+            resources: ["/home/data/*"],
+          }),
+        ),
+      ).toMatchObject({ effect: "allow" })
     }),
   )
 

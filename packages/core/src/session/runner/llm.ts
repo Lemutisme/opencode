@@ -240,6 +240,7 @@ const layer = Layer.effect(
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
+      const authority = contract?.status === "active" ? contract.spec.authority : []
       const contractPermissions = contractBinding
         ? [
             { action: "*", resource: "*", effect: "deny" as const },
@@ -247,17 +248,17 @@ const layer = Layer.effect(
             { action: "contract_report_blocked", resource: "*", effect: "allow" as const },
             { action: "contract_propose_revision", resource: "*", effect: "allow" as const },
             { action: "todowrite", resource: "*", effect: "allow" as const },
-            ...(contract?.status === "active" && contract.spec.authority.includes("filesystem.read")
+            ...(authority.includes("filesystem.read")
               ? [
                   { action: "read", resource: "*", effect: "allow" as const },
                   { action: "glob", resource: "*", effect: "allow" as const },
                   { action: "grep", resource: "*", effect: "allow" as const },
                 ]
               : []),
-            ...(contract?.status === "active" && contract.spec.authority.includes("filesystem.write")
+            ...(authority.includes("filesystem.write")
               ? [{ action: "edit", resource: "*", effect: "allow" as const }]
               : []),
-            ...(contract?.status === "active" && contract.spec.authority.includes("process.execute")
+            ...(authority.includes("process.execute")
               ? [{ action: "bash", resource: "*", effect: "allow" as const }]
               : []),
           ]

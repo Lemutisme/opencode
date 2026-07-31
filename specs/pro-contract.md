@@ -643,6 +643,11 @@ Its current process-local wake and background-job mechanisms do not provide
 wall-clock liveness, and unrestricted shell execution cannot express a strong
 delegation boundary.
 
+The current filesystem capabilities are global, not path-scoped. The adapter
+therefore authorizes the existing external-directory fence with filesystem
+read or write; otherwise the approved capability would be unusable outside the
+Session directory.
+
 The intended flow is:
 
 ```text
