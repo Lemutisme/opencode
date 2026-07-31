@@ -388,7 +388,7 @@ docker run -d --name "$RUN_ID" \
   -v "$MLE_DATA/$COMP/prepared/private:/private/data/$COMP/prepared/private:ro" \
   -v "$RUN_DIR/submission:/home/submission" \
   -v "$RUN_DIR/logs:/home/logs" \
-  -v "$RUN_DIR/state:/home/nonroot/.local/share/opencode" \
+  -v "$RUN_DIR/state:/opencode-state" \
   -v "$OPENCODE_LINUX_X64:/usr/local/bin/opencode:ro" \
   mlebench-env
 ```
@@ -399,15 +399,28 @@ agent in the same container:
 ```bash
 until docker exec "$RUN_ID" curl -fsS http://localhost:5000/health >/dev/null; do sleep 1; done
 
-# ProContract handoff snapshots the entire candidate Location, including the
-# later /home/submission artifact. Initialize it before OpenCode discovers it.
-docker exec -u nonroot -w /home "$RUN_ID" git init
-docker exec -u nonroot -w /home "$RUN_ID" git config user.email benchmark@localhost
-docker exec -u nonroot -w /home "$RUN_ID" git config user.name "MLE-bench"
-docker exec -u nonroot -w /home "$RUN_ID" git add instructions.txt data
-docker exec -u nonroot -w /home "$RUN_ID" git commit -m "Initialize public benchmark input"
+# ProContract snapshots the candidate Location including /home/submission.
+# Keep OpenCode control-plane state outside that tree.
+docker exec "$RUN_ID" sh -c \
+  'mkdir -p /opencode-cache /opencode-runtime-state && chmod -R 777 /opencode-state /opencode-cache /opencode-runtime-state'
+docker exec -u nonroot -e HOME=/home/nonroot "$RUN_ID" git config --global --add safe.directory /home
+docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" git init
+docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" git config user.email benchmark@localhost
+docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" git config user.name "MLE-bench"
+docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" \
+  git add instructions.txt instructions_obfuscated.txt validate_submission.sh data
+docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" \
+  git commit -m "Initialize public benchmark input"
+docker exec -u nonroot -w /home "$RUN_ID" sh -c \
+  'printf "/nonroot/\n/logs/\n/cache/\n" >> .git/info/exclude'
 
-docker exec -d -u nonroot -w /home "$RUN_ID" \
+docker exec -d -u nonroot -w /home \
+  -e HOME=/home/nonroot \
+  -e XDG_DATA_HOME=/opencode-state \
+  -e XDG_CACHE_HOME=/opencode-cache \
+  -e XDG_STATE_HOME=/opencode-runtime-state \
+  -e PATH=/opt/conda/envs/agent/bin:/usr/local/bin:/usr/bin:/bin \
+  "$RUN_ID" \
   /usr/local/bin/opencode serve --hostname 0.0.0.0 --port 4096
 
 until curl -fsS http://127.0.0.1:4096/api/contract >/dev/null; do sleep 1; done
