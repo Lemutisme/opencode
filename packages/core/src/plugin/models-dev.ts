@@ -79,17 +79,19 @@ function applyModel(
   input: {
     readonly name?: string
     readonly cost?: ModelV2Info["cost"]
+    readonly package?: string
     readonly request?: NonNullable<NonNullable<ModelsDev.Model["experimental"]>["modes"]>[string]["provider"]
   } = {},
 ) {
   draft.name = input.name ?? model.name
   draft.family = model.family
-  draft.api = model.provider?.npm
+  const npm = model.provider?.npm ?? input.package
+  draft.api = npm
     ? {
         id: model.id,
         type: "aisdk",
-        package: model.provider.npm,
-        url: model.provider.api,
+        package: npm,
+        url: model.provider?.api,
       }
     : {
         id: model.id,
@@ -102,7 +104,19 @@ function applyModel(
     input: [...(model.modalities?.input ?? [])],
     output: [...(model.modalities?.output ?? [])],
   }
-  draft.variants = []
+  const effort = model.reasoning_options?.find((option) => option.type === "effort")
+  const api = draft.api.type === "aisdk" ? draft.api.package : undefined
+  draft.variants =
+    effort && (api === "@ai-sdk/openai" || api === "@ai-sdk/openai-compatible")
+      ? effort.values.map((value) => {
+          const id = value ?? "none"
+          const body =
+            api === "@ai-sdk/openai"
+              ? { reasoning: { effort: id, summary: "auto" } }
+              : { reasoning_effort: id }
+          return { id, headers: {}, body }
+        })
+      : []
   draft.time.released = released(model.release_date)
   draft.cost = input.cost ?? cost(model.cost)
   draft.status = model.status ?? "active"
@@ -161,12 +175,15 @@ export const ModelsDevPlugin = define({
 
           for (const model of Object.values(item.models)) {
             const baseCost = cost(model.cost)
-            catalog.model.update(providerID, model.id, (draft) => applyModel(draft, model, { cost: baseCost }))
+            catalog.model.update(providerID, model.id, (draft) =>
+              applyModel(draft, model, { cost: baseCost, package: item.npm }),
+            )
             for (const [mode, options] of Object.entries(model.experimental?.modes ?? {})) {
               catalog.model.update(providerID, `${model.id}-${mode}`, (draft) =>
                 applyModel(draft, model, {
                   name: modeName(model, mode),
                   cost: mergeCost(baseCost, options.cost),
+                  package: item.npm,
                   request: options.provider,
                 }),
               )

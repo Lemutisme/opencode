@@ -27,7 +27,7 @@ const layer = AppNodeBuilder.build(LayerNode.group([Catalog.node, Integration.no
 const it = testEffect(layer)
 
 describe("ModelsDevPlugin", () => {
-  it.effect("projects models.dev modes as separate models instead of variants", () =>
+  it.effect("projects models.dev modes and effort variants", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
       const catalog = yield* Catalog.Service
@@ -38,7 +38,7 @@ describe("ModelsDevPlugin", () => {
               id: "acme",
               name: "Acme",
               env: [],
-              npm: "@ai-sdk/openai-compatible",
+              npm: "@ai-sdk/openai",
               api: "https://api.acme.test/v1",
               models: {
                 "gpt-5.4": {
@@ -50,6 +50,7 @@ describe("ModelsDevPlugin", () => {
                   reasoning: true,
                   temperature: true,
                   tool_call: true,
+                  reasoning_options: [{ type: "effort", values: ["low", "max"] }],
                   cost: {
                     input: 2.5,
                     output: 15,
@@ -93,7 +94,18 @@ describe("ModelsDevPlugin", () => {
       const base = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4"))
       const fast = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4-fast"))
 
-      expect(base?.variants).toEqual([])
+      expect(base?.variants).toEqual([
+        {
+          id: ModelV2.VariantID.make("low"),
+          headers: {},
+          body: { reasoning: { effort: "low", summary: "auto" } },
+        },
+        {
+          id: ModelV2.VariantID.make("max"),
+          headers: {},
+          body: { reasoning: { effort: "max", summary: "auto" } },
+        },
+      ])
       expect(base?.request.body).toEqual({})
       expect(fast).toMatchObject({
         id: "gpt-5.4-fast",
@@ -104,7 +116,10 @@ describe("ModelsDevPlugin", () => {
           headers: { "x-mode": "fast" },
           body: { service_tier: "priority" },
         },
-        variants: [],
+        variants: [
+          { id: "low", headers: {}, body: { reasoning: { effort: "low", summary: "auto" } } },
+          { id: "max", headers: {}, body: { reasoning: { effort: "max", summary: "auto" } } },
+        ],
       })
       expect(fast?.cost).toEqual([
         { input: 5, output: 30, cache: { read: 0.5, write: 0 } },
