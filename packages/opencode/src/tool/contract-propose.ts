@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. budget.deadline must be a future Unix timestamp in milliseconds, not a duration. When unsure, propose. The exact draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. budget.deadline is a Unix timestamp in milliseconds; past values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -39,15 +39,17 @@ export const ContractProposeTool = Tool.define<
           const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
-          if (input.spec.budget.deadline <= now)
-            return yield* Effect.die("Contract deadline must be a future Unix timestamp in milliseconds")
+          const draft =
+            input.spec.budget.deadline > now
+              ? input.spec
+              : { ...input.spec, budget: { ...input.spec.budget, deadline: now + 24 * 60 * 60 * 1_000 } }
           const request = ctx.messages
             .findLast((item) => item.info.role === "user")
             ?.parts.flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
             .join("\n")
           const spec = request
-            ? { ...input.spec, brief: [input.spec.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n") }
-            : input.spec
+            ? { ...draft, brief: [draft.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n") }
+            : draft
           const key = Hash.sha256(`${ctx.sessionID}:${ctx.messageID}:${ctx.callID ?? ""}`)
           const contractID = ProContract.ID.make(`pct_${key}`)
           const specHash = ProContract.hashSpec(spec)

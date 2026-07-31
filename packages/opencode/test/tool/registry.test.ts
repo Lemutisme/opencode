@@ -134,8 +134,8 @@ describe("tool.registry", () => {
         model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") },
       })
       expect((yield* sessions.get(session.id)).id).toBe(session.id)
-      const proposal = ProContract.defaultSpec("Continue after this Session", Date.now())
-      const approved = { ...proposal, brief: "Original request:\nUse the prepared data at /home/data" }
+      const defaults = ProContract.defaultSpec("Continue after this Session", Date.now())
+      const proposal = { ...defaults, budget: { ...defaults.budget, deadline: 1 } }
       const tool =
         (yield* registry.all()).find((item) => item.id === "contract_propose") ??
         (yield* Effect.die("contract_propose not found"))
@@ -160,8 +160,11 @@ describe("tool.registry", () => {
         },
       )
 
-      expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(approved)] }])
-      expect(yield* contracts.get(result.metadata.contractID)).toMatchObject({ spec: approved })
+      const contract = yield* contracts.get(result.metadata.contractID)
+      if (!contract) return yield* Effect.die("Contract was not issued")
+      expect(contract.spec.brief).toBe("Original request:\nUse the prepared data at /home/data")
+      expect(contract.spec.budget.deadline).toBeGreaterThan(Date.now())
+      expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec)] }])
       expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({
         sessionID: result.metadata.sessionID,
         model: { id: "test", providerID: "test" },

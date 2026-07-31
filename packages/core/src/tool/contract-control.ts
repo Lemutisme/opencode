@@ -27,7 +27,7 @@ const layer = Layer.effectDiscard(
       .register({
         contract_propose: Tool.make({
           description:
-            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. budget.deadline must be a future Unix timestamp in milliseconds, not a duration. When unsure, propose. The exact draft requires principal approval before it is issued.",
+            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. budget.deadline is a Unix timestamp in milliseconds; past values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
           input: Schema.Struct({ spec: ProContract.Spec }),
           output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
           toModelOutput: ({ output }) => [
@@ -43,18 +43,18 @@ const layer = Layer.effectDiscard(
               if (!session.model)
                 return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
               const now = yield* Clock.currentTimeMillis
-              if (input.spec.budget.deadline <= now)
-                return yield* new ToolFailure({
-                  message: "Contract deadline must be a future Unix timestamp in milliseconds",
-                })
+              const draft =
+                input.spec.budget.deadline > now
+                  ? input.spec
+                  : { ...input.spec, budget: { ...input.spec.budget, deadline: now + 24 * 60 * 60 * 1_000 } }
               const request = (yield* sessions.context(context.sessionID)).findLast((item) => item.type === "user")
                 ?.text
               const spec = request
                 ? {
-                    ...input.spec,
-                    brief: [input.spec.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
+                    ...draft,
+                    brief: [draft.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
                   }
-                : input.spec
+                : draft
               const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
               const contractID = ProContract.ID.make(`pct_${key}`)
               const specHash = ProContract.hashSpec(spec)
