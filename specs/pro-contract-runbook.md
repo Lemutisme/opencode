@@ -288,6 +288,66 @@ curl -fsS -X POST \
 For holdout or official-test failures, use `disclosure: "sealed"`, omit
 `summary`, and do not continue adaptive evaluation against the same holdout.
 
+### 4.6 Automatic verifier adapter
+
+Automatic verification belongs to the task adapter, not the Contract kernel.
+Run the adapter as a supervised process that repeatedly:
+
+```text
+GET contracts in verification
+  -> fetch the exact revision, specHash, subjectHash, and execution binding
+  -> run the preregistered verifier policy
+  -> persist and hash a finite verifier report
+  -> POST attestation or subject-bound challenge
+```
+
+An adapter may use a simple polling loop around the existing API:
+
+```bash
+while sleep 1; do
+  curl -fsS "$API/api/contract" |
+    jq -r '.data[] | select(.status == "verification") | .id'
+done | while read -r CONTRACT_ID; do
+  "$VERIFIER" "$API" "$CONTRACT_ID"
+done
+```
+
+`VERIFIER` owns task-specific artifact access and evaluation. It must skip a
+Contract that is no longer in `verification`, bind every result to the current
+subject, and never expose sealed holdout feedback to an executor. The executor
+does not receive principal mutation routes.
+
+### 4.7 V2 no-Contract control
+
+Use the same SessionV2 runner for causal evaluation. The control Session has no
+Contract binding and therefore receives no privileged `<pro_contract>` System
+Context or Contract reporting authority. An evaluation-only agent/config may
+hide `contract_propose`; do not add a production feature flag solely for a
+benchmark. Comparing a legacy Session against a V2 Contract Session confounds
+Contract semantics with runner differences.
+
+### 4.8 Durable service and authority topology
+
+`opencode serve` is the OpenCode-specific Contract daemon: run it under
+launchd, systemd, Docker, or another supervisor with durable `XDG_DATA_HOME`.
+Do not add a second scheduler process. External trigger providers wake the
+plane through its API; a trigger may create attention but cannot grant effect
+authority.
+
+Treat the Contract Location as the capability boundary:
+
+```text
+read-only task inputs   -> mounted inside Location
+writable candidate     -> mounted inside Location
+OpenCode state/cache   -> outside Location
+credentials            -> outside Location
+authoritative promotion-> separate verifier/principal service
+```
+
+Filesystem capabilities expose tools inside the Location. External paths still
+require the existing permission fence; adapters should not compensate with a
+global external-directory allow rule.
+
 ## 5. MLE-bench: one CPU-friendly instance
 
 The recommended local smoke instance is:

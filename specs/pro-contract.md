@@ -408,6 +408,12 @@ This separation lets ProContract remain general. ProgramBench concepts,
 repository-specific probes, and evaluator containers may validate an adapter,
 but they cannot become hidden requirements of the core protocol.
 
+Automatic verifier consumers, no-Contract controls, daemon supervision, and
+sandbox topology remain adapter or evaluation concerns. OpenCode already
+provides their required surfaces through verification HTTP routes, SessionV2,
+`opencode serve`, Location, ProjectCopy, permissions, and snapshots; ProContract
+does not duplicate those mechanisms in its normative kernel.
+
 ## Epistemic support
 
 Institutional history, justifications, and current knowledge are different:

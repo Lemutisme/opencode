@@ -628,6 +628,7 @@ describe("SessionRunnerLLM", () => {
       const message = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Run automatically" }) })
 
       expect(requests).toHaveLength(1)
+      expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain("<pro_contract")
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
       ])
