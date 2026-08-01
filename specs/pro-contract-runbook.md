@@ -605,6 +605,10 @@ or otherwise prove that shell commands cannot use inference egress.
 
 Submit the original task once:
 
+Every ProgramBench artifact is evaluated after the Session, so its adapter must
+set the existing `contract_continue` permission to `deny`. Interactive OpenCode
+keeps the default `ask`; do not encode this benchmark policy in Contract Core.
+
 ```bash
 "$OPENCODE_BIN" run \
   --attach http://127.0.0.1:4096 \
