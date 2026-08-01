@@ -132,6 +132,7 @@ it.live("tool execution produces non-empty session diff (snapshot race)", () =>
 
       const session = yield* sessions.create({
         title: "snapshot race test",
+        metadata: { procontractFormation: "ordinary" },
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
 

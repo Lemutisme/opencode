@@ -1925,6 +1925,7 @@ unix(
       const sessions = yield* Session.Service
       const chat = yield* sessions.create({
         title: "Interrupted bash truncation",
+        metadata: { procontractFormation: "ordinary" },
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
 
