@@ -245,18 +245,22 @@ describe("opencode run (non-interactive subprocess)", () => {
     "rejects requested permissions by default and allows them with the dangerous flag",
     ({ home, llm, opencode }) =>
       Effect.gen(function* () {
+        yield* llm.tool("contract_continue", { reason: "This test completes in one Session" })
         yield* llm.tool("bash", { command: "rm -f denied-file", description: "Remove a test file" })
         yield* llm.text("continued after rejection")
-        const denied = yield* opencode.run("request permission", { permission: { bash: "ask" } })
+        const denied = yield* opencode.run("request permission", {
+          permission: { contract_continue: "allow", bash: "ask" },
+        })
         opencode.expectExit(denied, 0)
         expect(denied.stderr).toContain("permission requested: bash")
         expect(denied.stdout).toBe("")
 
         yield* llm.reset
+        yield* llm.tool("contract_continue", { reason: "This test completes in one Session" })
         yield* llm.tool("bash", { command: "rm -f allowed-file", description: "Remove a test file" })
         yield* llm.text("continued after approval")
         const allowed = yield* opencode.run("request permission", {
-          permission: { bash: "ask" },
+          permission: { contract_continue: "allow", bash: "ask" },
           extraArgs: ["--dangerously-skip-permissions"],
         })
         opencode.expectExit(allowed, 0)
@@ -264,10 +268,11 @@ describe("opencode run (non-interactive subprocess)", () => {
         expect(allowed.stdout).toContain("continued after approval")
 
         yield* llm.reset
+        yield* llm.tool("contract_continue", { reason: "This test completes in one Session" })
         yield* llm.tool("bash", { command: "touch explicitly-denied", description: "Create a denied marker" })
         yield* llm.text("continued after explicit denial")
         const explicitlyDenied = yield* opencode.run("request denied permission", {
-          permission: { bash: "deny" },
+          permission: { contract_continue: "allow", bash: "deny" },
           extraArgs: ["--dangerously-skip-permissions"],
         })
         opencode.expectExit(explicitlyDenied, 0)
