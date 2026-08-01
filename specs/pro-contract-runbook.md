@@ -334,6 +334,12 @@ Do not add a second scheduler process. External trigger providers wake the
 plane through its API; a trigger may create attention but cannot grant effect
 authority.
 
+The supervisor must probe `/global/health`; a live PID is not evidence that the
+event loop can still renew leases. Restart the same command with the same
+durable state after repeated probe failures. In Docker, use `--init` so finished
+tool processes are reaped. A restart policy alone does not react to an unhealthy
+but still-running process.
+
 Treat the Contract Location as the capability boundary:
 
 ```text
@@ -567,7 +573,7 @@ mkdir -p "$WORKSPACE" "$RUN_DIR/state" "$RUN_DIR/logs"
 docker run --rm --platform linux/amd64 \
   -v "$WORKSPACE:/candidate" \
   "$IMAGE" \
-  bash -lc 'cp -a /workspace/. /candidate/ && mv /candidate/executable /candidate/reference'
+  bash -lc 'cp -a /workspace/. /candidate/ && unlink /candidate/executable'
 ```
 
 Start a persistent OpenCode server in the cleanroom image:
@@ -575,15 +581,21 @@ Start a persistent OpenCode server in the cleanroom image:
 ```bash
 docker run -d --name "$RUN_ID" \
   --platform linux/amd64 \
+  --init \
+  --user agent \
   -p 127.0.0.1:4096:4096 \
+  -e HOME=/home/agent \
   -e OPENAI_API_KEY \
+  -e XDG_DATA_HOME=/opencode-state \
+  -e XDG_CACHE_HOME=/tmp/opencode-cache \
+  -e XDG_STATE_HOME=/tmp/opencode-runtime-state \
   -v "$WORKSPACE:/candidate" \
-  -v "$RUN_DIR/state:/root/.local/share/opencode" \
+  -v "$RUN_DIR/state:/opencode-state" \
   -v "$OPENCODE_LINUX_X64:/usr/local/bin/opencode:ro" \
   -w /candidate \
-  --entrypoint /usr/local/bin/opencode \
+  --entrypoint /bin/sh \
   "$IMAGE" \
-  serve --hostname 0.0.0.0 --port 4096
+  -lc 'ln -sfn /workspace/executable /candidate/reference && exec /usr/local/bin/opencode serve --hostname 0.0.0.0 --port 4096'
 ```
 
 This convenient local layout gives the OpenCode provider client and executor
