@@ -13,6 +13,7 @@ import { Credential } from "../../credential"
 import { Integration } from "../../integration"
 import { ModelV2 } from "../../model"
 import { PluginInternal } from "../../plugin/internal"
+import { SessionMessage } from "../message"
 import { ProviderV2 } from "../../provider"
 import { SessionSchema } from "../schema"
 
@@ -74,12 +75,35 @@ export type Error =
 
 export interface Interface {
   readonly resolve: (session: SessionSchema.Info) => Effect.Effect<Model, Error>
+  readonly cost: (
+    session: SessionSchema.Info,
+    tokens: NonNullable<SessionMessage.Assistant["tokens"]>,
+  ) => Effect.Effect<number>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SessionRunnerModel") {}
 
 /** Test or embedding seam for supplying a model resolver directly. */
-export const layerWith = (resolve: Interface["resolve"]) => Layer.succeed(Service, Service.of({ resolve }))
+export const layerWith = (resolve: Interface["resolve"]) =>
+  Layer.succeed(Service, Service.of({ resolve, cost: () => Effect.succeed(0) }))
+
+export const calculateCost = (
+  prices: ModelV2.Info["cost"],
+  tokens: NonNullable<SessionMessage.Assistant["tokens"]>,
+) => {
+  const context = tokens.input + tokens.cache.read + tokens.cache.write
+  const price = prices
+    .filter((item) => item.tier === undefined || context > item.tier.size)
+    .toSorted((a, b) => (b.tier?.size ?? -1) - (a.tier?.size ?? -1))[0]
+  if (!price) return 0
+  const value =
+    (tokens.input * price.input +
+      (tokens.output + tokens.reasoning) * price.output +
+      tokens.cache.read * price.cache.read +
+      tokens.cache.write * price.cache.write) /
+    1_000_000
+  return Number.isFinite(value) ? Math.max(0, value) : 0
+}
 
 const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (credential?.type === "key") return Auth.value(credential.key)
@@ -187,6 +211,12 @@ export const locationLayer = Layer.effect(
     const integrations = yield* Integration.Service
     const internal = yield* PluginInternal.Service
     return Service.of({
+      cost: Effect.fn("SessionRunnerModel.cost")(function* (session, tokens) {
+        if (!session.model) return 0
+        yield* internal.wait
+        const model = yield* catalog.model.get(session.model.providerID, session.model.id)
+        return calculateCost(model?.cost ?? [], tokens)
+      }),
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         yield* internal.wait
         const defaultModel = session.model ? undefined : yield* catalog.model.default()

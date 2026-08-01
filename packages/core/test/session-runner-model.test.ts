@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { LLM } from "@opencode-ai/llm"
 import { LLMClient } from "@opencode-ai/llm/route"
 import { DateTime, Effect } from "effect"
@@ -42,6 +42,17 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
   })
 
 describe("SessionRunnerModel", () => {
+  test("calculates context-tiered model cost", () => {
+    const cost = SessionRunnerModel.calculateCost(
+      [
+        { input: 1, output: 2, cache: { read: 0.1, write: 1 } },
+        { tier: { type: "context", size: 100 }, input: 10, output: 20, cache: { read: 1, write: 10 } },
+      ],
+      { input: 60, output: 20, reasoning: 5, cache: { read: 50, write: 0 } },
+    )
+    expect(cost).toBe(0.00115)
+  })
+
   it.effect("maps catalog OpenAI AI SDK models into native Responses routes", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(

@@ -442,7 +442,7 @@ const layer = Layer.effect(
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
                 finish: stepSettlement.finish,
-                cost: 0,
+                cost: yield* models.cost(session, stepSettlement.tokens),
                 tokens: stepSettlement.tokens,
                 snapshot: endSnapshot,
                 files,
