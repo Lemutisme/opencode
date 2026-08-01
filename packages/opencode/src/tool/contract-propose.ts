@@ -130,6 +130,12 @@ export const ContractContinueTool = Tool.define<
           const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
           if (session.metadata?.[formationMetadataKey] === "contract")
             return yield* Effect.die("A signed Contract cannot be replaced by an ordinary-work decision")
+          yield* ctx.ask({
+            permission: "contract_continue",
+            patterns: [ctx.sessionID],
+            always: [],
+            metadata: { reason: input.reason },
+          })
           yield* sessions.setMetadata({
             sessionID: session.id,
             metadata: { ...session.metadata, [formationMetadataKey]: "ordinary" },

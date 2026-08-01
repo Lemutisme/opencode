@@ -205,7 +205,21 @@ describe("tool.registry", () => {
       expect(blocked._tag).toBe("Failure")
       if (blocked._tag === "Failure") expect(Cause.pretty(blocked.cause)).toContain("Decide Contract formation")
 
-      yield* continuation.execute({ reason: "This is a local one-step check" }, context)
+      const denied = yield* continuation
+        .execute(
+          { reason: "This is a local one-step check" },
+          { ...context, ask: () => Effect.die("permission denied") },
+        )
+        .pipe(Effect.exit)
+      expect(denied._tag).toBe("Failure")
+      expect((yield* sessions.get(session.id)).metadata?.procontractFormation).toBeUndefined()
+
+      const asked: string[] = []
+      yield* continuation.execute(
+        { reason: "This is a local one-step check" },
+        { ...context, ask: (input) => Effect.sync(() => void asked.push(input.permission)) },
+      )
+      expect(asked).toEqual(["contract_continue"])
       expect((yield* sessions.get(session.id)).metadata?.procontractFormation).toBe("ordinary")
       expect((yield* bash.execute({ command: "true" }, context).pipe(Effect.exit))._tag).toBe("Success")
 
