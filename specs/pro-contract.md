@@ -684,11 +684,12 @@ plane activates duty
   -> principal submits evidence
 ```
 
-Each contract Session is a replaceable execution venue. Provider retries reuse
-the current Session; challenges, revisions, lost leases, and execution that ends
-without handoff start a fresh semantic attempt. Deleting, reverting, compacting,
-or ending any Session cannot settle the duty. Contract authority never appears
-in model input or tool arguments.
+Each contract Session is a replaceable execution venue. Provider retries and a
+lease lost before any reserved turn or action reuse the current Session;
+challenges, revisions, started attempts with lost leases, and execution that
+ends without handoff start a fresh semantic attempt. Deleting, reverting,
+compacting, or ending any Session cannot settle the duty. Contract authority
+never appears in model input or tool arguments.
 Every new semantic attempt begins by reconciling the existing candidate state:
 it inspects and reuses valid files, artifacts, and completed checks before new
 exploration. Rotation therefore changes the executor, not ownership of work

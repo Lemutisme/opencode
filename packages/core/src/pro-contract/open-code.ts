@@ -265,11 +265,12 @@ const layer = Layer.effect(
                       row.contract.challenge?.disclosure === "executor" ||
                       row.contract.blocked !== undefined
                     : row.binding.attemptKey !== attemptKey
+                const leaseExpired = row.binding.dispatched && (row.binding.leaseExpiresAt ?? 0) <= now
                 const newAttempt =
                   row.binding.attempts === 0 ||
                   attemptChanged ||
-                  (row.binding.dispatched && (row.binding.leaseExpiresAt ?? 0) <= now)
-                if (!newAttempt && row.binding.dispatched) return {}
+                  (leaseExpired && (row.binding.turnsUsed > 0 || row.binding.actionsUsed > 0))
+                if (!newAttempt && row.binding.dispatched && !leaseExpired) return {}
                 if (!newAttempt && row.binding.nextActionAt > now) return {}
                 if (now >= row.contract.spec.budget.deadline) return {}
                 if (newAttempt && row.binding.attempts >= row.contract.spec.resolution.maxAttempts)

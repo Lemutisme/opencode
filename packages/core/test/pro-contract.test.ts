@@ -1079,6 +1079,7 @@ describe("OpenCode Contract binding", () => {
       })
       yield* contracts.activate(contractID, 1, 0)
       const first = yield* bindings.claim(contractID, 0)
+      yield* bindings.reserveTurn(first!.sessionID, 1)
       const second = yield* bindings.claim(contractID, 30_000)
       expect(second?.promptID).not.toBe(first?.promptID)
       expect(second?.sessionID).not.toBe(first?.sessionID)
@@ -1096,6 +1097,27 @@ describe("OpenCode Contract binding", () => {
         dispatched: true,
         attempts: 2,
       })
+    }),
+  )
+
+  schedulerIt.effect("reclaims a zero-work lease without consuming an attempt", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const limited = { ...spec, resolution: { ...spec.resolution, maxAttempts: 1 } }
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec: limited, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const first = yield* bindings.claim(contractID, 0)
+      const reclaimed = yield* bindings.claim(contractID, 30_000)
+
+      expect(reclaimed).toMatchObject({ sessionID: first?.sessionID, promptID: first?.promptID, attempts: 1 })
     }),
   )
 
@@ -1193,7 +1215,8 @@ describe("OpenCode Contract binding", () => {
         nextActionAt: 0,
       })
       yield* contracts.activate(contractID, 1, 0)
-      yield* bindings.claim(contractID, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+      yield* bindings.reserveTurn(attempt!.sessionID, 1)
       yield* TestClock.setTime(30_001)
 
       yield* scheduler.runOnce()
