@@ -347,6 +347,13 @@ durable state after repeated probe failures. In Docker, use `--init` so finished
 tool processes are reaped. A restart policy alone does not react to an unhealthy
 but still-running process.
 
+The runner also enforces narrow inactivity bounds: a provider stream with no
+event for ten minutes is interrupted and retried as transport, while filesystem
+inspection inside `read` returns a tool error after one minute. Permission waits
+are outside the read timeout. Streaming provider events reset the provider
+bound, and process tools retain their own explicit timeout so long builds and
+training are not constrained by the short read policy.
+
 Treat the Contract Location as the capability boundary:
 
 ```text

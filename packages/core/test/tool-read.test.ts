@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect } from "bun:test"
 import path from "path"
-import { Effect, Exit, Layer, PlatformError } from "effect"
+import { Effect, Exit, Fiber, Layer, PlatformError } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { Config } from "@opencode-ai/core/config"
 import { ConfigAttachments } from "@opencode-ai/core/config/attachments"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -40,6 +41,7 @@ let readResult: FileSystem.Content | ReadToolFileSystem.TextPage = {
   mime: "text/plain",
 }
 let readFailure: ReadToolFileSystem.ReadError | undefined
+let readHook = Effect.void
 let configEntries: Config.Entry[] = []
 const reader = Layer.succeed(
   ReadToolFileSystem.Service,
@@ -47,8 +49,9 @@ const reader = Layer.succeed(
     inspect: () => (resolveFailure === undefined ? Effect.succeed(resolvedType) : Effect.die(resolveFailure)),
     read: (input, _resource, page = {}) => {
       readCalls.push({ input, page })
-      if (readFailure !== undefined) return Effect.fail(readFailure)
-      return Effect.succeed(readResult)
+      return readHook.pipe(
+        Effect.andThen(readFailure !== undefined ? Effect.fail(readFailure) : Effect.succeed(readResult)),
+      )
     },
     list: (_path, input = {}) =>
       Effect.sync(() => {
@@ -161,6 +164,7 @@ describe("ReadTool", () => {
       mime: "text/plain",
     }
     readFailure = undefined
+    readHook = Effect.void
     configEntries = []
   })
 
@@ -541,6 +545,22 @@ describe("ReadTool", () => {
         }),
       ).toEqual({ type: "error", value: "Unable to read README.md" })
       expect(readCalls).toEqual([])
+    }),
+  )
+
+  it.effect("times out stalled filesystem reads after permission", () =>
+    Effect.gen(function* () {
+      readHook = Effect.never
+      const registry = yield* ToolRegistry.Service
+      const result = yield* executeTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "call-stalled-read", name: "read", input: { path: "README.md" } },
+      }).pipe(Effect.forkChild)
+      while (assertions.length === 0) yield* Effect.yieldNow
+      yield* TestClock.adjust("1 minute")
+
+      expect(yield* Fiber.join(result)).toEqual({ type: "error", value: "Unable to read README.md" })
     }),
   )
 

@@ -58,6 +58,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 
@@ -3061,6 +3062,25 @@ describe("SessionRunnerLLM", () => {
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
       expect(requests).toHaveLength(1)
       yield* session.interrupt(sessionID)
+    }),
+  )
+
+  it.effect("interrupts a provider stream after ten idle minutes", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Timeout idle provider" }), resume: false })
+      requests.length = 0
+      responseStream = Stream.never
+
+      const runner = yield* SessionRunner.Service
+      const run = yield* runner.run({ sessionID, force: true }).pipe(Effect.forkChild)
+      while (requests.length === 0) yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("10 minutes")
+      const exit = yield* Fiber.await(run)
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
     }),
   )
 

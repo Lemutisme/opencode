@@ -464,6 +464,11 @@ Startup compensation reclaims expired leases and revisits overdue actions. A
 local process cannot provide wall-clock liveness while it is stopped; that
 requires a daemon or hosted plane.
 
+A heartbeat proves process-local ownership, not progress. OpenCode therefore
+bounds silent provider pulls and filesystem reads at their execution
+boundaries. These mechanical timeouts interrupt transport or return a tool
+error; they do not claim that the task is semantically blocked or settled.
+
 One failed scheduler cycle is logged and retried; it cannot silently terminate
 the process-local attention loop.
 

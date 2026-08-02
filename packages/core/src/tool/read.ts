@@ -68,7 +68,7 @@ const layer = Layer.effectDiscard(
                 })
               const resource = target.resource
               const absolute = AbsolutePath.make(target.canonical)
-              const type = yield* reader.inspect(absolute)
+              const type = yield* reader.inspect(absolute).pipe(Effect.timeout("1 minute"))
               yield* permission.assert({
                 action: name,
                 resources: [resource],
@@ -78,11 +78,15 @@ const layer = Layer.effectDiscard(
                 source,
               })
               if (type === "directory")
-                return yield* reader.list(absolute, { offset: input.offset, limit: input.limit })
-              const content = yield* reader.read(absolute, resource, {
-                offset: input.offset,
-                limit: input.limit,
-              })
+                return yield* reader
+                  .list(absolute, { offset: input.offset, limit: input.limit })
+                  .pipe(Effect.timeout("1 minute"))
+              const content = yield* reader
+                .read(absolute, resource, {
+                  offset: input.offset,
+                  limit: input.limit,
+                })
+                .pipe(Effect.timeout("1 minute"))
               if ("encoding" in content && content.encoding === "base64" && SUPPORTED_IMAGE_MIMES.has(content.mime)) {
                 return yield* image
                   .normalize(resource, { ...content, encoding: "base64" })
