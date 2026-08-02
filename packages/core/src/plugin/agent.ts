@@ -112,6 +112,7 @@ export const Plugin = define({
     const defaults: PermissionV2.Ruleset = [
       { action: "*", resource: "*", effect: "allow" },
       { action: "contract_issue", resource: "*", effect: "ask" },
+      { action: "contract_revision", resource: "*", effect: "ask" },
       { action: "contract_propose", resource: "*", effect: "deny" },
       ...readonlyExternalDirectory,
       { action: "question", resource: "*", effect: "deny" },

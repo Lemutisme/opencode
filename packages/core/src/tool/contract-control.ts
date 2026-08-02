@@ -1,7 +1,7 @@
 export * as ContractControlTools from "./contract-control"
 
 import { ToolFailure } from "@opencode-ai/llm"
-import { Clock, Effect, Layer, Schema } from "effect"
+import { Clock, Effect, Exit, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
@@ -186,13 +186,37 @@ const layer = Layer.effectDiscard(
               if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
               const contract = yield* contracts.get(binding.contractID)
               if (!contract) return yield* new ToolFailure({ message: "Contract not found" })
+              const spec = { ...contract.spec, goal: input.goal, brief: input.brief ?? contract.spec.brief }
               const receipt = yield* contracts.petitionRevision({
                 contractID: contract.id,
-                spec: { ...contract.spec, goal: input.goal, brief: input.brief ?? contract.spec.brief },
+                spec,
                 reason: input.reason,
               })
               if (receipt.decision.type === "rejected")
                 return yield* new ToolFailure({ message: receipt.decision.reason })
+              const approved = Exit.isSuccess(
+                yield* Effect.exit(
+                  permissions.assert({
+                    action: "contract_revision",
+                    resources: [ProContract.hashSpec(spec)],
+                    metadata: { contractID: contract.id, goal: input.goal, reason: input.reason },
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source: {
+                      type: "tool",
+                      messageID: context.assistantMessageID,
+                      callID: context.toolCallID,
+                    },
+                  }),
+                ),
+              )
+              const decision = yield* contracts.decideRevision({ contractID: contract.id, accept: approved })
+              if (decision.decision.type === "rejected")
+                return yield* new ToolFailure({ message: decision.decision.reason })
+              if (!approved)
+                return yield* new ToolFailure({
+                  message: "Revision rejected by the principal; the original Contract remains authoritative",
+                })
               return { recorded: true }
             }).pipe(
               Effect.mapError((error) =>

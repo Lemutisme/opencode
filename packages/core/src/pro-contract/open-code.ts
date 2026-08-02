@@ -135,7 +135,8 @@ const layer = Layer.effect(
                 row.binding.leaseOwner !== owner ||
                 (row.binding.leaseExpiresAt ?? 0) <= now ||
                 row.binding.revision !== row.contract.revision ||
-                row.contract.status !== "active"
+                row.contract.status !== "active" ||
+                row.contract.pendingRevision
               )
                 return { allowed: false }
               if (now >= row.contract.spec.budget.deadline)
@@ -249,7 +250,7 @@ const layer = Layer.effect(
                   .where(eq(ProContractOpenCodeTable.contract_id, contractID))
                   .get()
                   .pipe(Effect.orDie)
-                if (!row || row.contract.status !== "active") return {}
+                if (!row || row.contract.status !== "active" || row.contract.pendingRevision) return {}
                 // Transport retries preserve this key; authoritative context changes replace the Session.
                 const attemptKey = `${row.contract.revision}:${
                   row.contract.challenge?.disclosure === "executor"
@@ -326,6 +327,7 @@ const layer = Layer.effect(
           .filter(
             (row) =>
               row.contract.status === "active" &&
+              !row.contract.pendingRevision &&
               (row.binding.revision !== row.contract.revision ||
                 (row.contract.challenge?.disclosure === "executor" &&
                   row.binding.attemptKey !==
@@ -352,7 +354,8 @@ const layer = Layer.effect(
                       row.binding.leaseOwner === owner &&
                       sessionIDs.has(row.binding.sessionID) &&
                       row.binding.revision === row.contract.revision &&
-                      row.contract.status === "active",
+                      row.contract.status === "active" &&
+                      !row.contract.pendingRevision,
                   ),
                   (row) => {
                     const expires = Math.min(now + LEASE_MS, row.contract.spec.budget.deadline)
@@ -392,6 +395,24 @@ const layer = Layer.effect(
                   !row.binding.dispatched
                 )
                   return undefined
+                if (row.contract.pendingRevision) {
+                  yield* tx
+                    .update(ProContractOpenCodeTable)
+                    .set({
+                      data: {
+                        ...row.binding,
+                        promptID: SessionMessage.ID.create(),
+                        dispatched: false,
+                        nextActionAt: input.now,
+                        leaseOwner: undefined,
+                        leaseExpiresAt: undefined,
+                      },
+                    })
+                    .where(eq(ProContractOpenCodeTable.contract_id, input.contractID))
+                    .run()
+                    .pipe(Effect.orDie)
+                  return undefined
+                }
                 if (
                   (input.attempt === "new" && row.binding.attempts >= row.contract.spec.resolution.maxAttempts) ||
                   input.now >= row.contract.spec.budget.deadline

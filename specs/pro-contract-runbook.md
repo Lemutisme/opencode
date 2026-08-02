@@ -239,6 +239,13 @@ contract_report_blocked
 contract_propose_revision
 ```
 
+A revision petition pauses executor turns, actions, leases, and retries until
+the principal decides it through the existing permission boundary. Approval
+accepts the proposed revision; rejection keeps the original Contract and
+resumes the same semantic attempt. Headless benchmark policy should explicitly
+deny `contract_revision` unless it has a separate, trusted revision policy;
+`--auto` otherwise approves permission requests by design.
+
 Only the principal path may attest, challenge, release, decide a revision, or
 resume an escalation.
 

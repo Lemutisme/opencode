@@ -204,6 +204,11 @@ escalated    -> dormant
 
 `released` is the issuer-authorized terminal alternative. Only `active`
 authorizes executor effects; verification is a normal phase, not an escalation.
+An active Contract with a pending revision is outstanding but not
+executor-ready: the current attempt stops, leases are not renewed, and the
+petition routes to the issuer. Rejecting it resumes the same semantic attempt
+under the original revision; accepting it creates a new revision and therefore
+a new attempt.
 The database migration converts the earlier implicit escalation combinations
 once, so runtime authorization does not carry compatibility branches.
 

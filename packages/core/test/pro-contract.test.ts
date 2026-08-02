@@ -949,6 +949,51 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
+  schedulerIt.effect("pauses one attempt while the principal decides a revision", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      const binding = yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+      yield* contracts.petitionRevision({
+        contractID,
+        spec: { ...spec, goal: "Revise the verified change" },
+        reason: "The original acceptance condition is ambiguous",
+      })
+
+      yield* bindings.heartbeat(new Set([binding.sessionID]), 1)
+      expect(yield* bindings.get(contractID)).toMatchObject({ leaseExpiresAt: 30_000 })
+      expect(yield* bindings.due(30_000)).toEqual([])
+      expect(yield* bindings.claim(contractID, 30_000)).toBeUndefined()
+      expect(yield* bindings.reserveTurn(binding.sessionID, 1)).toBe(false)
+      expect(yield* bindings.reserveAction(binding.sessionID, 1)).toBe(false)
+
+      yield* bindings.reschedule({
+        contractID,
+        revision: 1,
+        promptID: attempt!.promptID,
+        reason: "OpenCode execution ended without settlement",
+        now: 1,
+        attempt: "new",
+      })
+      const paused = yield* bindings.get(contractID)
+      expect(paused).toMatchObject({ sessionID: attempt!.sessionID, attempts: 1, dispatched: false, nextActionAt: 1 })
+      expect(paused?.promptID).not.toBe(attempt?.promptID)
+
+      yield* contracts.decideRevision({ contractID, accept: false })
+      const resumed = yield* bindings.claim(contractID, 1)
+      expect(resumed).toMatchObject({ sessionID: attempt!.sessionID, attempts: 1, promptID: paused?.promptID })
+    }),
+  )
+
   schedulerIt.effect("escalates after bounded retry exhaustion without becoming quiet", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service

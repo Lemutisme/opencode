@@ -264,6 +264,111 @@ describe("LocationServiceMap", () => {
     ),
   )
 
+  it.live("routes revision petitions through principal permission", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) => {
+        const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+        return Effect.gen(function* () {
+          const contractID = ProContract.ID.make("pct_revision_permission")
+          const model = ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") })
+          const contracts = yield* ProContract.Service
+          const bindings = yield* ProContractOpenCode.Service
+          const issued = yield* contracts.issue({
+            id: contractID,
+            scope: "revision-permission",
+            spec: ProContract.defaultSpec("Keep the original goal", Date.now()),
+            executor: "opencode",
+          })
+          const binding = yield* bindings.create({
+            contractID,
+            revision: issued.contract!.revision,
+            location,
+            model,
+            nextActionAt: 0,
+          })
+          const { db } = yield* Database.Service
+          yield* db
+            .insert(ProjectTable)
+            .values({ id: ProjectV2.ID.global, worktree: location.directory, sandboxes: [] })
+            .onConflictDoNothing()
+            .run()
+            .pipe(Effect.orDie)
+          yield* db
+            .insert(SessionTable)
+            .values({
+              id: binding.sessionID,
+              project_id: ProjectV2.ID.global,
+              slug: binding.sessionID,
+              directory: location.directory,
+              title: "Contract revision",
+              version: "test",
+              model,
+            })
+            .run()
+            .pipe(Effect.orDie)
+          yield* contracts.activate(contractID, 1, Date.now())
+          yield* bindings.claim(contractID, Date.now())
+
+          const agents = yield* AgentV2.Service
+          const registry = yield* ToolRegistry.Service
+          yield* agents.transform((draft) =>
+            draft.update(AgentV2.defaultID, (agent) => {
+              agent.permissions.push({ action: "contract_revision", resource: "*", effect: "deny" })
+            }),
+          )
+          const rejected = yield* settleTool(registry, {
+            sessionID: binding.sessionID,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "call-revision-rejected",
+              name: "contract_propose_revision",
+              input: { goal: "Weaken the goal", reason: "Make completion easier" },
+            },
+          })
+          expect(rejected).toMatchObject({
+            result: {
+              type: "error",
+              value: "Revision rejected by the principal; the original Contract remains authoritative",
+            },
+          })
+          expect(yield* contracts.get(contractID)).toMatchObject({
+            revision: 1,
+            status: "active",
+            spec: { goal: "Keep the original goal" },
+          })
+          expect((yield* contracts.get(contractID))?.pendingRevision).toBeUndefined()
+
+          yield* agents.transform((draft) =>
+            draft.update(AgentV2.defaultID, (agent) => {
+              agent.permissions.push({ action: "contract_revision", resource: "*", effect: "allow" })
+            }),
+          )
+          const accepted = yield* settleTool(registry, {
+            sessionID: binding.sessionID,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "call-revision-accepted",
+              name: "contract_propose_revision",
+              input: { goal: "Use the approved goal", reason: "Principal approved a clearer target" },
+            },
+          })
+          expect(accepted.output?.structured).toEqual({ recorded: true })
+          expect(yield* contracts.get(contractID)).toMatchObject({
+            revision: 2,
+            status: "dormant",
+            spec: { goal: "Use the approved goal" },
+          })
+          expect((yield* contracts.get(contractID))?.pendingRevision).toBeUndefined()
+        }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
+      }),
+    ),
+  )
+
   it.live("rejects an unavailable selected model during location model resolution", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

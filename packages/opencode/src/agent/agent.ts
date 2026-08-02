@@ -119,6 +119,7 @@ const layer = Layer.effect(
         const defaults = Permission.fromConfig({
           "*": "allow",
           contract_issue: "ask",
+          contract_revision: "ask",
           contract_continue: "deny",
           contract_propose: "deny",
           doom_loop: "ask",
