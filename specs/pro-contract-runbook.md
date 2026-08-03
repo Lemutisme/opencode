@@ -162,8 +162,30 @@ export WORKSPACE=/path/to/workspace
 export RUN_LOG="$ARTIFACT_ROOT/opencode-server-$(date +%Y%m%d-%H%M%S).log"
 
 cd "$WORKSPACE"
-"$OPENCODE_BIN" serve --hostname 127.0.0.1 --port "$PORT" >"$RUN_LOG" 2>&1 &
+supervise_opencode() {
+  child=
+  trap 'test -z "$child" || kill "$child" 2>/dev/null; exit' INT TERM
+  while true; do
+    "$OPENCODE_BIN" serve --hostname 127.0.0.1 --port "$PORT" --print-logs &
+    child=$!
+    failures=0
+    while kill -0 "$child" 2>/dev/null; do
+      sleep 5
+      if curl --max-time 5 -fsS "http://127.0.0.1:$PORT/global/health" >/dev/null; then
+        failures=0
+      else
+        failures=$((failures + 1))
+      fi
+      test "$failures" -lt 3 || kill "$child" 2>/dev/null
+    done
+    wait "$child" || true
+    child=
+  done
+}
+supervise_opencode >"$RUN_LOG" 2>&1 &
 export OPENCODE_SERVER_PID=$!
+
+until curl --max-time 5 -fsS "http://127.0.0.1:$PORT/global/health" >/dev/null; do sleep 1; done
 
 "$OPENCODE_BIN" run \
   --attach "http://127.0.0.1:$PORT" \
