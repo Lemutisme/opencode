@@ -357,16 +357,15 @@ export function transition(state: State, command: Command): Result {
     if (command.actor !== contract.issuer) return reject("only the issuer may resume the contract")
     if (contract.status !== "escalated") return reject("contract is not escalated")
     if (contract.pendingRevision) return reject("contract has a pending revision")
-    if (dependent) return reject(`contract is required by outstanding contract: ${dependent.id}`)
     return accept({
       ...state,
       contracts: {
         ...state.contracts,
         [contract.id]: {
           ...contract,
-          revision: contract.revision + 1,
           status: "dormant",
           escalation: undefined,
+          blocked: contract.blocked ?? contract.escalation,
           handoff: undefined,
         },
       },

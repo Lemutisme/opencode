@@ -156,13 +156,13 @@ describe("ProContract kernel", () => {
       reason: "retry upstream",
       time: 0,
     })
-    expect(
-      ProContract.transition(escalated.state, {
-        type: "resume",
-        actor: upstreamDraft.issuer,
-        contractID: upstreamID,
-      }).decision,
-    ).toEqual({ type: "rejected", reason: `contract is required by outstanding contract: ${contractID}` })
+    const resumed = ProContract.transition(escalated.state, {
+      type: "resume",
+      actor: upstreamDraft.issuer,
+      contractID: upstreamID,
+    })
+    expect(resumed.decision).toEqual({ type: "accepted" })
+    expect(resumed.state.contracts[upstreamID]).toMatchObject({ status: "dormant", revision: 1 })
     const upstreamRevision = { ...spec, goal: "Revise upstream" }
     const petitioned = ProContract.transition(admitted.state, {
       type: "petition-revision",
@@ -337,14 +337,14 @@ describe("ProContract kernel", () => {
       type: "activate",
       actor: "institution",
       contractID,
-      revision: 2,
+      revision: 1,
       time: 2,
     })
     const handedOff = ProContract.transition(reactivated.state, {
       type: "report-ready",
       actor: "institution",
       contractID,
-      revision: 2,
+      revision: 1,
       summary: "candidate complete",
       uncertainties: [],
       subjectHash,
@@ -356,7 +356,7 @@ describe("ProContract kernel", () => {
       contractID,
       attestation: {
         id: ProContract.AttestationID.make("pca_escalated"),
-        revision: 2,
+        revision: 1,
         specHash: draft.specHash,
         subjectHash,
         evidenceHash: "reviewed",
@@ -526,6 +526,7 @@ describe("ProContract kernel", () => {
     const releasedID = ProContract.ID.make("pct_support_released")
     const upstreamAttestationID = ProContract.AttestationID.make("pca_support_upstream")
     const childAttestationID = ProContract.AttestationID.make("pca_support_child")
+    const grandchildAttestationID = ProContract.AttestationID.make("pca_support_grandchild")
     const upstream = {
       ...draft,
       id: upstreamID,
@@ -557,11 +558,14 @@ describe("ProContract kernel", () => {
           spec: grandchildSpec,
           specHash: ProContract.hashSpec(grandchildSpec),
           revision: 1,
-          status: "active",
+          status: "discharged",
+          handoff: { summary: "grandchild", uncertainties: [], subjectHash: "grandchild-subject", time: 0 },
+          attestationID: grandchildAttestationID,
         },
         [waitingID]: {
           ...draft,
           id: waitingID,
+          scope: "other",
           spec: waitingSpec,
           specHash: ProContract.hashSpec(waitingSpec),
           revision: 1,
@@ -570,6 +574,7 @@ describe("ProContract kernel", () => {
         [releasedID]: {
           ...draft,
           id: releasedID,
+          scope: "other",
           spec: waitingSpec,
           specHash: ProContract.hashSpec(waitingSpec),
           revision: 1,
@@ -594,6 +599,16 @@ describe("ProContract kernel", () => {
           specHash: child.specHash,
           subjectHash: child.handoff.subjectHash,
           evidenceHash: "child-evidence",
+          verifierID: draft.issuer,
+          class: "principal",
+        },
+        [grandchildAttestationID]: {
+          id: grandchildAttestationID,
+          contractID: grandchildID,
+          revision: 1,
+          specHash: ProContract.hashSpec(grandchildSpec),
+          subjectHash: "grandchild-subject",
+          evidenceHash: "grandchild-evidence",
           verifierID: draft.issuer,
           class: "principal",
         },
@@ -629,6 +644,53 @@ describe("ProContract kernel", () => {
     expect(challenged.state.contracts[waitingID]?.status).toBe("dormant")
     expect(challenged.state.contracts[releasedID]?.status).toBe("released")
     expect(ProContract.quiet(challenged.state, draft.scope)).toBe(false)
+
+    const repair = (current: ProContract.State, id: ProContract.ID, nextSubject: string) => {
+      const dormant =
+        current.contracts[id]?.status === "escalated"
+          ? ProContract.transition(current, { type: "resume", actor: draft.issuer, contractID: id }).state
+          : current
+      const contract = dormant.contracts[id]!
+      const active = ProContract.transition(dormant, {
+        type: "activate",
+        actor: "institution",
+        contractID: id,
+        revision: contract.revision,
+        time: 2,
+      })
+      const handedOff = ProContract.transition(active.state, {
+        type: "report-ready",
+        actor: "institution",
+        contractID: id,
+        revision: contract.revision,
+        summary: `${id} repaired`,
+        uncertainties: [],
+        subjectHash: nextSubject,
+        time: 2,
+      })
+      return ProContract.transition(handedOff.state, {
+        type: "discharge",
+        actor: draft.issuer,
+        contractID: id,
+        attestation: {
+          id: ProContract.AttestationID.create(),
+          revision: contract.revision,
+          specHash: contract.specHash,
+          subjectHash: nextSubject,
+          evidenceHash: `${id}-repaired-evidence`,
+          verifierID: draft.issuer,
+          class: "principal",
+        },
+      }).state
+    }
+    const repairedUpstream = repair(challenged.state, upstreamID, "upstream-repaired")
+    const repairedChild = repair(repairedUpstream, childID, "child-repaired")
+    const repaired = repair(repairedChild, grandchildID, "grandchild-repaired")
+
+    expect(repaired.contracts[upstreamID]).toMatchObject({ status: "discharged", revision: 1 })
+    expect(repaired.contracts[childID]).toMatchObject({ status: "discharged", revision: 1 })
+    expect(repaired.contracts[grandchildID]).toMatchObject({ status: "discharged", revision: 1 })
+    expect(ProContract.quiet(repaired, draft.scope)).toBe(true)
   })
 
   test("keeps sealed verifier evidence away from automatic execution", () => {
@@ -1487,7 +1549,7 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
-  schedulerIt.effect("resume preserves consumed budgets and fences the old revision", () =>
+  schedulerIt.effect("resume preserves revision and consumed budgets while fencing the old Session", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
@@ -1506,10 +1568,10 @@ describe("OpenCode Contract binding", () => {
       yield* bindings.reserveAction(binding.sessionID, 1)
       yield* contracts.escalate({ contractID, revision: 1, reason: "manual review", time: 1 })
       yield* contracts.resume(contractID)
-      yield* contracts.activate(contractID, 2, 2)
+      yield* contracts.activate(contractID, 1, 2)
       const second = yield* bindings.claim(contractID, 2)
 
-      expect(second).toMatchObject({ revision: 2, turnsUsed: 1, actionsUsed: 1 })
+      expect(second).toMatchObject({ revision: 1, turnsUsed: 1, actionsUsed: 1 })
       expect(second?.promptID).not.toBe(first?.promptID)
       expect(second?.sessionID).not.toBe(first?.sessionID)
       expect(yield* bindings.reserveTurn(binding.sessionID, 2)).toBe(false)

@@ -294,8 +294,10 @@ resolution    expiry, revision, release, transfer, and escalation rights
 already issued Contract from the same issuer at its exact revision, so the
 dependency graph is acyclic by construction. Adaptation appends a new Contract
 and explicitly releases the obsolete one; revision cannot silently rewire the
-graph. Revision, resume, and release of an upstream Contract are rejected while
-an outstanding Contract still requires it. A waiting Contract escalates if its
+graph. Revision and release of an upstream Contract are rejected while an
+outstanding Contract still requires it. Resume preserves the exact revision, so
+the issuer can repair challenged support from upstream to downstream. A waiting
+Contract escalates if its
 deadline passes.
 
 This gives the minimal graph its safety argument: every prerequisite precedes
