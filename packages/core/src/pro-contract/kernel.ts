@@ -167,33 +167,56 @@ export function transition(state: State, command: Command): Result {
       return reject("executor-visible challenge requires a summary")
     if (command.challenge.disclosure === "sealed" && command.challenge.summary)
       return reject("sealed challenge cannot include a summary")
-    if (
-      contract.status === "discharged" &&
-      Object.values(state.contracts).some(
-        (item) =>
-          item.spec.requires.some((requirement) => requirement.contractID === contract.id) &&
-          item.status !== "dormant" &&
-          item.status !== "released",
-      )
-    )
-      return reject("challenged evidence already supports a running or settled contract")
+    const affected = new Set([contract.id])
+    const pending = [contract.id]
+    while (pending.length > 0) {
+      const dependencyID = pending.pop()
+      if (!dependencyID) continue
+      Object.values(state.contracts)
+        .filter(
+          (item) =>
+            !affected.has(item.id) &&
+            item.spec.requires.some((requirement) => requirement.contractID === dependencyID),
+        )
+        .forEach((item) => {
+          affected.add(item.id)
+          pending.push(item.id)
+        })
+    }
     return accept({
       ...state,
-      contracts: {
-        ...state.contracts,
-        [contract.id]: {
-          ...contract,
-          status: command.challenge.disclosure === "sealed" ? "escalated" : "dormant",
-          escalation:
-            command.challenge.disclosure === "sealed"
-              ? { reason: "Verification challenged; evidence is sealed", time: command.challenge.time }
-              : undefined,
-          challenge: { ...command.challenge, attestationID: contract.attestationID },
-          blocked: undefined,
-          handoff: undefined,
-          attestationID: undefined,
-        },
-      },
+      contracts: Object.fromEntries(
+        Object.entries(state.contracts).map(([id, item]) => {
+          if (item.id === contract.id)
+            return [
+              id,
+              {
+                ...contract,
+                status: command.challenge.disclosure === "sealed" ? "escalated" : "dormant",
+                escalation:
+                  command.challenge.disclosure === "sealed"
+                    ? { reason: "Verification challenged; evidence is sealed", time: command.challenge.time }
+                    : undefined,
+                challenge: { ...command.challenge, attestationID: contract.attestationID },
+                blocked: undefined,
+                handoff: undefined,
+                attestationID: undefined,
+              },
+            ]
+          if (!affected.has(item.id) || item.status === "dormant" || item.status === "released") return [id, item]
+          return [
+            id,
+            {
+              ...item,
+              status: "escalated",
+              escalation: { reason: `Dependency support lost: ${contract.id}`, time: command.challenge.time },
+              blocked: undefined,
+              handoff: undefined,
+              attestationID: undefined,
+            },
+          ]
+        }),
+      ),
     })
   }
 

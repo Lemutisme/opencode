@@ -171,17 +171,21 @@ const layer = Layer.effect(
                 command,
               )
               const current = result.state.contracts[contractID]
-              if (result.decision.type === "accepted" && current) {
-                yield* tx
-                  .insert(ProContractTable)
-                  .values({ id: current.id, scope: current.scope, status: current.status, data: current })
-                  .onConflictDoUpdate({
-                    target: ProContractTable.id,
-                    set: { scope: current.scope, status: current.status, data: current },
-                  })
-                  .run()
-                  .pipe(Effect.orDie)
-              }
+              if (result.decision.type === "accepted" && current)
+                yield* Effect.forEach(
+                  command.type === "challenge" ? Object.values(result.state.contracts) : [current],
+                  (current) =>
+                    tx
+                      .insert(ProContractTable)
+                      .values({ id: current.id, scope: current.scope, status: current.status, data: current })
+                      .onConflictDoUpdate({
+                        target: ProContractTable.id,
+                        set: { scope: current.scope, status: current.status, data: current },
+                      })
+                      .run()
+                      .pipe(Effect.orDie),
+                  { discard: true },
+                )
               if (result.decision.type === "accepted" && command.type === "discharge") {
                 const recorded = result.state.attestations[command.attestation.id]
                 if (!recorded) return yield* Effect.die("Accepted attestation was not recorded")

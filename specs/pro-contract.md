@@ -193,6 +193,17 @@ Escalation is routing, not settlement. It does not make a scope quiet. A
 transfer remains `handoff_pending` until the receiving ledger acknowledges the
 new duty.
 
+Responsibility closure extends conservation across lost support:
+
+```text
+live mandate -> currently supported settlement or outstanding remediation
+```
+
+An accepted challenge cannot leave a dependent recognized as complete on the
+challenged support. The kernel atomically keeps the challenged Contract
+outstanding and escalates affected dependents to the issuer. It does not start
+the remediation cascade automatically.
+
 The status names the lifecycle directly:
 
 ```text
@@ -248,9 +259,11 @@ sealed challenge           -> escalated, no automatic wake
 Sealed challenges let a confirmation evaluator reject completion without
 leaking holdout evidence into the executor policy. Challenging a historical
 discharge never deletes its attestation; it removes current support and admits
-new work. The current kernel conservatively rejects that transition when the
-old evidence already supports a running or discharged dependent. Dependency
-invalidation and remediation closure remain future truth-maintenance work.
+new work. The same transition follows immutable `requires` edges transitively.
+Dormant dependents are already outstanding, released dependents stay released,
+and every other affected dependent becomes an issuer-owned escalation with its
+current handoff and attestation support cleared. The ledger and attestation
+history remain intact.
 
 Executor completion is a petition, not an attestation. `report-ready` records a
 structured handoff containing the claimed result, every known unresolved
@@ -431,17 +444,17 @@ K = currently supported authoritative facts
 
 A historical discharge is never deleted. If its justification loses support,
 the discharge becomes epistemically unsupported while remaining a historical
-fact. A standing governance rule may then admit a new remediation duty:
+fact. A standing mandate must then reopen or admit remediation:
 
 ```text
-support loss + mandate still valid -> new remediation obligation
+support loss + mandate still valid -> outstanding remediation
 ```
 
 This is the addition beyond a truth-maintenance system: loss of epistemic
-support has a normative consequence. Dependency edges must state their
-semantics, such as `depends_on_claim`, `uses_artifact`,
-`requires_current_revision`, or `assumes_environment`; supersession alone does
-not imply that an old fact became false.
+support has a normative consequence. The current `requires` edge means that
+upstream support must remain current and therefore propagates a challenge.
+Richer edge semantics such as `uses_artifact` or `assumes_environment` remain
+future work; supersession alone does not imply that an old fact became false.
 
 Relevant foundations are Doyle's
 [TMS](https://www.sciencedirect.com/science/article/pii/0004370279900080) and de
@@ -778,9 +791,10 @@ workflow framework.
 6. **Implemented:** immutable revision-bound prerequisites, atomic readiness
    validation, structured handoff with unresolved assumptions, discharge
    gating, deadline escalation, evidence-bearing dependency context, and
-   durable visible/sealed verification challenges. Automatic planning,
-   dependency invalidation, supersession lineage, typed epistemic edges, and
-   remediation closure remain future work.
+   durable visible/sealed verification challenges. Challenges atomically keep
+   the target outstanding and escalate its transitive dependents without
+   deleting historical attestations. Automatic planning, supersession lineage,
+   and typed epistemic edges remain future work.
 7. A second harness adapter to test that the protocol is not OpenCode-specific.
 8. A separate plane/worker deployment must isolate principal credentials and
    storage before OpenCode claims adversarial executor non-bypass.

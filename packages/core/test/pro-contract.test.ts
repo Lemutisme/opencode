@@ -510,6 +510,119 @@ describe("ProContract kernel", () => {
     })
   })
 
+  test("turns unsupported dependents into principal-owned remediation", () => {
+    const upstreamID = ProContract.ID.make("pct_support_upstream")
+    const childID = ProContract.ID.make("pct_support_child")
+    const grandchildID = ProContract.ID.make("pct_support_grandchild")
+    const waitingID = ProContract.ID.make("pct_support_waiting")
+    const releasedID = ProContract.ID.make("pct_support_released")
+    const upstreamAttestationID = ProContract.AttestationID.make("pca_support_upstream")
+    const childAttestationID = ProContract.AttestationID.make("pca_support_child")
+    const upstream = {
+      ...draft,
+      id: upstreamID,
+      revision: 1,
+      status: "discharged" as const,
+      handoff: { summary: "upstream", uncertainties: [], subjectHash: "upstream-subject", time: 0 },
+      attestationID: upstreamAttestationID,
+    }
+    const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
+    const child = {
+      ...draft,
+      id: childID,
+      spec: childSpec,
+      specHash: ProContract.hashSpec(childSpec),
+      revision: 1,
+      status: "discharged" as const,
+      handoff: { summary: "child", uncertainties: [], subjectHash: "child-subject", time: 0 },
+      attestationID: childAttestationID,
+    }
+    const grandchildSpec = { ...spec, requires: [{ contractID: childID, revision: 1 }] }
+    const waitingSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
+    const state: ProContract.State = {
+      contracts: {
+        [upstreamID]: upstream,
+        [childID]: child,
+        [grandchildID]: {
+          ...draft,
+          id: grandchildID,
+          spec: grandchildSpec,
+          specHash: ProContract.hashSpec(grandchildSpec),
+          revision: 1,
+          status: "active",
+        },
+        [waitingID]: {
+          ...draft,
+          id: waitingID,
+          spec: waitingSpec,
+          specHash: ProContract.hashSpec(waitingSpec),
+          revision: 1,
+          status: "dormant",
+        },
+        [releasedID]: {
+          ...draft,
+          id: releasedID,
+          spec: waitingSpec,
+          specHash: ProContract.hashSpec(waitingSpec),
+          revision: 1,
+          status: "released",
+        },
+      },
+      attestations: {
+        [upstreamAttestationID]: {
+          id: upstreamAttestationID,
+          contractID: upstreamID,
+          revision: 1,
+          specHash: upstream.specHash,
+          subjectHash: upstream.handoff.subjectHash,
+          evidenceHash: "upstream-evidence",
+          verifierID: draft.issuer,
+          class: "principal",
+        },
+        [childAttestationID]: {
+          id: childAttestationID,
+          contractID: childID,
+          revision: 1,
+          specHash: child.specHash,
+          subjectHash: child.handoff.subjectHash,
+          evidenceHash: "child-evidence",
+          verifierID: draft.issuer,
+          class: "principal",
+        },
+      },
+    }
+    const challenged = ProContract.transition(state, {
+      type: "challenge",
+      actor: draft.issuer,
+      contractID: upstreamID,
+      challenge: {
+        revision: 1,
+        subjectHash: upstream.handoff.subjectHash,
+        evidenceHash: "negative-witness",
+        disclosure: "executor",
+        summary: "Upstream support was withdrawn",
+        time: 1,
+      },
+    })
+
+    expect(challenged.decision).toEqual({ type: "accepted" })
+    expect(challenged.state.attestations).toBe(state.attestations)
+    expect(challenged.state.contracts[upstreamID]).toMatchObject({ status: "dormant", attestationID: undefined })
+    expect(challenged.state.contracts[childID]).toMatchObject({
+      status: "escalated",
+      escalation: { reason: `Dependency support lost: ${upstreamID}`, time: 1 },
+      attestationID: undefined,
+      handoff: undefined,
+    })
+    expect(challenged.state.contracts[grandchildID]).toMatchObject({
+      status: "escalated",
+      escalation: { reason: `Dependency support lost: ${upstreamID}`, time: 1 },
+    })
+    expect(challenged.state.contracts[waitingID]?.status).toBe("dormant")
+    expect(challenged.state.contracts[releasedID]?.status).toBe("released")
+    expect(ProContract.quiet(challenged.state, draft.scope)).toBe(false)
+  })
+
   test("keeps sealed verifier evidence away from automatic execution", () => {
     const activated = ProContract.transition(ProContract.transition(ProContract.empty, issue).state, {
       type: "activate",
@@ -625,6 +738,70 @@ describe("ProContract ledger", () => {
       expect(challenged.decision).toEqual({ type: "accepted" })
       expect((yield* contracts.due(3)).map((contract) => contract.id)).toEqual([contractID])
       expect(yield* contracts.history({ contractID })).toHaveLength(4)
+    }),
+  )
+
+  it.effect("persists challenged support and affected dependents atomically", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const upstreamID = ProContract.ID.make("pct_ledger_support_upstream")
+      const childID = ProContract.ID.make("pct_ledger_support_child")
+      yield* contracts.issue({ id: upstreamID, scope: "support", spec, executor: "upstream" })
+      yield* contracts.activate(upstreamID, 1, 0)
+      yield* contracts.reportReady({
+        contractID: upstreamID,
+        revision: 1,
+        summary: "upstream complete",
+        uncertainties: [],
+        subjectHash: "upstream-subject",
+        time: 0,
+      })
+      yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
+      const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
+      yield* contracts.issue({ id: childID, scope: "support", spec: childSpec, executor: "child" })
+      yield* contracts.activate(childID, 1, 1)
+      yield* contracts.reportReady({
+        contractID: childID,
+        revision: 1,
+        summary: "child complete",
+        uncertainties: [],
+        subjectHash: "child-subject",
+        time: 1,
+      })
+      const childDischarge = yield* contracts.principalAttest({
+        contractID: childID,
+        evidenceHash: "child-evidence",
+      })
+      const childAttestationID = childDischarge.state.contracts[childID]?.attestationID
+      expect(yield* contracts.quiet("support")).toMatchObject({ quiet: true })
+
+      const challenged = yield* contracts.challenge({
+        contractID: upstreamID,
+        revision: 1,
+        subjectHash: "upstream-subject",
+        evidenceHash: "negative-witness",
+        disclosure: "executor",
+        summary: "Upstream support was withdrawn",
+        time: 2,
+      })
+
+      expect(challenged.decision).toEqual({ type: "accepted" })
+      const challengedUpstream = yield* contracts.get(upstreamID)
+      const challengedChild = yield* contracts.get(childID)
+      expect(challengedUpstream).toMatchObject({ status: "dormant" })
+      expect(challengedUpstream?.attestationID).toBeUndefined()
+      expect(challengedChild).toMatchObject({
+        status: "escalated",
+        escalation: { reason: `Dependency support lost: ${upstreamID}`, time: 2 },
+      })
+      expect(challengedChild?.attestationID).toBeUndefined()
+      expect(childAttestationID ? yield* contracts.getAttestation(childAttestationID) : undefined).toMatchObject({
+        evidenceHash: "child-evidence",
+      })
+      expect(yield* contracts.quiet("support")).toMatchObject({
+        quiet: false,
+        outstanding: expect.arrayContaining([upstreamID, childID]),
+      })
     }),
   )
 
