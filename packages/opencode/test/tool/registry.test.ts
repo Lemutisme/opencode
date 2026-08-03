@@ -135,7 +135,11 @@ describe("tool.registry", () => {
       })
       expect((yield* sessions.get(session.id)).id).toBe(session.id)
       const defaults = ProContract.defaultSpec("Continue after this Session", Date.now())
-      const proposal = { ...defaults, budget: { ...defaults.budget, deadline: 1 } }
+      const proposal = {
+        ...defaults,
+        budget: { ...defaults.budget, deadline: 1 },
+        resolution: { ...defaults.resolution, maxAttempts: 1 },
+      }
       const tool =
         (yield* registry.all()).find((item) => item.id === "contract_propose") ??
         (yield* Effect.die("contract_propose not found"))
@@ -166,6 +170,7 @@ describe("tool.registry", () => {
       expect(contract.spec.budget.turns).toBe(1_000)
       expect(contract.spec.budget.actions).toBe(10_000)
       expect(contract.spec.budget.deadline).toBeGreaterThan(Date.now())
+      expect(contract.spec.resolution.maxAttempts).toBe(2)
       expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec)] }])
       expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({
         sessionID: result.metadata.sessionID,

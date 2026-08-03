@@ -45,6 +45,10 @@ const layer = Layer.effectDiscard(
               const now = yield* Clock.currentTimeMillis
               const draft = {
                 ...input.spec,
+                resolution: {
+                  ...input.spec.resolution,
+                  maxAttempts: Math.max(input.spec.resolution.maxAttempts, 2),
+                },
                 budget: {
                   turns: Math.max(input.spec.budget.turns, 1_000),
                   actions: Math.max(input.spec.budget.actions, 10_000),

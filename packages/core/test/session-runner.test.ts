@@ -733,7 +733,7 @@ describe("SessionRunnerLLM", () => {
         "The failing behavior is isolated to argument parsing.",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "The independent verifier owns exhaustive evaluation.",
+        "Produce the smallest concrete candidate before broad exploration.",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Establish the runner prerequisite")

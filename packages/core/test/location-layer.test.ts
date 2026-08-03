@@ -207,6 +207,7 @@ describe("LocationServiceMap", () => {
             const defaults = ProContract.defaultSpec("Continue after this Session", Date.now())
             const proposal = {
               ...defaults,
+              resolution: { ...defaults.resolution, maxAttempts: 1 },
               budget: {
                 ...defaults.budget,
                 turns: 1_000,
@@ -214,6 +215,7 @@ describe("LocationServiceMap", () => {
                 deadline: defaults.budget.deadline + 24 * 60 * 60 * 1_000,
               },
             }
+            const expected = { ...proposal, resolution: { ...proposal.resolution, maxAttempts: 2 } }
             expect((yield* registry.materialize()).definitions.map((item) => item.name)).toContain("contract_propose")
             const execution = yield* settleTool(registry, {
               sessionID,
@@ -230,7 +232,7 @@ describe("LocationServiceMap", () => {
             expect(pending).toHaveLength(1)
             const approval = pending[0]
             if (!approval) yield* Effect.die("Contract proposal did not request permission")
-            expect(approval).toMatchObject({ action: "contract_issue", resources: [ProContract.hashSpec(proposal)] })
+            expect(approval).toMatchObject({ action: "contract_issue", resources: [ProContract.hashSpec(expected)] })
             const contractID = ProContract.ID.make(String(approval.metadata?.contractID))
             expect(yield* contracts.get(contractID)).toBeUndefined()
 
@@ -238,7 +240,7 @@ describe("LocationServiceMap", () => {
             const settled = yield* Fiber.join(execution)
 
             expect(settled.output?.structured).toMatchObject({ contractID })
-            expect(yield* contracts.get(contractID)).toMatchObject({ id: contractID, spec: proposal })
+            expect(yield* contracts.get(contractID)).toMatchObject({ id: contractID, spec: expected })
             expect(yield* bindings.get(contractID)).toMatchObject({ contractID, model: { id: "test" } })
 
             const rejected = yield* settleTool(registry, {

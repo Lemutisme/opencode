@@ -365,9 +365,10 @@ synchronous; `contract_continue` requires both work and validation to finish in
 the current Session and cannot replace an issued Contract. Proposal deadlines
 are absolute Unix timestamps; past drafts receive the standard 24-hour deadline
 before the exact normalized specification is ratified. Model-authored proposals
-also receive a 1000-turn and 10000-action autonomy floor before approval. These
-budgets are total across all attempts, leaving verification and remediation
-headroom while the principal still approves the exact expanded authority.
+also receive a 1000-turn and 10000-action autonomy floor and at least two
+semantic attempts before approval. These budgets are total across all attempts,
+reserving a second semantic attempt for recovery or verifier-driven remediation
+while the principal still approves the exact expanded authority.
 The existing permission UI shows the exact goal, delegated authority, budget,
 dependencies, evidence policy, and specification hash. Headless `--auto` uses
 the same permission event and issuer path; it does not bypass adjudication.
@@ -377,8 +378,10 @@ term changes use the durable Contract channels instead.
 ### Handoff and justification artifacts
 
 An executor handoff contains a concise claim, known unresolved assumptions, and
-an institution-captured subject hash. Larger task artifacts remain adapter-owned and should form a
-content-addressed justification bundle:
+an institution-captured subject hash. The executor produces the smallest
+concrete candidate before broad exploration; independent verification owns
+exhaustive evaluation and returns finite evidence. Larger task artifacts remain
+adapter-owned and should form a content-addressed justification bundle:
 
 ```text
 claim + assumptions + witnesses + unknowns + provenance + disclosure policy
