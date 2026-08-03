@@ -8,6 +8,7 @@ import { SessionStore } from "../store"
 import { ContextSnapshotDecodeError, MessageDecodeError } from "../error"
 import { SessionExecution } from "../execution"
 import { ProContractOpenCode } from "../../pro-contract/open-code"
+import { ProContract } from "../../pro-contract"
 
 /** Current-process routing for implicit-local Locations. Future remote placement belongs here. */
 const layer = Layer.effect(
@@ -15,16 +16,17 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
-    const contracts = yield* ProContractOpenCode.Service
+    const bindings = yield* ProContractOpenCode.Service
+    const contracts = yield* ProContract.Service
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError>({
       drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
-        const attempt = yield* contracts.forSession(sessionID)
+        const attempt = yield* bindings.forSession(sessionID)
         if (
           attempt &&
           (!attempt.dispatched ||
-            attempt.leaseOwner !== contracts.owner ||
+            attempt.leaseOwner !== bindings.owner ||
             (attempt.leaseExpiresAt ?? 0) <= (yield* Clock.currentTimeMillis))
         )
           return undefined
@@ -40,8 +42,18 @@ const layer = Layer.effect(
         const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
         const replaceSession =
           Exit.isSuccess(exit) || error instanceof MessageDecodeError || error instanceof ContextSnapshotDecodeError
-        if (attempt)
-          yield* contracts.reschedule({
+        const lastAssistant = attempt && Exit.isSuccess(exit)
+          ? (yield* store.context(sessionID)).findLast((message) => message.type === "assistant")
+          : undefined
+        if (attempt && lastAssistant?.finish === "error")
+          yield* contracts.escalate({
+            contractID: attempt.contractID,
+            revision: attempt.revision,
+            reason: "OpenCode provider returned a terminal error",
+            time: yield* Clock.currentTimeMillis,
+          })
+        else if (attempt)
+          yield* bindings.reschedule({
             contractID: attempt.contractID,
             revision: attempt.revision,
             promptID: attempt.promptID,
@@ -66,7 +78,7 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: SessionExecution.Service,
   layer,
-  deps: [SessionStore.node, LocationServiceMap.node, ProContractOpenCode.node],
+  deps: [SessionStore.node, LocationServiceMap.node, ProContractOpenCode.node, ProContract.node],
 })
 
 export * as SessionExecutionLocal from "./local"

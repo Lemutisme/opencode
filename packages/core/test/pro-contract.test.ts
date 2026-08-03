@@ -9,9 +9,17 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionRunner } from "@opencode-ai/core/session/runner"
+import { SessionStore } from "@opencode-ai/core/session/store"
 import { SessionInputTable } from "@opencode-ai/core/session/sql"
 import { Database } from "@opencode-ai/core/database/database"
-import { Duration, Effect, Layer } from "effect"
+import { AgentV2 } from "@opencode-ai/core/agent"
+import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import type { LocationError, LocationServices } from "@opencode-ai/core/location-services"
+import { ProjectV2 } from "@opencode-ai/core/project"
+import { DateTime, Duration, Effect, Layer, LayerMap } from "effect"
 import { eq } from "drizzle-orm"
 import * as TestClock from "effect/testing/TestClock"
 import { testEffect } from "./lib/effect"
@@ -916,7 +924,82 @@ const schedulerLiveIt = testEffect(
   ]),
 )
 
+const terminalSession = Layer.mock(SessionStore.Service, {
+  get: (id) =>
+    Effect.succeed(
+      SessionV2.Info.make({
+        id,
+        projectID: ProjectV2.ID.global,
+        agent: AgentV2.ID.make("build"),
+        model: executionModel,
+        title: "Terminal provider error",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+        location: { directory: AbsolutePath.make("/project") },
+      }),
+    ),
+  context: () =>
+    Effect.succeed([
+      SessionMessage.Assistant.make({
+        id: SessionMessage.ID.make("msg_terminal_provider_error"),
+        type: "assistant",
+        agent: AgentV2.ID.make("build"),
+        model: executionModel,
+        time: { created: DateTime.makeUnsafe(0), completed: DateTime.makeUnsafe(0) },
+        content: [],
+        finish: "error",
+        error: { type: "unknown", message: "Expired key" },
+      }),
+    ]),
+})
+const terminalLocations = Layer.effect(
+  LocationServiceMap.Service,
+  LayerMap.make(
+    () =>
+      Layer.succeed(
+        SessionRunner.Service,
+        SessionRunner.Service.of({ run: () => Effect.void }),
+      ) as unknown as Layer.Layer<LocationServices, LocationError>,
+  ),
+)
+const terminalExecutionIt = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([Database.node, ProContract.node, ProContractOpenCode.node, SessionExecutionLocal.node]),
+    [
+      [SessionStore.node, terminalSession],
+      [LocationServiceMap.node, terminalLocations],
+    ],
+  ),
+)
+
 describe("OpenCode Contract binding", () => {
+  terminalExecutionIt.effect("escalates a durable provider error without retrying", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const execution = yield* SessionExecution.Service
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+
+      yield* execution.resume(attempt!.sessionID)
+
+      expect(yield* contracts.get(contractID)).toMatchObject({
+        status: "escalated",
+        escalation: { reason: "OpenCode provider returned a terminal error", time: 0 },
+      })
+      expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, turnsUsed: 0, actionsUsed: 0 })
+    }),
+  )
+
   schedulerLiveIt.effect("keeps the live scheduler running after a failed cycle", () =>
     Effect.gen(function* () {
       schedulerCycles = 0

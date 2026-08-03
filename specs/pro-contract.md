@@ -716,8 +716,9 @@ it inspects and reuses valid files, artifacts, and completed checks before new
 exploration. Rotation therefore changes the executor, not ownership of work
 already materialized in the Location.
 Durable message or context-snapshot decode failures also replace the Session;
-provider, model-availability, and transient infrastructure failures retry the
-current semantic attempt.
+raw transport and transient infrastructure failures retry the current semantic
+attempt. A provider-declared error is already a durable terminal result; it
+escalates once instead of redispatching the same invalid request.
 
 Every current and retired Contract Session has an indexed durable reservation.
 Rotation changes the active binding without returning an old Session ID to the
