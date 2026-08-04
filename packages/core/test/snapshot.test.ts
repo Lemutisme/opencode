@@ -54,6 +54,14 @@ describe("Snapshot", () => {
             expect(yield* read(path.join(materialized, "scope", "tracked.txt"))).toBe("two\n")
             expect(yield* read(path.join(materialized, "scope", "added.txt"))).toBe("added\n")
             expect(yield* read(path.join(materialized, "outside.txt"))).toBe("outside\n")
+            expect(
+              (yield* Effect.promise(() => $`git rev-parse --is-inside-work-tree`.cwd(materialized).quiet())).stdout
+                .toString()
+                .trim(),
+            ).toBe("true")
+            expect((yield* Effect.promise(() => $`git status --short`.cwd(materialized).quiet())).stdout.toString()).toBe(
+              "",
+            )
 
             expect(yield* snapshot.files({ from: before, to: after })).toEqual([
               RelativePath.make("scope/added.txt"),

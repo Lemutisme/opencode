@@ -3,12 +3,14 @@ export * as Snapshot from "./snapshot"
 import { makeLocationNode } from "./effect/app-node"
 import path from "path"
 import { Context, Effect, Layer, Schema } from "effect"
+import { ChildProcess } from "effect/unstable/process"
 import { Config } from "./config"
 import { File } from "./file"
 import { FSUtil } from "./fs-util"
 import { Git } from "./git"
 import { Global } from "./global"
 import { Location } from "./location"
+import { AppProcess } from "./process"
 import { AbsolutePath, RelativePath } from "./schema"
 import { Hash } from "./util/hash"
 
@@ -97,6 +99,7 @@ const layer = Layer.effect(
     const git = yield* Git.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
+    const processes = yield* AppProcess.Service
     const source = yield* git.repo.discover(location.project.directory)
     const worktree = source
       ? AbsolutePath.make(yield* fs.realPath(source.worktree).pipe(Effect.orDie))
@@ -247,6 +250,32 @@ const layer = Layer.effect(
       yield* git.tree
         .checkout({ repository: target, tree: Git.TreeID.make(input.snapshot) })
         .pipe(Effect.mapError((cause) => failure("materialize", cause)))
+      yield* fs
+        .writeFileString(path.join(input.directory, ".git"), `gitdir: ${gitDirectory}\n`)
+        .pipe(Effect.mapError((cause) => new Error({ operation: "materialize", message: cause.message, cause })))
+      const runGit = (args: ReadonlyArray<string>) =>
+        processes
+          .run(
+            ChildProcess.make("git", args, {
+              cwd: input.directory,
+              extendEnv: true,
+              env: {
+                GIT_AUTHOR_NAME: "OpenCode Replay",
+                GIT_AUTHOR_EMAIL: "replay@opencode.local",
+                GIT_COMMITTER_NAME: "OpenCode Replay",
+                GIT_COMMITTER_EMAIL: "replay@opencode.local",
+              },
+            }),
+          )
+          .pipe(
+            Effect.flatMap(AppProcess.requireSuccess),
+            Effect.mapError((cause) => new Error({ operation: "materialize", message: cause.message, cause })),
+          )
+      const commit = (yield* runGit(["commit-tree", input.snapshot, "-m", "Replay subject"])).stdout
+        .toString("utf8")
+        .trim()
+      yield* runGit(["update-ref", "HEAD", commit])
+      yield* runGit(["reset", "--mixed", "HEAD"])
       return undefined
     })
 
@@ -259,7 +288,7 @@ export const locationLayer = layer.pipe(Layer.provideMerge(Config.locationLayer)
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Config.node, FSUtil.node, Git.node, Global.node, Location.node],
+  deps: [Config.node, FSUtil.node, Git.node, Global.node, Location.node, AppProcess.node],
 })
 
 export const noopLayer = Layer.succeed(
