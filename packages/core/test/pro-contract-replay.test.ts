@@ -25,8 +25,10 @@ describe("ProContract replay verifier", () => {
           const data = path.join(tmp.path, "data")
           yield* Effect.promise(async () => {
             await fs.mkdir(project)
+            await fs.writeFile(path.join(tmp.path, "outside.txt"), "outside\n")
             await fs.writeFile(path.join(project, "verify.txt"), "pass\n")
             await fs.writeFile(path.join(project, "artifact.txt"), "artifact\n")
+            await fs.symlink(path.join(tmp.path, "outside.txt"), path.join(project, "escape.txt"))
             await $`git init`.cwd(project).quiet()
             await $`git config core.fsmonitor false`.cwd(project).quiet()
             await $`git config commit.gpgsign false`.cwd(project).quiet()
@@ -81,6 +83,13 @@ describe("ProContract replay verifier", () => {
               subjectHash: subject,
             })
             expect(failed).toMatchObject({ passed: false, summary: "Replay verification failed: missing.txt" })
+
+            const escaped = yield* replay.verify({
+              contractID: ProContract.ID.make("pct_replay_escaped"),
+              policy: { ...policy, artifacts: [RelativePath.make("escape.txt")] },
+              subjectHash: subject,
+            })
+            expect(escaped).toMatchObject({ passed: false, summary: "Replay verification failed: escape.txt" })
           }).pipe(
             Effect.provide(
               AppNodeBuilder.build(LayerNode.group([ProContractReplay.node, Snapshot.node]), [

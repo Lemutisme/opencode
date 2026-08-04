@@ -2,7 +2,7 @@ export * as ProContractReplay from "./replay"
 
 import { ProContract } from "@opencode-ai/schema/pro-contract"
 import path from "path"
-import { Context, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
@@ -23,6 +23,8 @@ type CheckResult = {
   readonly exit?: number
   readonly stdoutHash?: string
   readonly stderrHash?: string
+  readonly stdoutTruncated?: boolean
+  readonly stderrTruncated?: boolean
   readonly error?: string
 }
 
@@ -67,12 +69,14 @@ const layer = Layer.effect(
     const inspect = Effect.fnUntraced(function* (root: string, relative: string) {
       const target = path.resolve(root, relative)
       if (!FSUtil.contains(root, target) || !(yield* fs.existsSafe(target))) return { path: relative, exists: false }
-      const info = yield* fs.stat(target).pipe(Effect.orDie)
+      const canonical = yield* fs.realPath(target).pipe(Effect.orDie)
+      if (!FSUtil.contains(root, canonical)) return { path: relative, exists: false }
+      const info = yield* fs.stat(canonical).pipe(Effect.orDie)
       if (info.type !== "File") return { path: relative, exists: true }
       return {
         path: relative,
         exists: true,
-        hash: Hash.sha256(Buffer.from(yield* fs.readFile(target).pipe(Effect.orDie))),
+        hash: Hash.sha256(Buffer.from(yield* fs.readFile(canonical).pipe(Effect.orDie))),
       }
     })
 
@@ -93,7 +97,8 @@ const layer = Layer.effect(
           (check: ProContract.ReplayCheck) =>
             Effect.gen(function* () {
               const [command, ...args] = check.argv
-              const cwd = path.resolve(root, check.cwd ?? ".")
+              const selected = path.resolve(root, check.cwd ?? ".")
+              const cwd = yield* fs.realPath(selected).pipe(Effect.catch(() => Effect.succeed(selected)))
               if (!command || !FSUtil.contains(root, cwd))
                 return {
                   argv: check.argv,
@@ -102,11 +107,20 @@ const layer = Layer.effect(
                   error: "Replay check escapes the candidate root",
                 } satisfies CheckResult
               return yield* processes
-                .run(ChildProcess.make(command, args, { cwd, stdin: "ignore", extendEnv: true }), {
-                  timeout: check.timeout,
-                  maxOutputBytes: MAX_OUTPUT_BYTES,
-                  maxErrorBytes: MAX_OUTPUT_BYTES,
-                })
+                .run(
+                  ChildProcess.make(command, args, {
+                    cwd,
+                    stdin: "ignore",
+                    extendEnv: true,
+                    detached: process.platform !== "win32",
+                    forceKillAfter: Duration.seconds(3),
+                  }),
+                  {
+                    timeout: check.timeout,
+                    maxOutputBytes: MAX_OUTPUT_BYTES,
+                    maxErrorBytes: MAX_OUTPUT_BYTES,
+                  },
+                )
                 .pipe(
                   Effect.map(
                     (result): CheckResult => ({
@@ -116,6 +130,8 @@ const layer = Layer.effect(
                       exit: result.exitCode,
                       stdoutHash: Hash.sha256(result.stdout),
                       stderrHash: Hash.sha256(result.stderr),
+                      stdoutTruncated: result.stdoutTruncated,
+                      stderrTruncated: result.stderrTruncated,
                     }),
                   ),
                   Effect.catch((error) =>
