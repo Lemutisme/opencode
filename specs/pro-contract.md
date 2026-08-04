@@ -397,6 +397,12 @@ concrete candidate before broad exploration; independent verification owns
 exhaustive evaluation and returns finite evidence. Larger task artifacts remain
 adapter-owned and should form a content-addressed justification bundle:
 
+OpenCode treats handoff uncertainties as material only when they could change
+acceptance. The first handoff with such uncertainties and reserved attempt
+headroom becomes a subject-bound visible challenge. A fresh Session owns one
+review and remediation pass; the final attempt hands any residual uncertainty
+to the external verifier instead of opening another self-review loop.
+
 When replay is configured, OpenCode materializes that exact snapshot into a
 fresh temporary Git worktree and runs the frozen argv-based checks there. It
 hashes command outputs and required artifacts into a finite report stored

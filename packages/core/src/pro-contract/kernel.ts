@@ -77,6 +77,7 @@ export type Command =
       readonly uncertainties: ReadonlyArray<string>
       readonly subjectHash: string
       readonly replay?: ProContract.ReplayResult
+      readonly review?: { readonly evidenceHash: string; readonly summary: string }
       readonly time: number
     }
   | {
@@ -247,7 +248,9 @@ export function transition(state: State, command: Command): Result {
       if (command.replay.policyHash !== hashReplay(replay)) return reject("replay policy does not match")
       if (command.replay.subjectHash !== command.subjectHash) return reject("replay subject does not match")
     }
-    if (command.replay && !command.replay.passed)
+    if (command.review && command.uncertainties.length === 0) return reject("review requires material uncertainty")
+    const challenge = command.replay && !command.replay.passed ? command.replay : command.review
+    if (challenge)
       return accept({
         ...state,
         contracts: {
@@ -261,9 +264,9 @@ export function transition(state: State, command: Command): Result {
             challenge: {
               revision: contract.revision,
               subjectHash: command.subjectHash,
-              evidenceHash: command.replay.evidenceHash,
+              evidenceHash: challenge.evidenceHash,
               disclosure: "executor",
-              summary: command.replay.summary,
+              summary: challenge.summary,
               time: command.time,
             },
             attestationID: undefined,

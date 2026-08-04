@@ -15,6 +15,8 @@ import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 
+const UNCERTAINTY_REVIEW = "Resolve the material handoff uncertainties:"
+
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
@@ -117,7 +119,7 @@ const layer = Layer.effectDiscard(
         }),
         contract_report_ready: Tool.make({
           description:
-            "Hand off the active contract for independent verification. State completed checks and every known unresolved assumption; use contract_report_blocked instead when an uncertainty prevents meaningful verification.",
+            "Hand off the active contract for independent verification. State completed checks and only unresolved assumptions that could materially change acceptance; put informational limitations in the summary. A first handoff with material uncertainties uses reserved attempt headroom for one subject-bound review and remediation. Use contract_report_blocked when an uncertainty prevents meaningful verification.",
           input: Schema.Struct({
             summary: Schema.NonEmptyString,
             uncertainties: Schema.Array(Schema.NonEmptyString),
@@ -138,6 +140,33 @@ const layer = Layer.effectDiscard(
                     subjectHash,
                   })
                 : undefined
+              const now = yield* Clock.currentTimeMillis
+              const reviewed = input.uncertainties.length
+                ? (yield* contracts.history({ contractID: contract.id })).some(
+                    (entry) =>
+                      entry.decision.type === "accepted" &&
+                      entry.command.type === "report-ready" &&
+                      entry.command.revision === contract.revision &&
+                      entry.command.review !== undefined,
+                  )
+                : false
+              const review =
+                replay?.passed !== false &&
+                input.uncertainties.length > 0 &&
+                !reviewed &&
+                binding.attempts < contract.spec.resolution.maxAttempts
+                  ? {
+                      evidenceHash: Hash.sha256(
+                        JSON.stringify({
+                          contractID: contract.id,
+                          revision: contract.revision,
+                          subjectHash,
+                          uncertainties: input.uncertainties,
+                        }),
+                      ),
+                      summary: `${UNCERTAINTY_REVIEW}\n${input.uncertainties.map((item) => `- ${item}`).join("\n")}`,
+                    }
+                  : undefined
               const receipt = yield* contracts.reportReady({
                 contractID: binding.contractID,
                 revision: binding.revision,
@@ -145,7 +174,8 @@ const layer = Layer.effectDiscard(
                 uncertainties: input.uncertainties,
                 subjectHash,
                 replay,
-                time: yield* Clock.currentTimeMillis,
+                review,
+                time: now,
               })
               if (receipt.decision.type === "rejected")
                 return yield* new ToolFailure({ message: receipt.decision.reason })

@@ -763,17 +763,9 @@ describe("SessionRunnerLLM", () => {
         contractID: contract.id,
         revision: contract.revision,
         summary: "parser repaired",
-        uncertainties: [],
+        uncertainties: ["offline build"],
         subjectHash: "candidate-subject-2",
-        time: Date.now(),
-      })
-      yield* contracts.challenge({
-        contractID: contract.id,
-        revision: contract.revision,
-        subjectHash: "candidate-subject-2",
-        evidenceHash: "offline-witness",
-        disclosure: "executor",
-        summary: "Offline build regressed",
+        review: { evidenceHash: "offline-witness", summary: "Offline build regressed" },
         time: Date.now(),
       })
       yield* contracts.activate(contract.id, contract.revision, Date.now())

@@ -62,6 +62,7 @@ export interface Interface {
     readonly uncertainties: ReadonlyArray<string>
     readonly subjectHash: string
     readonly replay?: Schema.ReplayResult
+    readonly review?: { readonly evidenceHash: string; readonly summary: string }
     readonly time: number
   }) => Effect.Effect<Receipt>
   readonly reportBlocked: (input: {

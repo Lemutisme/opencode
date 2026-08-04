@@ -447,6 +447,94 @@ describe("LocationServiceMap", () => {
     ),
   )
 
+  it.live("turns material handoff uncertainty into one bounded remediation", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.writeFile(path.join(dir.path, "candidate.txt"), "candidate\n")
+            await $`git init`.cwd(dir.path).quiet()
+            await $`git config core.fsmonitor false`.cwd(dir.path).quiet()
+            await $`git config commit.gpgsign false`.cwd(dir.path).quiet()
+            await $`git config user.email test@opencode.test`.cwd(dir.path).quiet()
+            await $`git config user.name Test`.cwd(dir.path).quiet()
+            await $`git add .`.cwd(dir.path).quiet()
+            await $`git commit -m initial`.cwd(dir.path).quiet()
+          })
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          yield* Effect.gen(function* () {
+            const contracts = yield* ProContract.Service
+            const bindings = yield* ProContractOpenCode.Service
+            const registry = yield* ToolRegistry.Service
+            const contractID = ProContract.ID.make("pct_uncertainty_review")
+            const spec = ProContract.defaultSpec("Review material uncertainty", Date.now())
+            yield* contracts.issue({ id: contractID, scope: "review", spec, executor: "opencode" })
+            yield* bindings.create({
+              contractID,
+              revision: 1,
+              location,
+              model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") }),
+              nextActionAt: 0,
+            })
+            yield* contracts.activate(contractID, 1, Date.now())
+            const claimed = yield* bindings.claim(contractID, Date.now())
+            const contractSessionID = claimed
+              ? claimed.sessionID
+              : yield* Effect.die("Contract attempt was not claimed")
+
+            const settled = yield* settleTool(registry, {
+              sessionID: contractSessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-report-uncertainty",
+                name: "contract_report_ready",
+                input: {
+                  summary: "candidate ready for review",
+                  uncertainties: ["CLI diagnostics may not match"],
+                },
+              },
+            })
+
+            expect(settled.output?.structured).toEqual({ recorded: true })
+            expect(yield* contracts.get(contractID)).toMatchObject({
+              status: "dormant",
+              challenge: {
+                disclosure: "executor",
+                summary: "Resolve the material handoff uncertainties:\n- CLI diagnostics may not match",
+              },
+            })
+            yield* contracts.activate(contractID, 1, Date.now())
+            const remediation = yield* bindings.claim(contractID, Date.now())
+            if (!remediation) return yield* Effect.die("Remediation attempt was not claimed")
+            yield* settleTool(registry, {
+              sessionID: remediation.sessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-report-residual-uncertainty",
+                name: "contract_report_ready",
+                input: {
+                  summary: "candidate remediated",
+                  uncertainties: ["CLI diagnostics may still vary by platform"],
+                },
+              },
+            })
+
+            expect(yield* contracts.get(contractID)).toMatchObject({
+              status: "verification",
+              handoff: { uncertainties: ["CLI diagnostics may still vary by platform"] },
+            })
+            expect(yield* contracts.history({ contractID })).toHaveLength(5)
+          }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
+        }),
+      ),
+    ),
+  )
+
   it.live("rejects an unavailable selected model during location model resolution", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

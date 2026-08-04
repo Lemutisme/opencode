@@ -188,28 +188,35 @@ const layer = Layer.effect(
       const contract = contractBinding ? yield* contracts.get(contractBinding.contractID) : undefined
       const contractChallenges =
         contract?.status === "active" && contract.challenge?.disclosure === "executor"
-          ? (yield* contracts.history({ contractID: contract.id })).flatMap((entry) =>
-              entry.decision.type === "accepted" &&
-              entry.command.type === "challenge" &&
-              entry.command.challenge.revision === contract.revision &&
-              entry.command.challenge.disclosure === "executor"
-                ? [entry.command.challenge]
-                : entry.decision.type === "accepted" &&
-                    entry.command.type === "report-ready" &&
-                    entry.command.revision === contract.revision &&
-                    entry.command.replay?.passed === false
-                  ? [
-                      {
-                        revision: entry.command.revision,
-                        subjectHash: entry.command.subjectHash,
-                        evidenceHash: entry.command.replay.evidenceHash,
-                        disclosure: "executor" as const,
-                        summary: entry.command.replay.summary,
-                        time: entry.command.time,
-                      },
-                    ]
-                  : [],
-            )
+          ? (yield* contracts.history({ contractID: contract.id })).flatMap((entry) => {
+              if (
+                entry.decision.type === "accepted" &&
+                entry.command.type === "challenge" &&
+                entry.command.challenge.revision === contract.revision &&
+                entry.command.challenge.disclosure === "executor"
+              )
+                return [entry.command.challenge]
+              if (
+                entry.decision.type !== "accepted" ||
+                entry.command.type !== "report-ready" ||
+                entry.command.revision !== contract.revision
+              )
+                return []
+              const review =
+                entry.command.review ?? (entry.command.replay?.passed === false ? entry.command.replay : undefined)
+              return review
+                ? [
+                    {
+                      revision: entry.command.revision,
+                      subjectHash: entry.command.subjectHash,
+                      evidenceHash: review.evidenceHash,
+                      disclosure: "executor" as const,
+                      summary: review.summary,
+                      time: entry.command.time,
+                    },
+                  ]
+                : []
+            })
           : []
       const contractDependencies =
         contract?.status === "active"
