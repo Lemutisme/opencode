@@ -56,7 +56,10 @@ const CandidatePath = RelativePath.check(
 export const ReplayCheck = Schema.Struct({
   argv: Schema.Array(Schema.NonEmptyString),
   cwd: CandidatePath.pipe(optional),
-  timeout: PositiveInt.check(Schema.isLessThanOrEqualTo(10 * 60 * 1_000)),
+  timeout: PositiveInt.check(
+    Schema.isGreaterThanOrEqualTo(1_000),
+    Schema.isLessThanOrEqualTo(10 * 60 * 1_000),
+  ).annotate({ description: "Timeout in milliseconds (1,000 to 600,000)." }),
   exit: NonNegativeInt,
 }).annotate({ identifier: "ProContract.ReplayCheck" })
 export interface ReplayCheck extends Schema.Schema.Type<typeof ReplayCheck> {}

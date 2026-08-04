@@ -411,6 +411,8 @@ isolates replay filesystem mutations from the candidate; host, credential, and
 network isolation still depend on the deployment boundary.
 Replay working directories and artifact paths are relative to the candidate
 root; absolute and parent-escaping paths are rejected before issuance.
+Replay timeouts are milliseconds and must be between one second and ten
+minutes, preventing process startup latency from becoming a false failure.
 
 ```text
 claim + assumptions + witnesses + unknowns + provenance + disclosure policy

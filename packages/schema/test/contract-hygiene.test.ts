@@ -47,6 +47,9 @@ describe("contract hygiene", () => {
       expect(() =>
         decode({ checks: [{ argv: ["true"], cwd, timeout: 1000, exit: 0 }], protected: [], artifacts: [] }),
       ).toThrow()
+    expect(() =>
+      decode({ checks: [{ argv: ["true"], cwd: ".", timeout: 10, exit: 0 }], protected: [], artifacts: [] }),
+    ).toThrow()
   })
 
   test("reusable public identifiers are stable and unique", () => {
