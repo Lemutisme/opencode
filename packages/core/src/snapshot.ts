@@ -16,7 +16,7 @@ export const ID = Schema.String.pipe(Schema.brand("Snapshot.ID"))
 export type ID = typeof ID.Type
 
 export class Error extends Schema.TaggedErrorClass<Error>()("Snapshot.Error", {
-  operation: Schema.Literals(["capture", "files", "diff", "preview", "restore"]),
+  operation: Schema.Literals(["capture", "files", "diff", "preview", "restore", "materialize"]),
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
@@ -79,6 +79,12 @@ export interface Interface {
    * only known paths should change.
    */
   readonly checkout: (snapshot: ID) => Effect.Effect<void, Error>
+
+  /** Materialize one captured tree into a new isolated worktree. */
+  readonly materialize: (input: {
+    readonly snapshot: ID
+    readonly directory: AbsolutePath
+  }) => Effect.Effect<void, Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Snapshot") {}
@@ -223,7 +229,28 @@ const layer = Layer.effect(
         .pipe(Effect.mapError((cause) => failure("restore", cause)))
     })
 
-    return Service.of({ capture, files, diff, preview, restore, checkout })
+    const materialize = Effect.fn("Snapshot.materialize")(function* (input: {
+      readonly snapshot: ID
+      readonly directory: AbsolutePath
+    }) {
+      if (!(yield* enabled())) return yield* new Error({ operation: "materialize", message: "Snapshots are disabled" })
+      if (yield* fs.existsSafe(input.directory))
+        return yield* new Error({ operation: "materialize", message: `Directory already exists: ${input.directory}` })
+      const source = yield* repository().pipe(Effect.mapError((cause) => failure("materialize", cause)))
+      const gitDirectory = AbsolutePath.make(`${input.directory}.git`)
+      yield* fs
+        .makeDirectory(input.directory, { recursive: true })
+        .pipe(Effect.mapError((cause) => new Error({ operation: "materialize", message: cause.message, cause })))
+      const target = yield* git.repo
+        .create({ worktree: input.directory, gitDirectory, seed: source })
+        .pipe(Effect.mapError((cause) => failure("materialize", cause)))
+      yield* git.tree
+        .checkout({ repository: target, tree: Git.TreeID.make(input.snapshot) })
+        .pipe(Effect.mapError((cause) => failure("materialize", cause)))
+      return undefined
+    })
+
+    return Service.of({ capture, files, diff, preview, restore, checkout, materialize })
   }),
 )
 
@@ -244,6 +271,7 @@ export const noopLayer = Layer.succeed(
     preview: () => Effect.succeed([]),
     restore: () => Effect.void,
     checkout: () => Effect.void,
+    materialize: () => Effect.void,
   }),
 )
 

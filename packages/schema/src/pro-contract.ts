@@ -45,7 +45,7 @@ export const Budget = Schema.Struct({
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}
 
 export const ReplayCheck = Schema.Struct({
-  argv: Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1)),
+  argv: Schema.Array(Schema.NonEmptyString),
   cwd: RelativePath.pipe(optional),
   timeout: PositiveInt.check(Schema.isLessThanOrEqualTo(10 * 60 * 1_000)),
   exit: NonNegativeInt,

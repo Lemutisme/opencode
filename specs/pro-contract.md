@@ -393,6 +393,13 @@ concrete candidate before broad exploration; independent verification owns
 exhaustive evaluation and returns finite evidence. Larger task artifacts remain
 adapter-owned and should form a content-addressed justification bundle:
 
+When replay is configured, OpenCode materializes that exact snapshot into a
+fresh temporary Git worktree and runs the frozen argv-based checks there. It
+hashes command outputs and required artifacts into a finite report stored
+outside the candidate Location, then removes the temporary worktree. This
+isolates replay filesystem mutations from the candidate; host, credential, and
+network isolation still depend on the deployment boundary.
+
 ```text
 claim + assumptions + witnesses + unknowns + provenance + disclosure policy
 ```

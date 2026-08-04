@@ -132,6 +132,7 @@ export function transition(state: State, command: Command): Result {
     const replay = command.draft.spec.evidence.replay
     if (replay && replay.checks.length === 0 && replay.protected.length === 0 && replay.artifacts.length === 0)
       return reject("replay policy is empty")
+    if (replay?.checks.some((check) => check.argv.length === 0)) return reject("replay check command is empty")
     const existing = state.contracts[command.draft.id]
     if (existing) {
       if (

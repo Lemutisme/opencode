@@ -20,6 +20,7 @@ import { PluginV2 } from "./plugin"
 import { PluginInternal } from "./plugin/internal"
 import { Policy } from "./policy"
 import { ProjectCopy } from "./project/copy"
+import { ProContractReplay } from "./pro-contract/replay"
 import { Pty } from "./pty"
 import { QuestionV2 } from "./question"
 import { Reference } from "./reference"
@@ -75,6 +76,7 @@ export const locationServices = LayerNode.group([
   ReadToolFileSystem.node,
   BuiltInTools.node,
   ContractControlTools.node,
+  ProContractReplay.node,
   SessionRunnerModel.node,
   Snapshot.node,
   SessionRunnerLLM.node,

@@ -49,6 +49,12 @@ describe("Snapshot", () => {
             expect(after).toBeDefined()
             if (!after) return
 
+            const materialized = path.join(tmp.path, "materialized")
+            yield* snapshot.materialize({ snapshot: after, directory: AbsolutePath.make(materialized) })
+            expect(yield* read(path.join(materialized, "scope", "tracked.txt"))).toBe("two\n")
+            expect(yield* read(path.join(materialized, "scope", "added.txt"))).toBe("added\n")
+            expect(yield* read(path.join(materialized, "outside.txt"))).toBe("outside\n")
+
             expect(yield* snapshot.files({ from: before, to: after })).toEqual([
               RelativePath.make("scope/added.txt"),
               RelativePath.make("scope/tracked.txt"),
