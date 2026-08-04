@@ -4,12 +4,18 @@ import { AgentV2 } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
+import { ProContract } from "@opencode-ai/core/pro-contract"
+import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { executeTool, settleTool, toolDefinitions } from "./lib/tool"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Schema, SchemaGetter, SchemaIssue, Scope } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { testEffect } from "./lib/effect"
 
 const bounds: ToolOutputStore.BoundInput[] = []
@@ -33,6 +39,11 @@ const registryLayer = AppNodeBuilder.build(ToolRegistry.node, [[ToolOutputStore.
 const it = testEffect(registryLayer)
 const integrated = testEffect(
   AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node]), [
+    [ToolOutputStore.node, outputStore],
+  ]),
+)
+const contractIntegrated = testEffect(
+  AppNodeBuilder.build(LayerNode.group([ToolRegistry.node, ProContract.node, ProContractOpenCode.node]), [
     [ToolOutputStore.node, outputStore],
   ]),
 )
@@ -200,6 +211,51 @@ describe("ToolRegistry", () => {
           Effect.catchDefect(Effect.succeed),
         ),
       ).toBe("unexpected executor defect")
+    }),
+  )
+
+  contractIntegrated.effect("bounds filesystem tools in Contract sessions", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const started = yield* Deferred.make<void>()
+      yield* service.register({
+        edit: Tool.make({
+          description: "Never settles",
+          input: Schema.Struct({ text: Schema.String }),
+          output: Schema.Struct({ text: Schema.String }),
+          execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+        }),
+      })
+      const contractID = ProContract.ID.make("pct_bounded_tool")
+      const issued = yield* contracts.issue({
+        id: contractID,
+        scope: "bounded-tool",
+        spec: ProContract.defaultSpec("Bound filesystem execution", Date.now()),
+        executor: "opencode",
+      })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") }),
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+      if (!attempt) return yield* Effect.die("Contract attempt was not claimed")
+      const materialized = yield* service.materialize()
+      const settled = yield* materialized
+        .settle({ ...call("edit"), sessionID: attempt.sessionID })
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      yield* TestClock.adjust("1 minute")
+
+      expect((yield* Fiber.join(settled)).result).toEqual({
+        type: "error",
+        value: "Tool edit exceeded the Contract time limit",
+      })
     }),
   )
 

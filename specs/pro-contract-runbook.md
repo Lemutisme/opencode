@@ -414,6 +414,9 @@ inspection inside `read` returns a tool error after one minute. Permission waits
 are outside the read timeout. Streaming provider events reset the provider
 bound, and process tools retain their own explicit timeout so long builds and
 training are not constrained by the short read policy.
+Contract-bound `read`, `edit`, `write`, `apply_patch`, `glob`, and `grep` calls
+also settle with an explicit error after one minute. Ordinary Session
+permission waits and process tools keep their existing behavior.
 
 Treat the Contract Location as the capability boundary:
 

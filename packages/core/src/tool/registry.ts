@@ -1,6 +1,6 @@
 export * as ToolRegistry from "./registry"
 
-import { ToolOutput, type ToolCall, type ToolDefinition, type ToolResultValue } from "@opencode-ai/llm"
+import { ToolFailure, ToolOutput, type ToolCall, type ToolDefinition, type ToolResultValue } from "@opencode-ai/llm"
 import { Clock, Context, Effect, Layer, Scope } from "effect"
 import { AgentV2 } from "../agent"
 import { PermissionV2 } from "../permission"
@@ -13,6 +13,8 @@ import { definition, permission, settle, validateName, type AnyTool, type Regist
 import { Tools } from "./tools"
 import { makeLocationNode } from "../effect/app-node"
 import { ProContractOpenCode } from "../pro-contract/open-code"
+
+const BOUNDED_CONTRACT_TOOLS = new Set(["read", "edit", "write", "apply_patch", "glob", "grep"])
 
 export type ExecuteInput = {
   readonly sessionID: SessionSchema.ID
@@ -63,12 +65,25 @@ const registryLayer = Layer.effect(
         }
       if (advertised && registration.identity !== advertised)
         return { result: { type: "error" as const, value: `Stale tool call: ${input.call.name}` } }
-      const pending = yield* settle(registration.tool, input.call, {
+      const execute = settle(registration.tool, input.call, {
         sessionID: input.sessionID,
         agent: input.agent,
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
-      }).pipe(
+      })
+      const boundedContractTool =
+        BOUNDED_CONTRACT_TOOLS.has(input.call.name) && (yield* contracts.forSession(input.sessionID)) !== undefined
+      const pending = yield* (
+        boundedContractTool
+          ? execute.pipe(
+              Effect.timeoutOrElse({
+                duration: "1 minute",
+                orElse: () =>
+                  Effect.fail(new ToolFailure({ message: `Tool ${input.call.name} exceeded the Contract time limit` })),
+              }),
+            )
+          : execute
+      ).pipe(
         Effect.map((output) => ({ output })),
         Effect.catchTag("LLM.ToolFailure", (failure) =>
           Effect.succeed({ result: { type: "error" as const, value: failure.message } }),
@@ -76,13 +91,13 @@ const registryLayer = Layer.effect(
       )
       if ("result" in pending) return pending
       const output = pending.output
-      const bounded = yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
-      const result = ToolOutput.toResultValue(bounded.output)
+      const retained = yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
+      const result = ToolOutput.toResultValue(retained.output)
       if (result.type === "error")
-        return bounded.outputPaths.length > 0 ? { result, outputPaths: bounded.outputPaths } : { result }
-      return bounded.outputPaths.length > 0
-        ? { result, output: bounded.output, outputPaths: bounded.outputPaths }
-        : { result, output: bounded.output }
+        return retained.outputPaths.length > 0 ? { result, outputPaths: retained.outputPaths } : { result }
+      return retained.outputPaths.length > 0
+        ? { result, output: retained.output, outputPaths: retained.outputPaths }
+        : { result, output: retained.output }
     })
 
     return Service.of({
