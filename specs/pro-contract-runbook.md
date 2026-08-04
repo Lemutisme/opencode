@@ -350,6 +350,10 @@ semantic attempt. A pass is recorded in the handoff and is required before the
 principal can attest; replay does not replace principal judgment in this
 conservative policy.
 
+The first replay-passing handoff with remaining attempt headroom also receives
+one fresh counterexample review, even when the executor reports no uncertainty.
+The next handoff proceeds to verification instead of opening another review.
+
 Replay inherits the verifier process environment and network namespace. It
 isolates filesystem mutations from the candidate but does not provide host or
 credential isolation. Files named in `protected` must be regular files with the
