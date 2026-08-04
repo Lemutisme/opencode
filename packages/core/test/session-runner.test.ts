@@ -747,7 +747,7 @@ describe("SessionRunnerLLM", () => {
         "The failing behavior is isolated to argument parsing.",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "Produce the smallest concrete candidate before broad exploration.",
+        "test one discriminating counterexample for each uncovered material class",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Establish the runner prerequisite")

@@ -392,16 +392,19 @@ term changes use the durable Contract channels instead.
 ### Handoff and justification artifacts
 
 An executor handoff contains a concise claim, known unresolved assumptions, and
-an institution-captured subject hash. The executor produces the smallest
-concrete candidate before broad exploration; independent verification owns
-exhaustive evaluation and returns finite evidence. Larger task artifacts remain
-adapter-owned and should form a content-addressed justification bundle:
+an institution-captured subject hash. The executor produces a concrete
+candidate early, then tests discriminating counterexamples from materially
+different failure surfaces before handoff. External verification adjudicates
+the claim rather than making executor exploration exhaustive. Larger task
+artifacts remain adapter-owned and should form a content-addressed justification
+bundle:
 
-OpenCode treats handoff uncertainties as material only when they could change
-acceptance. The first handoff with such uncertainties and reserved attempt
-headroom becomes a subject-bound visible challenge. A fresh Session owns one
-review and remediation pass; the final attempt hands any residual uncertainty
-to the external verifier instead of opening another self-review loop.
+OpenCode does not depend on an executor discovering its own blind spots. The
+first handoff with reserved attempt headroom becomes a subject-bound visible
+challenge even when the executor reports no uncertainty. A fresh Session owns
+one counterexample review and remediation pass; the final attempt hands any
+residual uncertainty to the external verifier instead of opening another
+self-review loop.
 
 When replay is configured, OpenCode materializes that exact snapshot into a
 fresh temporary Git worktree and runs the frozen argv-based checks there. It

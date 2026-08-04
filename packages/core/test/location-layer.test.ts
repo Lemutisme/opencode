@@ -447,7 +447,7 @@ describe("LocationServiceMap", () => {
     ),
   )
 
-  it.live("turns material handoff uncertainty into one bounded remediation", () =>
+  it.live("reviews the first handoff once in a fresh attempt", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -494,7 +494,7 @@ describe("LocationServiceMap", () => {
                 name: "contract_report_ready",
                 input: {
                   summary: "candidate ready for review",
-                  uncertainties: ["CLI diagnostics may not match"],
+                  uncertainties: [],
                 },
               },
             })
@@ -504,12 +504,14 @@ describe("LocationServiceMap", () => {
               status: "dormant",
               challenge: {
                 disclosure: "executor",
-                summary: "Resolve the material handoff uncertainties:\n- CLI diagnostics may not match",
+                summary:
+                  "Independently challenge this candidate. Find one material way it could fail the Contract that existing evidence does not cover. Repair it or report the residual risk.",
               },
             })
             yield* contracts.activate(contractID, 1, Date.now())
             const remediation = yield* bindings.claim(contractID, Date.now())
             if (!remediation) return yield* Effect.die("Remediation attempt was not claimed")
+            expect(remediation.sessionID).not.toBe(contractSessionID)
             yield* settleTool(registry, {
               sessionID: remediation.sessionID,
               ...toolIdentity,

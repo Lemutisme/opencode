@@ -340,7 +340,7 @@ const layer = Layer.effect(
                   : []),
                 `Delegated authority: ${contract.spec.authority.join(", ")}.`,
                 "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
-                "Produce the smallest concrete candidate before broad exploration. The independent verifier owns exhaustive evaluation: run one representative suite, then only targeted checks after changes; report residual mismatches as uncertainties instead of repeating broad searches.",
+                "Produce a concrete candidate early. Before handoff, identify materially different ways it could fail the Contract. Within budget, test one discriminating counterexample for each uncovered material class; do not repeat covered checks, and report residual risks as uncertainties.",
                 "After completing the prescribed checks, call contract_report_ready with all known unresolved assumptions. A final answer alone does not hand work to the verifier.",
                 "</pro_contract>",
               ].join("\n")

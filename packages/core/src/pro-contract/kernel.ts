@@ -248,7 +248,6 @@ export function transition(state: State, command: Command): Result {
       if (command.replay.policyHash !== hashReplay(replay)) return reject("replay policy does not match")
       if (command.replay.subjectHash !== command.subjectHash) return reject("replay subject does not match")
     }
-    if (command.review && command.uncertainties.length === 0) return reject("review requires material uncertainty")
     const challenge = command.replay && !command.replay.passed ? command.replay : command.review
     if (challenge)
       return accept({
