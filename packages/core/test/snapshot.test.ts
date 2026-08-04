@@ -59,9 +59,9 @@ describe("Snapshot", () => {
                 .toString()
                 .trim(),
             ).toBe("true")
-            expect((yield* Effect.promise(() => $`git status --short`.cwd(materialized).quiet())).stdout.toString()).toBe(
-              "",
-            )
+            expect(
+              (yield* Effect.promise(() => $`git status --short`.cwd(materialized).quiet())).stdout.toString(),
+            ).toBe("")
 
             expect(yield* snapshot.files({ from: before, to: after })).toEqual([
               RelativePath.make("scope/added.txt"),

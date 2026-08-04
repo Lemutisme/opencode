@@ -417,7 +417,9 @@ describe("LocationServiceMap", () => {
             })
             yield* contracts.activate(contractID, 1, Date.now())
             const claimed = yield* bindings.claim(contractID, Date.now())
-            const contractSessionID = claimed ? claimed.sessionID : yield* Effect.die("Contract attempt was not claimed")
+            const contractSessionID = claimed
+              ? claimed.sessionID
+              : yield* Effect.die("Contract attempt was not claimed")
 
             const settled = yield* settleTool(registry, {
               sessionID: contractSessionID,
