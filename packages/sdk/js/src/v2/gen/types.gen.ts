@@ -6170,13 +6170,39 @@ export type ProContractTrigger =
 export type ProContractCapability = "filesystem.read" | "filesystem.write" | "process.execute"
 
 export type ProContractBudget = {
+  /**
+   * Total provider turns shared by every attempt. Use 1000 when the principal gives no tighter limit.
+   */
   turns: number
+  /**
+   * Total tool actions shared by every attempt. Use 10000 when the principal gives no tighter limit.
+   */
   actions: number
+  /**
+   * Absolute Unix timestamp in milliseconds.
+   */
   deadline: number
+}
+
+export type ProContractReplayCheck = {
+  argv: Array<string>
+  cwd?: string
+  timeout: number
+  exit: number
+}
+
+export type ProContractReplayPolicy = {
+  checks: Array<ProContractReplayCheck>
+  protected: Array<{
+    path: string
+    hash: string
+  }>
+  artifacts: Array<string>
 }
 
 export type ProContractEvidence = {
   type: "principal"
+  replay?: ProContractReplayPolicy
 }
 
 export type ProContractResolution = {
@@ -6187,6 +6213,9 @@ export type ProContractResolution = {
 export type ProContractSpec = {
   trigger: ProContractTrigger
   goal: string
+  /**
+   * Self-contained handoff brief. Preserve user-stated quality criteria. For open-ended optimization, state the evaluation protocol, required exploration, known quality floor, stopping rule, and assumptions; expose missing criteria instead of inventing them.
+   */
   brief: string
   requires: Array<ProContractRequirement>
   authority: Array<ProContractCapability>
@@ -6202,10 +6231,19 @@ export type ProContractBlocked = {
   time: number
 }
 
+export type ProContractReplayResult = {
+  policyHash: string
+  subjectHash: string
+  evidenceHash: string
+  passed: boolean
+  summary: string
+}
+
 export type ProContractHandoff = {
   summary: string
   uncertainties: Array<string>
   subjectHash: string
+  replay?: ProContractReplayResult
   time: number
 }
 

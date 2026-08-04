@@ -2826,7 +2826,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["id"]
   readonly scope: {
@@ -2840,7 +2852,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["scope"]
   readonly goal: {
@@ -2854,7 +2878,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["goal"]
   readonly brief?: {
@@ -2868,7 +2904,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["brief"]
   readonly requires?: {
@@ -2882,7 +2930,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["requires"]
   readonly location: {
@@ -2896,7 +2956,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["location"]
   readonly model: {
@@ -2910,7 +2982,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["model"]
   readonly trigger?: {
@@ -2924,7 +3008,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["trigger"]
   readonly authority?: {
@@ -2938,7 +3034,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["authority"]
   readonly budget?: {
@@ -2952,7 +3060,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["budget"]
   readonly evidence?: {
@@ -2966,7 +3086,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["evidence"]
   readonly resolution?: {
@@ -2980,7 +3112,19 @@ export type ServerProContractIssueInput = {
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
-    readonly evidence?: { readonly type: "principal" } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["resolution"]
 }
@@ -2996,7 +3140,19 @@ export type ServerProContractIssueOutput = {
       readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
       readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
-      readonly evidence: { readonly type: "principal" }
+      readonly evidence: {
+        readonly type: "principal"
+        readonly replay?: {
+          readonly checks: ReadonlyArray<{
+            readonly argv: ReadonlyArray<string>
+            readonly cwd?: string
+            readonly timeout: number
+            readonly exit: number
+          }>
+          readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+          readonly artifacts: ReadonlyArray<string>
+        }
+      }
       readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
     }
     readonly issuer: string
@@ -3009,6 +3165,13 @@ export type ServerProContractIssueOutput = {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
       readonly subjectHash: string
+      readonly replay?: {
+        readonly policyHash: string
+        readonly subjectHash: string
+        readonly evidenceHash: string
+        readonly passed: boolean
+        readonly summary: string
+      }
       readonly time: number
     }
     readonly challenge?: {
@@ -3028,7 +3191,19 @@ export type ServerProContractIssueOutput = {
         readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
         readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
-        readonly evidence: { readonly type: "principal" }
+        readonly evidence: {
+          readonly type: "principal"
+          readonly replay?: {
+            readonly checks: ReadonlyArray<{
+              readonly argv: ReadonlyArray<string>
+              readonly cwd?: string
+              readonly timeout: number
+              readonly exit: number
+            }>
+            readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+            readonly artifacts: ReadonlyArray<string>
+          }
+        }
         readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
       }
       readonly specHash: string
@@ -3067,7 +3242,19 @@ export type ServerProContractListOutput = {
       readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
       readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
-      readonly evidence: { readonly type: "principal" }
+      readonly evidence: {
+        readonly type: "principal"
+        readonly replay?: {
+          readonly checks: ReadonlyArray<{
+            readonly argv: ReadonlyArray<string>
+            readonly cwd?: string
+            readonly timeout: number
+            readonly exit: number
+          }>
+          readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+          readonly artifacts: ReadonlyArray<string>
+        }
+      }
       readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
     }
     readonly issuer: string
@@ -3080,6 +3267,13 @@ export type ServerProContractListOutput = {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
       readonly subjectHash: string
+      readonly replay?: {
+        readonly policyHash: string
+        readonly subjectHash: string
+        readonly evidenceHash: string
+        readonly passed: boolean
+        readonly summary: string
+      }
       readonly time: number
     }
     readonly challenge?: {
@@ -3099,7 +3293,19 @@ export type ServerProContractListOutput = {
         readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
         readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
-        readonly evidence: { readonly type: "principal" }
+        readonly evidence: {
+          readonly type: "principal"
+          readonly replay?: {
+            readonly checks: ReadonlyArray<{
+              readonly argv: ReadonlyArray<string>
+              readonly cwd?: string
+              readonly timeout: number
+              readonly exit: number
+            }>
+            readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+            readonly artifacts: ReadonlyArray<string>
+          }
+        }
         readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
       }
       readonly specHash: string
@@ -3133,7 +3339,19 @@ export type ServerProContractGetOutput = {
       readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
       readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
-      readonly evidence: { readonly type: "principal" }
+      readonly evidence: {
+        readonly type: "principal"
+        readonly replay?: {
+          readonly checks: ReadonlyArray<{
+            readonly argv: ReadonlyArray<string>
+            readonly cwd?: string
+            readonly timeout: number
+            readonly exit: number
+          }>
+          readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+          readonly artifacts: ReadonlyArray<string>
+        }
+      }
       readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
     }
     readonly issuer: string
@@ -3146,6 +3364,13 @@ export type ServerProContractGetOutput = {
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
       readonly subjectHash: string
+      readonly replay?: {
+        readonly policyHash: string
+        readonly subjectHash: string
+        readonly evidenceHash: string
+        readonly passed: boolean
+        readonly summary: string
+      }
       readonly time: number
     }
     readonly challenge?: {
@@ -3165,7 +3390,19 @@ export type ServerProContractGetOutput = {
         readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
         readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
-        readonly evidence: { readonly type: "principal" }
+        readonly evidence: {
+          readonly type: "principal"
+          readonly replay?: {
+            readonly checks: ReadonlyArray<{
+              readonly argv: ReadonlyArray<string>
+              readonly cwd?: string
+              readonly timeout: number
+              readonly exit: number
+            }>
+            readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+            readonly artifacts: ReadonlyArray<string>
+          }
+        }
         readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
       }
       readonly specHash: string

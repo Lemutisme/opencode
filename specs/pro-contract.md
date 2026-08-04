@@ -246,6 +246,14 @@ contract ID + revision + specification hash + artifact hash + verifier identity
 The issuer attestation and discharge are one atomic institutional transition.
 The executor cannot submit evidence or discharge the contract.
 
+Principal evidence may preregister an OpenCode replay policy. The policy is a
+finite list of argv-based checks, protected file hashes, and required artifact
+paths inside the Contract specification, so `specHash` freezes it before
+execution. A replay result is bound to that policy and the exact handoff
+subject. Failed replay may challenge the handoff; successful replay is a
+mandatory mechanical prerequisite to, but does not replace, principal
+attestation in this conservative slice.
+
 Failed verification is also an institutional transition. The challenger names
 the evaluated revision and handoff subject; the kernel rejects a mismatch
 instead of inferring the target from arrival order. An accepted challenge binds

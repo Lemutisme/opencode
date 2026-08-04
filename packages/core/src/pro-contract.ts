@@ -11,6 +11,9 @@ export {
   ID,
   Info,
   Requirement,
+  ReplayCheck,
+  ReplayPolicy,
+  ReplayResult,
   Spec,
   Status,
 } from "@opencode-ai/schema/pro-contract"
@@ -58,6 +61,7 @@ export interface Interface {
     readonly summary: string
     readonly uncertainties: ReadonlyArray<string>
     readonly subjectHash: string
+    readonly replay?: Schema.ReplayResult
     readonly time: number
   }) => Effect.Effect<Receipt>
   readonly reportBlocked: (input: {

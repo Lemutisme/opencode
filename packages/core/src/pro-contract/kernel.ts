@@ -76,6 +76,7 @@ export type Command =
       readonly summary: string
       readonly uncertainties: ReadonlyArray<string>
       readonly subjectHash: string
+      readonly replay?: ProContract.ReplayResult
       readonly time: number
     }
   | {
@@ -110,6 +111,10 @@ export function hashSpec(spec: ProContract.Spec) {
   return Hash.sha256(JSON.stringify(ProContract.Spec.make(spec)))
 }
 
+export function hashReplay(policy: ProContract.ReplayPolicy) {
+  return Hash.sha256(JSON.stringify(ProContract.ReplayPolicy.make(policy)))
+}
+
 export function transition(state: State, command: Command): Result {
   const reject = (reason: string): Result => {
     const decision = { type: "rejected" as const, reason }
@@ -124,6 +129,9 @@ export function transition(state: State, command: Command): Result {
     if (command.actor !== command.draft.issuer) return reject("only the issuer may issue the contract")
     if (command.draft.issuer === command.draft.executor) return reject("issuer and executor must be distinct")
     if (command.draft.specHash !== hashSpec(command.draft.spec)) return reject("specification hash does not match")
+    const replay = command.draft.spec.evidence.replay
+    if (replay && replay.checks.length === 0 && replay.protected.length === 0 && replay.artifacts.length === 0)
+      return reject("replay policy is empty")
     const existing = state.contracts[command.draft.id]
     if (existing) {
       if (
@@ -232,6 +240,13 @@ export function transition(state: State, command: Command): Result {
     if (contract.status !== "active") return reject("contract is not active")
     if (command.revision !== contract.revision) return reject("contract revision does not match")
     if (contract.pendingRevision) return reject("handoff is blocked while a revision petition is pending")
+    const replay = contract.spec.evidence.replay
+    if (replay && !command.replay) return reject("replay evidence is required")
+    if (!replay && command.replay) return reject("replay evidence is not configured")
+    if (replay && command.replay) {
+      if (command.replay.policyHash !== hashReplay(replay)) return reject("replay policy does not match")
+      if (command.replay.subjectHash !== command.subjectHash) return reject("replay subject does not match")
+    }
     return accept({
       ...state,
       contracts: {
@@ -245,6 +260,7 @@ export function transition(state: State, command: Command): Result {
             summary: command.summary,
             uncertainties: command.uncertainties,
             subjectHash: command.subjectHash,
+            replay: command.replay,
             time: command.time,
           },
         },
@@ -396,6 +412,14 @@ export function transition(state: State, command: Command): Result {
     if (command.attestation.specHash !== contract.specHash) return reject("attestation specification does not match")
     if (command.attestation.subjectHash !== contract.handoff.subjectHash)
       return reject("attestation subject does not match")
+    const replay = contract.spec.evidence.replay
+    if (
+      replay &&
+      (!contract.handoff.replay?.passed ||
+        contract.handoff.replay.policyHash !== hashReplay(replay) ||
+        contract.handoff.replay.subjectHash !== contract.handoff.subjectHash)
+    )
+      return reject("replay evidence does not support discharge")
     if (command.actor !== contract.issuer || command.attestation.verifierID !== contract.issuer)
       return reject("principal evidence requires issuer attestation")
     return accept({

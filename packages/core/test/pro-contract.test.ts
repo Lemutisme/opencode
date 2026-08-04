@@ -28,6 +28,11 @@ const contractID = ProContract.ID.make("pct_test")
 const executionModel = ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") })
 const spec = ProContract.defaultSpec("Ship the verified change", 0)
 const subjectHash = "subject-1"
+const replayPolicy = {
+  checks: [{ argv: ["bun", "test"], timeout: 60_000, exit: 0 }],
+  protected: [],
+  artifacts: [],
+} satisfies ProContract.ReplayPolicy
 const draft = {
   id: contractID,
   scope: "project-1",
@@ -731,6 +736,73 @@ describe("ProContract kernel", () => {
       challenge: { disclosure: "sealed", evidenceHash: "sealed-witness" },
     })
     expect(activation.decision).toEqual({ type: "rejected", reason: "contract is not dormant" })
+  })
+
+  test("requires matching replay evidence before principal discharge", () => {
+    const replaySpec = { ...spec, evidence: { type: "principal" as const, replay: replayPolicy } }
+    const replayDraft = { ...draft, spec: replaySpec, specHash: ProContract.hashSpec(replaySpec) }
+    const issued = ProContract.transition(ProContract.empty, {
+      type: "issue",
+      actor: replayDraft.issuer,
+      draft: replayDraft,
+    })
+    const activated = ProContract.transition(issued.state, {
+      type: "activate",
+      actor: "institution",
+      contractID,
+      revision: 1,
+      time: 0,
+    })
+    const ready = (passed: boolean) =>
+      ProContract.transition(activated.state, {
+        type: "report-ready",
+        actor: "institution",
+        contractID,
+        revision: 1,
+        summary: "candidate complete",
+        uncertainties: [],
+        subjectHash,
+        replay: {
+          policyHash: ProContract.hashReplay(replayPolicy),
+          subjectHash,
+          evidenceHash: passed ? "replay-pass" : "replay-fail",
+          passed,
+          summary: passed ? "Replay passed" : "Replay failed",
+        },
+        time: 1,
+      })
+    const discharge = {
+      type: "discharge",
+      actor: replayDraft.issuer,
+      contractID,
+      attestation: {
+        id: ProContract.AttestationID.make("pca_replay"),
+        revision: 1,
+        specHash: replayDraft.specHash,
+        subjectHash,
+        evidenceHash: "principal-evidence",
+        verifierID: replayDraft.issuer,
+        class: "principal",
+      },
+    } as const
+
+    expect(
+      ProContract.transition(activated.state, {
+        type: "report-ready",
+        actor: "institution",
+        contractID,
+        revision: 1,
+        summary: "candidate complete",
+        uncertainties: [],
+        subjectHash,
+        time: 1,
+      }).decision,
+    ).toEqual({ type: "rejected", reason: "replay evidence is required" })
+    expect(ProContract.transition(ready(false).state, discharge).decision).toEqual({
+      type: "rejected",
+      reason: "replay evidence does not support discharge",
+    })
+    expect(ProContract.transition(ready(true).state, discharge).state.contracts[contractID]?.status).toBe("discharged")
   })
 })
 

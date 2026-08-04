@@ -2,7 +2,7 @@ export * as ProContract from "./pro-contract"
 
 import { Schema } from "effect"
 import { ascending } from "./identifier"
-import { NonNegativeInt, optional, PositiveInt, statics } from "./schema"
+import { NonNegativeInt, optional, PositiveInt, RelativePath, statics } from "./schema"
 
 export const ID = Schema.String.check(Schema.isStartsWith("pct_")).pipe(
   Schema.brand("ProContract.ID"),
@@ -44,7 +44,34 @@ export const Budget = Schema.Struct({
 }).annotate({ identifier: "ProContract.Budget" })
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}
 
-export const Evidence = Schema.Struct({ type: Schema.Literal("principal") }).annotate({
+export const ReplayCheck = Schema.Struct({
+  argv: Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1)),
+  cwd: RelativePath.pipe(optional),
+  timeout: PositiveInt.check(Schema.isLessThanOrEqualTo(10 * 60 * 1_000)),
+  exit: NonNegativeInt,
+}).annotate({ identifier: "ProContract.ReplayCheck" })
+export interface ReplayCheck extends Schema.Schema.Type<typeof ReplayCheck> {}
+
+export const ReplayPolicy = Schema.Struct({
+  checks: Schema.Array(ReplayCheck),
+  protected: Schema.Array(Schema.Struct({ path: RelativePath, hash: Schema.NonEmptyString })),
+  artifacts: Schema.Array(RelativePath),
+}).annotate({ identifier: "ProContract.ReplayPolicy" })
+export interface ReplayPolicy extends Schema.Schema.Type<typeof ReplayPolicy> {}
+
+export const ReplayResult = Schema.Struct({
+  policyHash: Schema.NonEmptyString,
+  subjectHash: Schema.NonEmptyString,
+  evidenceHash: Schema.NonEmptyString,
+  passed: Schema.Boolean,
+  summary: Schema.NonEmptyString,
+}).annotate({ identifier: "ProContract.ReplayResult" })
+export interface ReplayResult extends Schema.Schema.Type<typeof ReplayResult> {}
+
+export const Evidence = Schema.Struct({
+  type: Schema.Literal("principal"),
+  replay: ReplayPolicy.pipe(optional),
+}).annotate({
   identifier: "ProContract.Evidence",
 })
 export type Evidence = typeof Evidence.Type
@@ -64,6 +91,7 @@ export const Handoff = Schema.Struct({
   summary: Schema.NonEmptyString,
   uncertainties: Schema.Array(Schema.NonEmptyString),
   subjectHash: Schema.NonEmptyString,
+  replay: ReplayResult.pipe(optional),
   time: NonNegativeInt,
 }).annotate({ identifier: "ProContract.Handoff" })
 export interface Handoff extends Schema.Schema.Type<typeof Handoff> {}
