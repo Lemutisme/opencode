@@ -372,8 +372,11 @@ effectful tool: `contract_propose` delegates the work, while
 exploration remains available before that decision. Work whose artifact is
 evaluated after the Session is Contract work even when execution itself is
 synchronous; `contract_continue` requires both work and validation to finish in
-the current Session and cannot replace an issued Contract. Proposal deadlines
-are absolute Unix timestamps; past drafts receive the standard 24-hour deadline
+the current Session and cannot replace an issued Contract. Once either decision
+is recorded, that Session cannot issue a second Contract for the same request.
+Implementation proposals that promise a build command or named output artifact
+must include finite replay checks and every required artifact path. Proposal
+deadlines are absolute Unix timestamps; past drafts receive the standard 24-hour deadline
 before the exact normalized specification is ratified. Model-authored proposals
 also receive a 1000-turn and 10000-action autonomy floor and at least two
 semantic attempts before approval. These budgets are total across all attempts,

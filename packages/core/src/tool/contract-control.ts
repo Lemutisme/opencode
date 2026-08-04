@@ -29,7 +29,7 @@ const layer = Layer.effectDiscard(
       .register({
         contract_propose: Tool.make({
           description:
-            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Use evidence.replay when finite repository checks or required artifacts can mechanically verify the frozen candidate. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
+            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
           input: Schema.Struct({ spec: ProContract.Spec }),
           output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
           toModelOutput: ({ output }) => [

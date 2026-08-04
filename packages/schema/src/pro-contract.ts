@@ -56,7 +56,11 @@ export const ReplayPolicy = Schema.Struct({
   checks: Schema.Array(ReplayCheck),
   protected: Schema.Array(Schema.Struct({ path: RelativePath, hash: Schema.NonEmptyString })),
   artifacts: Schema.Array(RelativePath),
-}).annotate({ identifier: "ProContract.ReplayPolicy" })
+}).annotate({
+  identifier: "ProContract.ReplayPolicy",
+  description:
+    "Harness-owned replay for the frozen candidate. Implementation Contracts that promise a build command or named output artifact should include finite checks and every required artifact path.",
+})
 export interface ReplayPolicy extends Schema.Schema.Type<typeof ReplayPolicy> {}
 
 export const ReplayResult = Schema.Struct({
@@ -70,7 +74,10 @@ export interface ReplayResult extends Schema.Schema.Type<typeof ReplayResult> {}
 
 export const Evidence = Schema.Struct({
   type: Schema.Literal("principal"),
-  replay: ReplayPolicy.pipe(optional),
+  replay: ReplayPolicy.pipe(optional).annotate({
+    description:
+      "Required for implementation work with honest finite build, test, or artifact checks; omit only when no mechanical criterion represents the goal.",
+  }),
 }).annotate({
   identifier: "ProContract.Evidence",
 })

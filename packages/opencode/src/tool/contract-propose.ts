@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Use evidence.replay when finite repository checks or required artifacts can mechanically verify the frozen candidate. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -37,6 +37,10 @@ export const ContractProposeTool = Tool.define<
           if (!agent || agent.mode !== "primary")
             return yield* Effect.die("Only a primary agent may propose a Contract")
           const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
+          if (session.metadata?.[formationMetadataKey] === "contract")
+            return yield* Effect.die("This Session already delegated its obligation to a Contract")
+          if (session.metadata?.[formationMetadataKey] === "ordinary")
+            return yield* Effect.die("This Session already committed to ordinary execution")
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
           const draft = {

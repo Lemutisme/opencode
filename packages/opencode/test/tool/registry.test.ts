@@ -176,6 +176,23 @@ describe("tool.registry", () => {
         sessionID: result.metadata.sessionID,
         model: { id: "test", providerID: "test" },
       })
+      const duplicate = yield* tool
+        .execute(
+          { spec: proposal },
+          {
+            sessionID: session.id,
+            messageID: MessageID.make("msg_duplicate_contract"),
+            agent: "build",
+            abort: new AbortController().signal,
+            callID: "call_duplicate_contract",
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+      expect(duplicate._tag).toBe("Failure")
+      expect(yield* contracts.list(session.projectID)).toHaveLength(1)
     }),
   )
 
