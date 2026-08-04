@@ -44,9 +44,18 @@ export const Budget = Schema.Struct({
 }).annotate({ identifier: "ProContract.Budget" })
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}
 
+const CandidatePath = RelativePath.check(
+  Schema.makeFilter<RelativePath>((value) => {
+    const normalized = value.replaceAll("\\", "/")
+    return normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized) || normalized.split("/").includes("..")
+      ? "Replay paths must stay inside the candidate root."
+      : undefined
+  }),
+)
+
 export const ReplayCheck = Schema.Struct({
   argv: Schema.Array(Schema.NonEmptyString),
-  cwd: RelativePath.pipe(optional),
+  cwd: CandidatePath.pipe(optional),
   timeout: PositiveInt.check(Schema.isLessThanOrEqualTo(10 * 60 * 1_000)),
   exit: NonNegativeInt,
 }).annotate({ identifier: "ProContract.ReplayCheck" })
@@ -54,8 +63,8 @@ export interface ReplayCheck extends Schema.Schema.Type<typeof ReplayCheck> {}
 
 export const ReplayPolicy = Schema.Struct({
   checks: Schema.Array(ReplayCheck),
-  protected: Schema.Array(Schema.Struct({ path: RelativePath, hash: Schema.NonEmptyString })),
-  artifacts: Schema.Array(RelativePath),
+  protected: Schema.Array(Schema.Struct({ path: CandidatePath, hash: Schema.NonEmptyString })),
+  artifacts: Schema.Array(CandidatePath),
 }).annotate({
   identifier: "ProContract.ReplayPolicy",
   description:

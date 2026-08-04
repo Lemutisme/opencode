@@ -5,6 +5,7 @@ import { FileSystem } from "../src/filesystem"
 import { Model } from "../src/model"
 import { Project } from "../src/project"
 import { Pty } from "../src/pty"
+import { ProContract } from "../src/pro-contract"
 import { Question } from "../src/question"
 import { Session } from "../src/session"
 import { SessionEvent } from "../src/session-event"
@@ -31,6 +32,21 @@ describe("contract hygiene", () => {
   test("current ID constructors expose create", () => {
     expect(Question.ID.create()).toStartWith("que_")
     expect(Pty.ID.create()).toStartWith("pty_")
+  })
+
+  test("replay paths stay inside the candidate root", () => {
+    const decode = Schema.decodeUnknownSync(ProContract.ReplayPolicy)
+    expect(
+      decode({
+        checks: [{ argv: ["./compile.sh"], cwd: ".", timeout: 1000, exit: 0 }],
+        protected: [{ path: "src/main.ts", hash: "hash" }],
+        artifacts: ["executable"],
+      }),
+    ).toMatchObject({ checks: [{ cwd: "." }] })
+    for (const cwd of ["/candidate", "../candidate", "C:\\candidate"])
+      expect(() =>
+        decode({ checks: [{ argv: ["true"], cwd, timeout: 1000, exit: 0 }], protected: [], artifacts: [] }),
+      ).toThrow()
   })
 
   test("reusable public identifiers are stable and unique", () => {

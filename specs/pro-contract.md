@@ -409,6 +409,8 @@ hashes command outputs and required artifacts into a finite report stored
 outside the candidate Location, then removes the temporary worktree. This
 isolates replay filesystem mutations from the candidate; host, credential, and
 network isolation still depend on the deployment boundary.
+Replay working directories and artifact paths are relative to the candidate
+root; absolute and parent-escaping paths are rejected before issuance.
 
 ```text
 claim + assumptions + witnesses + unknowns + provenance + disclosure policy
