@@ -1,5 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
+import { $ } from "bun"
 import { describe, expect } from "bun:test"
 import { DateTime, Effect, Equal, Fiber, Hash, Schema } from "effect"
 import { Tool } from "@opencode-ai/core/tool/tool"
@@ -368,6 +369,79 @@ describe("LocationServiceMap", () => {
           expect((yield* contracts.get(contractID))?.pendingRevision).toBeUndefined()
         }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
       }),
+    ),
+  )
+
+  it.live("turns failed replay into a subject-bound challenge", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.writeFile(path.join(dir.path, "candidate.txt"), "candidate\n")
+            await $`git init`.cwd(dir.path).quiet()
+            await $`git config core.fsmonitor false`.cwd(dir.path).quiet()
+            await $`git config commit.gpgsign false`.cwd(dir.path).quiet()
+            await $`git config user.email test@opencode.test`.cwd(dir.path).quiet()
+            await $`git config user.name Test`.cwd(dir.path).quiet()
+            await $`git add .`.cwd(dir.path).quiet()
+            await $`git commit -m initial`.cwd(dir.path).quiet()
+          })
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          yield* Effect.gen(function* () {
+            const contracts = yield* ProContract.Service
+            const bindings = yield* ProContractOpenCode.Service
+            const registry = yield* ToolRegistry.Service
+            const contractID = ProContract.ID.make("pct_replay_challenge")
+            const base = ProContract.defaultSpec("Replay the frozen candidate", Date.now())
+            const spec = {
+              ...base,
+              evidence: {
+                type: "principal" as const,
+                replay: {
+                  checks: [{ argv: [process.execPath, "-e", "process.exit(1)"], timeout: 10_000, exit: 0 }],
+                  protected: [],
+                  artifacts: [],
+                },
+              },
+            }
+            yield* contracts.issue({ id: contractID, scope: "replay", spec, executor: "opencode" })
+            yield* bindings.create({
+              contractID,
+              revision: 1,
+              location,
+              model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") }),
+              nextActionAt: 0,
+            })
+            yield* contracts.activate(contractID, 1, Date.now())
+            const claimed = yield* bindings.claim(contractID, Date.now())
+            const contractSessionID = claimed ? claimed.sessionID : yield* Effect.die("Contract attempt was not claimed")
+
+            const settled = yield* settleTool(registry, {
+              sessionID: contractSessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-report-replay",
+                name: "contract_report_ready",
+                input: { summary: "candidate complete", uncertainties: [] },
+              },
+            })
+
+            expect(settled.result).toMatchObject({ type: "error" })
+            expect(yield* contracts.get(contractID)).toMatchObject({
+              status: "dormant",
+              challenge: {
+                disclosure: "executor",
+                summary: `Replay verification failed: ${process.execPath} -e process.exit(1)`,
+              },
+            })
+            expect(yield* contracts.history({ contractID })).toHaveLength(3)
+          }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
+        }),
+      ),
     ),
   )
 

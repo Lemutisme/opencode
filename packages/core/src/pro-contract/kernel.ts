@@ -184,8 +184,7 @@ export function transition(state: State, command: Command): Result {
       Object.values(state.contracts)
         .filter(
           (item) =>
-            !affected.has(item.id) &&
-            item.spec.requires.some((requirement) => requirement.contractID === dependencyID),
+            !affected.has(item.id) && item.spec.requires.some((requirement) => requirement.contractID === dependencyID),
         )
         .forEach((item) => {
           affected.add(item.id)
@@ -248,6 +247,29 @@ export function transition(state: State, command: Command): Result {
       if (command.replay.policyHash !== hashReplay(replay)) return reject("replay policy does not match")
       if (command.replay.subjectHash !== command.subjectHash) return reject("replay subject does not match")
     }
+    if (command.replay && !command.replay.passed)
+      return accept({
+        ...state,
+        contracts: {
+          ...state.contracts,
+          [contract.id]: {
+            ...contract,
+            status: "dormant",
+            escalation: undefined,
+            blocked: undefined,
+            handoff: undefined,
+            challenge: {
+              revision: contract.revision,
+              subjectHash: command.subjectHash,
+              evidenceHash: command.replay.evidenceHash,
+              disclosure: "executor",
+              summary: command.replay.summary,
+              time: command.time,
+            },
+            attestationID: undefined,
+          },
+        },
+      })
     return accept({
       ...state,
       contracts: {
@@ -257,6 +279,7 @@ export function transition(state: State, command: Command): Result {
           status: "verification",
           escalation: undefined,
           blocked: undefined,
+          challenge: undefined,
           handoff: {
             summary: command.summary,
             uncertainties: command.uncertainties,

@@ -35,7 +35,16 @@ export function DialogContracts(props: { scope?: string } = {}) {
         `Brief: ${contract.spec.brief ? "provided" : "none"}`,
         `Requires: ${contract.spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
         ...(contract.handoff
-          ? [`Handoff: ${contract.handoff.summary}`, `Uncertainties: ${contract.handoff.uncertainties.length}`]
+          ? [
+              `Handoff: ${contract.handoff.summary}`,
+              `Uncertainties: ${contract.handoff.uncertainties.length}`,
+              ...(contract.handoff.replay
+                ? [
+                    `Replay: ${contract.handoff.replay.passed ? "passed" : "failed"}`,
+                    `Replay evidence: ${contract.handoff.replay.evidenceHash}`,
+                  ]
+                : []),
+            ]
           : []),
         ...(contract.challenge
           ? [

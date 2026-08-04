@@ -6,6 +6,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
 import { ProContractOpenCode } from "../pro-contract/open-code"
+import { ProContractReplay } from "../pro-contract/replay"
 import { SessionSchema } from "../session/schema"
 import { SessionStore } from "../session/store"
 import { Snapshot } from "../snapshot"
@@ -19,6 +20,7 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
+    const replayVerifier = yield* ProContractReplay.Service
     const permissions = yield* PermissionV2.Service
     const sessions = yield* SessionStore.Service
     const snapshots = yield* Snapshot.Service
@@ -27,7 +29,7 @@ const layer = Layer.effectDiscard(
       .register({
         contract_propose: Tool.make({
           description:
-            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
+            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Use evidence.replay when finite repository checks or required artifacts can mechanically verify the frozen candidate. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
           input: Schema.Struct({ spec: ProContract.Spec }),
           output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
           toModelOutput: ({ output }) => [
@@ -55,8 +57,9 @@ const layer = Layer.effectDiscard(
                   deadline: Math.max(input.spec.budget.deadline, now + 24 * 60 * 60 * 1_000),
                 },
               }
-              const request = (yield* sessions.context(context.sessionID)).findLast((item) => item.type === "user")
-                ?.text
+              const request = (yield* sessions.context(context.sessionID)).findLast(
+                (item) => item.type === "user",
+              )?.text
               const spec = request
                 ? {
                     ...draft,
@@ -80,7 +83,7 @@ const layer = Layer.effectDiscard(
                     `Authority: ${spec.authority.join(", ")}`,
                     `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
                     `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
-                    `Evidence: ${spec.evidence.type}`,
+                    `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
                     `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
                   ]
                     .filter((item) => item !== undefined)
@@ -124,18 +127,29 @@ const layer = Layer.effectDiscard(
             Effect.gen(function* () {
               const binding = yield* bindings.forSession(context.sessionID)
               if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
+              const contract = yield* contracts.get(binding.contractID)
+              if (!contract) return yield* new ToolFailure({ message: "Contract not found" })
               const subjectHash = yield* snapshots.capture()
               if (!subjectHash) return yield* new ToolFailure({ message: "Contract handoff requires a snapshot" })
+              const replay = contract.spec.evidence.replay
+                ? yield* replayVerifier.verify({
+                    contractID: contract.id,
+                    policy: contract.spec.evidence.replay,
+                    subjectHash,
+                  })
+                : undefined
               const receipt = yield* contracts.reportReady({
                 contractID: binding.contractID,
                 revision: binding.revision,
                 summary: input.summary,
                 uncertainties: input.uncertainties,
                 subjectHash,
+                replay,
                 time: yield* Clock.currentTimeMillis,
               })
               if (receipt.decision.type === "rejected")
                 return yield* new ToolFailure({ message: receipt.decision.reason })
+              if (replay && !replay.passed) return yield* new ToolFailure({ message: replay.summary })
               return { recorded: true }
             }).pipe(
               Effect.mapError((error) =>
@@ -241,6 +255,7 @@ export const node = makeLocationNode({
     PermissionV2.node,
     ProContract.node,
     ProContractOpenCode.node,
+    ProContractReplay.node,
     SessionStore.node,
     Snapshot.node,
   ],

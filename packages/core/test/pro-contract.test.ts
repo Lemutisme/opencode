@@ -798,9 +798,9 @@ describe("ProContract kernel", () => {
         time: 1,
       }).decision,
     ).toEqual({ type: "rejected", reason: "replay evidence is required" })
-    expect(ProContract.transition(ready(false).state, discharge).decision).toEqual({
-      type: "rejected",
-      reason: "replay evidence does not support discharge",
+    expect(ready(false).state.contracts[contractID]).toMatchObject({
+      status: "dormant",
+      challenge: { evidenceHash: "replay-fail", subjectHash },
     })
     expect(ProContract.transition(ready(true).state, discharge).state.contracts[contractID]?.status).toBe("discharged")
   })
@@ -1034,7 +1034,13 @@ const execution = Layer.succeed(
 )
 const schedulerIt = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([Database.node, ProContract.node, ProContractOpenCode.node, SessionV2.node, ProContractScheduler.node]),
+    LayerNode.group([
+      Database.node,
+      ProContract.node,
+      ProContractOpenCode.node,
+      SessionV2.node,
+      ProContractScheduler.node,
+    ]),
     [[SessionExecution.node, execution]],
   ),
 )

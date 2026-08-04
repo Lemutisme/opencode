@@ -317,7 +317,42 @@ curl -fsS -X POST \
 For holdout or official-test failures, use `disclosure: "sealed"`, omit
 `summary`, and do not continue adaptive evaluation against the same holdout.
 
-### 4.6 Automatic verifier adapter
+### 4.6 Harness replay verifier
+
+Before adding a task-specific adapter, use the optional harness replay policy
+for finite repository checks. The policy is part of `spec.evidence`, so
+ratification freezes its argv, expected exits, protected file hashes, required
+artifacts, and ten-minute-per-check maximum timeout:
+
+```json
+{
+  "type": "principal",
+  "replay": {
+    "checks": [
+      { "argv": ["bun", "typecheck"], "timeout": 120000, "exit": 0 },
+      { "argv": ["bun", "test"], "timeout": 600000, "exit": 0 }
+    ],
+    "protected": [],
+    "artifacts": ["dist/app"]
+  }
+}
+```
+
+At `contract_report_ready`, OpenCode captures the candidate subject,
+materializes that exact tree into a temporary worktree, runs the checks there,
+and stores a hashed finite report under the control-plane data directory. A
+failure becomes an executor-visible, subject-bound challenge and creates a new
+semantic attempt. A pass is recorded in the handoff and is required before the
+principal can attest; replay does not replace principal judgment in this
+conservative policy.
+
+Replay inherits the verifier process environment and network namespace. It
+isolates filesystem mutations from the candidate but does not provide host or
+credential isolation. Files named in `protected` must be regular files with the
+approved SHA-256; candidate-owned tests that are not protected remain a weak
+proxy.
+
+### 4.7 Automatic task verifier adapter
 
 Automatic verification belongs to the task adapter, not the Contract kernel.
 Run the adapter as a supervised process that repeatedly:
@@ -346,7 +381,7 @@ Contract that is no longer in `verification`, bind every result to the current
 subject, and never expose sealed holdout feedback to an executor. The executor
 does not receive principal mutation routes.
 
-### 4.7 V2 no-Contract control
+### 4.8 V2 no-Contract control
 
 Use the same SessionV2 runner for causal evaluation. The control Session has no
 Contract binding and therefore receives no privileged `<pro_contract>` System
@@ -355,7 +390,7 @@ hide `contract_propose`; do not add a production feature flag solely for a
 benchmark. Comparing a legacy Session against a V2 Contract Session confounds
 Contract semantics with runner differences.
 
-### 4.8 Durable service and authority topology
+### 4.9 Durable service and authority topology
 
 `opencode serve` is the OpenCode-specific Contract daemon: run it under
 launchd, systemd, Docker, or another supervisor with durable `XDG_DATA_HOME`.
