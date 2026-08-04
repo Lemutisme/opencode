@@ -266,16 +266,15 @@ const layer = Layer.effect(
                       row.contract.blocked !== undefined
                     : row.binding.attemptKey !== attemptKey
                 const leaseExpired = row.binding.dispatched && (row.binding.leaseExpiresAt ?? 0) <= now
-                const newAttempt =
-                  row.binding.attempts === 0 ||
-                  attemptChanged ||
-                  (leaseExpired && (row.binding.turnsUsed > 0 || row.binding.actionsUsed > 0))
-                if (!newAttempt && row.binding.dispatched && !leaseExpired) return {}
-                if (!newAttempt && row.binding.nextActionAt > now) return {}
+                const newAttempt = row.binding.attempts === 0 || attemptChanged
+                const rotate =
+                  row.binding.attempts > 0 &&
+                  (attemptChanged || (leaseExpired && (row.binding.turnsUsed > 0 || row.binding.actionsUsed > 0)))
+                if (!newAttempt && !rotate && row.binding.dispatched && !leaseExpired) return {}
+                if (!newAttempt && !rotate && row.binding.nextActionAt > now) return {}
                 if (now >= row.contract.spec.budget.deadline) return {}
                 if (newAttempt && row.binding.attempts >= row.contract.spec.resolution.maxAttempts)
                   return { exhausted: row.contract }
-                const rotate = newAttempt && row.binding.attempts > 0
                 const leaseExpiresAt = Math.min(now + LEASE_MS, row.contract.spec.budget.deadline)
                 const next = {
                   ...row.binding,

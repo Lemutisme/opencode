@@ -741,8 +741,10 @@ attempt. A provider-declared error is already a durable terminal result; it
 escalates once instead of redispatching the same invalid request.
 
 Every current and retired Contract Session has an indexed durable reservation.
-Rotation changes the active binding without returning an old Session ID to the
-ordinary OpenCode permission domain.
+Lease loss rotates and fences the execution Session without consuming a
+semantic attempt. Revisions, visible challenges, and blocked context start new
+semantic attempts. Rotation never returns an old Session ID to the ordinary
+OpenCode permission domain.
 
 Blocked work is an institutional event, not a transient tool result. Its reason
 is retained in the ledger, changes the semantic-attempt context, and is supplied

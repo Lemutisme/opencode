@@ -1465,7 +1465,7 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
-  schedulerIt.effect("fences completion from an expired attempt", () =>
+  schedulerIt.effect("rotates an expired lease without consuming a semantic attempt", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
@@ -1495,7 +1495,7 @@ describe("OpenCode Contract binding", () => {
       expect(yield* bindings.get(contractID)).toMatchObject({
         promptID: second?.promptID,
         dispatched: true,
-        attempts: 2,
+        attempts: 1,
       })
     }),
   )
@@ -1599,7 +1599,7 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
-  schedulerIt.effect("escalates an expired final attempt", () =>
+  schedulerIt.effect("recovers an expired final attempt without exhausting remediation", () =>
     Effect.gen(function* () {
       activeSessions.clear()
       const contracts = yield* ProContract.Service
@@ -1619,11 +1619,15 @@ describe("OpenCode Contract binding", () => {
       yield* bindings.reserveTurn(attempt!.sessionID, 1)
       yield* TestClock.setTime(30_001)
 
+      const first = yield* bindings.get(contractID)
       yield* scheduler.runOnce()
 
-      expect(yield* contracts.get(contractID)).toMatchObject({
-        escalation: { reason: "OpenCode attempt budget exhausted", time: 30_001 },
+      expect(yield* contracts.get(contractID)).toMatchObject({ status: "active" })
+      expect(yield* bindings.get(contractID)).toMatchObject({
+        attempts: 1,
+        dispatched: true,
       })
+      expect((yield* bindings.get(contractID))?.sessionID).not.toBe(first?.sessionID)
     }),
   )
 
