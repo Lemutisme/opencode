@@ -719,10 +719,24 @@ describe("SessionRunnerLLM", () => {
         reason: "waiting for a reproducible input",
         time: Date.now(),
       })
+      yield* contracts.activate(contract.id, contract.revision, Date.now())
+      const blockedAttempt = yield* bindings.claim(contract.id, Date.now())
+      expect(blockedAttempt?.sessionID).not.toBe(attempt!.sessionID)
+      yield* session.create({
+        id: blockedAttempt!.sessionID,
+        location: blockedAttempt!.location,
+        model: blockedAttempt!.model,
+      })
+      yield* session.prompt({
+        id: blockedAttempt!.promptID,
+        sessionID: blockedAttempt!.sessionID,
+        prompt: Prompt.make({ text: "Reconcile the blocked contract." }),
+        resume: false,
+      })
       requests.length = 0
       response = []
 
-      yield* session.resume(attempt!.sessionID)
+      yield* session.resume(blockedAttempt!.sessionID)
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.tools).toEqual([])
@@ -769,13 +783,29 @@ describe("SessionRunnerLLM", () => {
         time: Date.now(),
       })
       yield* contracts.activate(contract.id, contract.revision, Date.now())
+      const challengedAttempt = yield* bindings.claim(contract.id, Date.now())
+      expect(challengedAttempt?.sessionID).not.toBe(blockedAttempt!.sessionID)
       yield* session.prompt({
-        sessionID: attempt!.sessionID,
+        sessionID: blockedAttempt!.sessionID,
+        prompt: Prompt.make({ text: "Continue in the old attempt" }),
+        resume: false,
+      })
+      response = []
+      yield* session.resume(blockedAttempt!.sessionID)
+      expect(requests).toHaveLength(1)
+      yield* session.create({
+        id: challengedAttempt!.sessionID,
+        location: challengedAttempt!.location,
+        model: challengedAttempt!.model,
+      })
+      yield* session.prompt({
+        id: challengedAttempt!.promptID,
+        sessionID: challengedAttempt!.sessionID,
         prompt: Prompt.make({ text: "Address the verifier challenge" }),
         resume: false,
       })
       response = []
-      yield* session.resume(attempt!.sessionID)
+      yield* session.resume(challengedAttempt!.sessionID)
 
       expect(requests).toHaveLength(2)
       expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Independent output mismatch")
@@ -787,12 +817,12 @@ describe("SessionRunnerLLM", () => {
 
       yield* contracts.release({ contractID: contract.id, reason: "test complete" })
       yield* session.prompt({
-        sessionID: attempt!.sessionID,
+        sessionID: challengedAttempt!.sessionID,
         prompt: Prompt.make({ text: "Continue after release" }),
         resume: false,
       })
       response = []
-      yield* session.resume(attempt!.sessionID)
+      yield* session.resume(challengedAttempt!.sessionID)
 
       expect(requests).toHaveLength(2)
     }),

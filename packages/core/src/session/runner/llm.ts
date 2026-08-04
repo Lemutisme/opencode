@@ -232,14 +232,14 @@ const layer = Layer.effect(
             )).filter((item) => item !== undefined)
           : []
       const now = yield* Clock.currentTimeMillis
-      if (
+      const contractAttemptChanged =
         contractBinding &&
-        (!contractBinding.dispatched ||
-          contractBinding.leaseOwner !== contractBindings.owner ||
-          (contractBinding.leaseExpiresAt ?? 0) <= now ||
-          contractBinding.revision !== contract?.revision)
-      )
-        return { needsContinuation: false, step }
+        contract &&
+        (contractBinding.attemptKey === undefined
+          ? contractBinding.revision !== contract.revision ||
+            contract.challenge?.disclosure === "executor" ||
+            contract.blocked !== undefined
+          : contractBinding.attemptKey !== ProContractOpenCode.attemptKey(contract))
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
@@ -254,7 +254,16 @@ const layer = Layer.effect(
         }
         if (promoted > 0) currentStep = 1
       }
-      if (contractBinding && contract?.status !== "active") return { needsContinuation: false, step: currentStep }
+      if (
+        contractBinding &&
+        (contract?.status !== "active" ||
+          !contractBinding.dispatched ||
+          contractBinding.leaseOwner !== contractBindings.owner ||
+          (contractBinding.leaseExpiresAt ?? 0) <= now ||
+          contractBinding.revision !== contract.revision ||
+          contractAttemptChanged)
+      )
+        return { needsContinuation: false, step: currentStep }
       const system =
         initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
       const model = yield* models.resolve(session)

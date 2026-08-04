@@ -67,6 +67,16 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Pr
 
 const LEASE_MS = 30_000
 
+export function attemptKey(contract: ProContract.Contract) {
+  const context =
+    contract.challenge?.disclosure === "executor"
+      ? contract.challenge.time + ":" + contract.challenge.evidenceHash
+      : contract.blocked
+        ? contract.blocked.time + ":" + contract.blocked.reason
+        : ""
+  return contract.revision + ":" + context
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -252,19 +262,13 @@ const layer = Layer.effect(
                   .pipe(Effect.orDie)
                 if (!row || row.contract.status !== "active" || row.contract.pendingRevision) return {}
                 // Transport retries preserve this key; authoritative context changes replace the Session.
-                const attemptKey = `${row.contract.revision}:${
-                  row.contract.challenge?.disclosure === "executor"
-                    ? `${row.contract.challenge.time}:${row.contract.challenge.evidenceHash}`
-                    : row.contract.blocked
-                      ? `${row.contract.blocked.time}:${row.contract.blocked.reason}`
-                      : ""
-                }`
+                const key = attemptKey(row.contract)
                 const attemptChanged =
                   row.binding.attemptKey === undefined
                     ? row.binding.revision !== row.contract.revision ||
                       row.contract.challenge?.disclosure === "executor" ||
                       row.contract.blocked !== undefined
-                    : row.binding.attemptKey !== attemptKey
+                    : row.binding.attemptKey !== key
                 const leaseExpired = row.binding.dispatched && (row.binding.leaseExpiresAt ?? 0) <= now
                 const newAttempt = row.binding.attempts === 0 || attemptChanged
                 const rotate =
@@ -286,7 +290,7 @@ const layer = Layer.effect(
                   nextActionAt: leaseExpiresAt,
                   leaseOwner: owner,
                   leaseExpiresAt,
-                  attemptKey,
+                  attemptKey: key,
                 }
                 yield* tx
                   .update(ProContractOpenCodeTable)
@@ -330,8 +334,7 @@ const layer = Layer.effect(
               !row.contract.pendingRevision &&
               (row.binding.revision !== row.contract.revision ||
                 (row.contract.challenge?.disclosure === "executor" &&
-                  row.binding.attemptKey !==
-                    `${row.contract.revision}:${row.contract.challenge.time}:${row.contract.challenge.evidenceHash}`) ||
+                  row.binding.attemptKey !== attemptKey(row.contract)) ||
                 row.binding.nextActionAt <= now),
           )
           .map((row) => row.binding)
