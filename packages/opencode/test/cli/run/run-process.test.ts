@@ -4,6 +4,7 @@
 // `opencode.run(message, opts?)` to spawn `bun src/index.ts run ...` with
 // `OPENCODE_CONFIG_CONTENT` providing the test provider config inline.
 import { describe, expect } from "bun:test"
+import { ProContract } from "@opencode-ai/core/pro-contract"
 import { Effect } from "effect"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
@@ -245,22 +246,20 @@ describe("opencode run (non-interactive subprocess)", () => {
     "rejects requested permissions by default and allows them with the dangerous flag",
     ({ home, llm, opencode }) =>
       Effect.gen(function* () {
-        yield* llm.tool("contract_continue", { reason: "This test completes in one Session" })
         yield* llm.tool("bash", { command: "rm -f denied-file", description: "Remove a test file" })
         yield* llm.text("continued after rejection")
         const denied = yield* opencode.run("request permission", {
-          permission: { contract_continue: "allow", bash: "ask" },
+          permission: { bash: "ask" },
         })
         opencode.expectExit(denied, 0)
         expect(denied.stderr).toContain("permission requested: bash")
         expect(denied.stdout).toBe("")
 
         yield* llm.reset
-        yield* llm.tool("contract_continue", { reason: "This test completes in one Session" })
         yield* llm.tool("bash", { command: "rm -f allowed-file", description: "Remove a test file" })
         yield* llm.text("continued after approval")
         const allowed = yield* opencode.run("request permission", {
-          permission: { contract_continue: "allow", bash: "ask" },
+          permission: { bash: "ask" },
           extraArgs: ["--dangerously-skip-permissions"],
         })
         opencode.expectExit(allowed, 0)
@@ -268,16 +267,34 @@ describe("opencode run (non-interactive subprocess)", () => {
         expect(allowed.stdout).toContain("continued after approval")
 
         yield* llm.reset
-        yield* llm.tool("contract_continue", { reason: "This test completes in one Session" })
         yield* llm.tool("bash", { command: "touch explicitly-denied", description: "Create a denied marker" })
         yield* llm.text("continued after explicit denial")
         const explicitlyDenied = yield* opencode.run("request denied permission", {
-          permission: { contract_continue: "allow", bash: "deny" },
+          permission: { bash: "deny" },
           extraArgs: ["--dangerously-skip-permissions"],
         })
         opencode.expectExit(explicitlyDenied, 0)
         expect(explicitlyDenied.stdout).toContain("continued after explicit denial")
         expect(yield* Effect.promise(() => Bun.file(`${home}/explicitly-denied`).exists())).toBe(false)
+      }),
+    60_000,
+  )
+
+  cliIt.concurrent(
+    "does not auto-approve principal Contract formation",
+    ({ llm, opencode }) =>
+      Effect.gen(function* () {
+        yield* llm.tool("contract_propose", {
+          spec: ProContract.defaultSpec("Persist this obligation", Date.now()),
+        })
+        const result = yield* opencode.run("propose durable work", {
+          permission: { contract_propose: "allow", contract_issue: "ask" },
+          extraArgs: ["--dangerously-skip-permissions"],
+        })
+
+        opencode.expectExit(result, 0)
+        expect(result.stderr).toContain("principal permission: contract_issue")
+        expect(result.stdout).toBe("")
       }),
     60_000,
   )

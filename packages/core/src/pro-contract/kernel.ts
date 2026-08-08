@@ -77,7 +77,6 @@ export type Command =
       readonly uncertainties: ReadonlyArray<string>
       readonly subjectHash: string
       readonly replay?: ProContract.ReplayResult
-      readonly review?: { readonly evidenceHash: string; readonly summary: string }
       readonly time: number
     }
   | {
@@ -248,7 +247,7 @@ export function transition(state: State, command: Command): Result {
       if (command.replay.policyHash !== hashReplay(replay)) return reject("replay policy does not match")
       if (command.replay.subjectHash !== command.subjectHash) return reject("replay subject does not match")
     }
-    const challenge = command.replay && !command.replay.passed ? command.replay : command.review
+    const challenge = command.replay && !command.replay.passed ? command.replay : undefined
     if (challenge)
       return accept({
         ...state,
@@ -446,6 +445,8 @@ export function transition(state: State, command: Command): Result {
         contract.handoff.replay.subjectHash !== contract.handoff.subjectHash)
     )
       return reject("replay evidence does not support discharge")
+    if (replay && command.attestation.evidenceHash === contract.handoff.replay?.evidenceHash)
+      return reject("principal evidence must be independent of replay")
     if (command.actor !== contract.issuer || command.attestation.verifierID !== contract.issuer)
       return reject("principal evidence requires issuer attestation")
     return accept({

@@ -120,7 +120,6 @@ const layer = Layer.effect(
           "*": "allow",
           contract_issue: "ask",
           contract_revision: "ask",
-          contract_continue: "deny",
           contract_propose: "deny",
           doom_loop: "ask",
           external_directory: {
@@ -150,7 +149,6 @@ const layer = Layer.effect(
               defaults,
               Permission.fromConfig({
                 contract_propose: "allow",
-                contract_continue: "allow",
                 question: "allow",
                 plan_enter: "allow",
               }),
@@ -167,7 +165,6 @@ const layer = Layer.effect(
               defaults,
               Permission.fromConfig({
                 contract_propose: "allow",
-                contract_continue: "allow",
                 question: "allow",
                 plan_exit: "allow",
                 task: {

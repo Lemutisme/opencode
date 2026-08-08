@@ -62,7 +62,6 @@ export interface Interface {
     readonly uncertainties: ReadonlyArray<string>
     readonly subjectHash: string
     readonly replay?: Schema.ReplayResult
-    readonly review?: { readonly evidenceHash: string; readonly summary: string }
     readonly time: number
   }) => Effect.Effect<Receipt>
   readonly reportBlocked: (input: {
@@ -112,6 +111,15 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ProContract") {}
 
+export function evidenceClaim(spec: Schema.Spec) {
+  return spec.evidence.claim ?? spec.goal
+}
+
+export function normalizeSpec(spec: Schema.Spec) {
+  if (spec.evidence.claim) return spec
+  return Schema.Spec.make({ ...spec, evidence: { ...spec.evidence, claim: spec.goal } })
+}
+
 export function defaultSpec(goal: string, now: number): Schema.Spec {
   return Schema.Spec.make({
     trigger: { type: "immediate" },
@@ -120,7 +128,7 @@ export function defaultSpec(goal: string, now: number): Schema.Spec {
     requires: [],
     authority: ["filesystem.read"],
     budget: { turns: 4, actions: 32, deadline: now + 24 * 60 * 60 * 1_000 },
-    evidence: { type: "principal" },
+    evidence: { type: "principal", claim: goal },
     resolution: { maxAttempts: 3, retryDelay: 60_000 },
   })
 }
@@ -266,16 +274,17 @@ const layer = Layer.effect(
     return Service.of({
       issue: Effect.fn("ProContract.issue")(function* (input) {
         const id = input.id ?? Schema.ID.create()
+        const spec = normalizeSpec(input.spec)
         const receipt = yield* execute({
           type: "issue",
           actor: "local-owner",
           draft: {
             id,
             scope: input.scope,
-            spec: input.spec,
+            spec,
             issuer: "local-owner",
             executor: input.executor,
-            specHash: ProContractKernel.hashSpec(input.spec),
+            specHash: ProContractKernel.hashSpec(spec),
           },
         })
         if (receipt.decision.type === "rejected") return receipt
@@ -307,12 +316,13 @@ const layer = Layer.effect(
       petitionRevision: Effect.fn("ProContract.petitionRevision")(function* (input) {
         const contract = yield* get(input.contractID)
         if (!contract) return yield* Effect.die(`Contract not found: ${input.contractID}`)
+        const spec = normalizeSpec(input.spec)
         return yield* execute({
           type: "petition-revision",
           actor: contract.executor,
           contractID: contract.id,
-          spec: input.spec,
-          specHash: ProContractKernel.hashSpec(input.spec),
+          spec,
+          specHash: ProContractKernel.hashSpec(spec),
           reason: input.reason,
         })
       }),

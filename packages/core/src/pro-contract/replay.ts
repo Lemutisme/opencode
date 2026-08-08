@@ -2,7 +2,7 @@ export * as ProContractReplay from "./replay"
 
 import { ProContract } from "@opencode-ai/schema/pro-contract"
 import path from "path"
-import { Context, Duration, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer, Schema } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
@@ -25,13 +25,27 @@ type CheckResult = {
   readonly stderrHash?: string
   readonly stdoutTruncated?: boolean
   readonly stderrTruncated?: boolean
-  readonly error?: string
 }
 
 type FileResult = {
   readonly path: string
   readonly exists: boolean
   readonly hash?: string
+}
+
+function failureSummary(
+  checks: ReadonlyArray<CheckResult>,
+  protectedFiles: ReadonlyArray<FileResult & { readonly expectedHash: string }>,
+  artifacts: ReadonlyArray<FileResult>,
+) {
+  const check = checks.find((item) => item.exit !== item.expectedExit)
+  if (check) return `Replay check ${check.argv.join(" ")} exited ${check.exit}; expected ${check.expectedExit}`
+  const protectedFile = protectedFiles.find((item) => !item.exists || item.hash !== item.expectedHash)
+  if (protectedFile)
+    return `Protected file ${protectedFile.exists ? "changed" : "missing"} after replay checks: ${protectedFile.path}`
+  const artifact = artifacts.find((item) => !item.exists)
+  if (artifact) return `Required artifact missing after replay checks: ${artifact.path}`
+  return "Unknown replay failure"
 }
 
 type Report = {
@@ -52,10 +66,15 @@ type VerifyInput = {
 }
 
 export interface Interface {
-  readonly verify: (input: VerifyInput) => Effect.Effect<ProContract.ReplayResult, Snapshot.Error>
+  readonly verify: (input: VerifyInput) => Effect.Effect<ProContract.ReplayResult, Snapshot.Error | Unavailable>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ProContractReplay") {}
+
+export class Unavailable extends Schema.TaggedErrorClass<Unavailable>()("ProContractReplayUnavailable", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
 const layer = Layer.effect(
   Service,
@@ -84,14 +103,10 @@ const layer = Layer.effect(
       const run = path.join(global.tmp, "pro-contract-replay", `${input.contractID}-${crypto.randomUUID()}`)
       const project = AbsolutePath.make(path.join(run, "project"))
       const relative = path.relative(location.project.directory, location.directory)
-      const root = path.resolve(project, relative)
       const policyHash = ProContractKernel.hashReplay(input.policy)
       return yield* Effect.gen(function* () {
         yield* snapshots.materialize({ snapshot: Snapshot.ID.make(input.subjectHash), directory: project })
-        const protectedFiles = yield* Effect.forEach(input.policy.protected, (item: { path: string; hash: string }) =>
-          inspect(root, item.path).pipe(Effect.map((result) => ({ ...result, expectedHash: item.hash }))),
-        )
-        const artifacts = yield* Effect.forEach(input.policy.artifacts, (item: string) => inspect(root, item))
+        const root = yield* fs.realPath(path.resolve(project, relative)).pipe(Effect.orDie)
         const checks = yield* Effect.forEach(
           input.policy.checks,
           (check: ProContract.ReplayCheck) =>
@@ -99,13 +114,11 @@ const layer = Layer.effect(
               const [command, ...args] = check.argv
               const selected = path.resolve(root, check.cwd ?? ".")
               const cwd = yield* fs.realPath(selected).pipe(Effect.catch(() => Effect.succeed(selected)))
-              if (!command || !FSUtil.contains(root, cwd))
-                return {
-                  argv: check.argv,
-                  cwd,
-                  expectedExit: check.exit,
-                  error: "Replay check escapes the candidate root",
-                } satisfies CheckResult
+              if (!command) return yield* new Unavailable({ message: "Replay check command is missing" })
+              if (!FSUtil.contains(root, cwd))
+                return yield* new Unavailable({
+                  message: `Replay check escapes the candidate root: ${check.cwd ?? "."}`,
+                })
               return yield* processes
                 .run(
                   ChildProcess.make(command, args, {
@@ -134,20 +147,20 @@ const layer = Layer.effect(
                       stderrTruncated: result.stderrTruncated,
                     }),
                   ),
-                  Effect.catch((error) =>
-                    Effect.succeed({
-                      argv: check.argv,
-                      cwd: path.relative(root, cwd) || ".",
-                      expectedExit: check.exit,
-                      error: error.message,
-                    } satisfies CheckResult),
+                  Effect.mapError(
+                    (error) =>
+                      new Unavailable({ message: `Replay check could not run: ${error.message}`, cause: error }),
                   ),
                 )
             }),
           { concurrency: 1 },
         )
+        const protectedFiles = yield* Effect.forEach(input.policy.protected, (item: { path: string; hash: string }) =>
+          inspect(root, item.path).pipe(Effect.map((result) => ({ ...result, expectedHash: item.hash }))),
+        )
+        const artifacts = yield* Effect.forEach(input.policy.artifacts, (item: string) => inspect(root, item))
         const passed =
-          checks.every((check) => check.error === undefined && check.exit === check.expectedExit) &&
+          checks.every((check) => check.exit === check.expectedExit) &&
           protectedFiles.every((item) => item.exists && item.hash === item.expectedHash) &&
           artifacts.every((item) => item.exists)
         const report: Report = {
@@ -165,16 +178,12 @@ const layer = Layer.effect(
         yield* fs
           .writeJson(path.join(global.data, "pro-contract", "replay", `${evidenceHash}.json`), report)
           .pipe(Effect.orDie)
-        const failure =
-          checks.find((check) => check.error !== undefined || check.exit !== check.expectedExit)?.argv.join(" ") ??
-          protectedFiles.find((item) => !item.exists || item.hash !== item.expectedHash)?.path ??
-          artifacts.find((item) => !item.exists)?.path
         return ProContract.ReplayResult.make({
           policyHash,
           subjectHash: input.subjectHash,
           evidenceHash,
           passed,
-          summary: passed ? "Replay verification passed" : `Replay verification failed: ${failure ?? "unknown"}`,
+          summary: passed ? "Replay verification passed" : failureSummary(checks, protectedFiles, artifacts),
         })
       }).pipe(Effect.ensuring(fs.remove(run, { recursive: true, force: true }).pipe(Effect.catch(() => Effect.void))))
     })

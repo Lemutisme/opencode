@@ -35,22 +35,17 @@ export type Capability = typeof Capability.Type
 
 export const Budget = Schema.Struct({
   turns: PositiveInt.annotate({
-    description: "Total provider turns shared by every attempt. Use 1000 when the principal gives no tighter limit.",
+    description: "Exact provider-turn ceiling shared by every attempt.",
   }),
   actions: PositiveInt.annotate({
-    description: "Total tool actions shared by every attempt. Use 10000 when the principal gives no tighter limit.",
+    description: "Exact tool-action ceiling shared by every attempt.",
   }),
   deadline: NonNegativeInt.annotate({ description: "Absolute Unix timestamp in milliseconds." }),
 }).annotate({ identifier: "ProContract.Budget" })
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}
 
 const CandidatePath = RelativePath.check(
-  Schema.makeFilter<RelativePath>((value) => {
-    const normalized = value.replaceAll("\\", "/")
-    return normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized) || normalized.split("/").includes("..")
-      ? "Replay paths must stay inside the candidate root."
-      : undefined
-  }),
+  Schema.isPattern(/^(?![\\/])(?![A-Za-z]:[\\/])(?!.*(?:^|[\\/])\.\.(?:[\\/]|$)).+$/),
 )
 
 export const ReplayCheck = Schema.Struct({
@@ -71,7 +66,7 @@ export const ReplayPolicy = Schema.Struct({
 }).annotate({
   identifier: "ProContract.ReplayPolicy",
   description:
-    "Harness-owned replay for the frozen candidate. Implementation Contracts that promise a build command or named output artifact should include finite checks and every required artifact path.",
+    "Harness-owned preflight replay for the frozen candidate. It is not final acceptance evidence. Implementation Contracts that promise a build command or named output artifact should include finite checks and exact user-named artifact paths, never guessed internal source paths.",
 })
 export interface ReplayPolicy extends Schema.Schema.Type<typeof ReplayPolicy> {}
 
@@ -86,6 +81,7 @@ export interface ReplayResult extends Schema.Schema.Type<typeof ReplayResult> {}
 
 export const Evidence = Schema.Struct({
   type: Schema.Literal("principal"),
+  claim: Schema.NonEmptyString.pipe(optional),
   replay: ReplayPolicy.pipe(optional).annotate({
     description:
       "Required for implementation work with honest finite build, test, or artifact checks; omit only when no mechanical criterion represents the goal.",

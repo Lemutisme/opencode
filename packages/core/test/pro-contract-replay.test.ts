@@ -23,8 +23,12 @@ describe("ProContract replay verifier", () => {
         Effect.gen(function* () {
           const project = path.join(tmp.path, "project")
           const data = path.join(tmp.path, "data")
+          const replay = path.join(tmp.path, "replay")
+          const replayAlias = process.platform === "win32" ? replay : path.join(tmp.path, "replay-alias")
           yield* Effect.promise(async () => {
             await fs.mkdir(project)
+            await fs.mkdir(replay)
+            if (replayAlias !== replay) await fs.symlink(replay, replayAlias)
             await fs.writeFile(path.join(tmp.path, "outside.txt"), "outside\n")
             await fs.writeFile(path.join(project, "verify.txt"), "pass\n")
             await fs.writeFile(path.join(project, "artifact.txt"), "artifact\n")
@@ -53,14 +57,14 @@ describe("ProContract replay verifier", () => {
                   argv: [
                     process.execPath,
                     "-e",
-                    "const fs=require('fs');process.exit(fs.readFileSync('verify.txt','utf8').trim()==='pass'?0:1)",
+                    "const fs=require('fs');fs.writeFileSync('built.txt','built');process.exit(fs.readFileSync('verify.txt','utf8').trim()==='pass'?0:1)",
                   ],
                   timeout: 10_000,
                   exit: 0,
                 },
               ],
               protected: [{ path: RelativePath.make("verify.txt"), hash: Hash.sha256(Buffer.from("pass\n")) }],
-              artifacts: [RelativePath.make("artifact.txt")],
+              artifacts: [RelativePath.make("artifact.txt"), RelativePath.make("built.txt")],
             } satisfies ProContract.ReplayPolicy
 
             const passed = yield* replay.verify({
@@ -77,24 +81,59 @@ describe("ProContract replay verifier", () => {
               ),
             ).toBe(true)
 
+            const unavailable = yield* replay
+              .verify({
+                contractID: ProContract.ID.make("pct_replay_unavailable"),
+                policy: { ...policy, checks: [{ ...policy.checks[0], argv: [path.join(tmp.path, "missing")] }] },
+                subjectHash: subject,
+              })
+              .pipe(Effect.flip)
+            expect(unavailable).toMatchObject({ _tag: "ProContractReplayUnavailable" })
+
+            const tampered = yield* replay.verify({
+              contractID: ProContract.ID.make("pct_replay_tampered"),
+              policy: {
+                ...policy,
+                checks: [
+                  {
+                    argv: [process.execPath, "-e", "require('fs').writeFileSync('verify.txt','tampered')"],
+                    timeout: 10_000,
+                    exit: 0,
+                  },
+                ],
+                artifacts: [],
+              },
+              subjectHash: subject,
+            })
+            expect(tampered).toMatchObject({
+              passed: false,
+              summary: "Protected file changed after replay checks: verify.txt",
+            })
+
             const failed = yield* replay.verify({
               contractID: ProContract.ID.make("pct_replay_failed"),
               policy: { ...policy, artifacts: [RelativePath.make("missing.txt")] },
               subjectHash: subject,
             })
-            expect(failed).toMatchObject({ passed: false, summary: "Replay verification failed: missing.txt" })
+            expect(failed).toMatchObject({
+              passed: false,
+              summary: "Required artifact missing after replay checks: missing.txt",
+            })
 
             const escaped = yield* replay.verify({
               contractID: ProContract.ID.make("pct_replay_escaped"),
               policy: { ...policy, artifacts: [RelativePath.make("escape.txt")] },
               subjectHash: subject,
             })
-            expect(escaped).toMatchObject({ passed: false, summary: "Replay verification failed: escape.txt" })
+            expect(escaped).toMatchObject({
+              passed: false,
+              summary: "Required artifact missing after replay checks: escape.txt",
+            })
           }).pipe(
             Effect.provide(
               AppNodeBuilder.build(LayerNode.group([ProContractReplay.node, Snapshot.node]), [
                 [Location.node, Location.boundNode(Location.Ref.make({ directory: AbsolutePath.make(project) }))],
-                [Global.node, Global.layerWith({ data, tmp: path.join(tmp.path, "tmp") })],
+                [Global.node, Global.layerWith({ data, tmp: replayAlias })],
               ]),
             ),
           )

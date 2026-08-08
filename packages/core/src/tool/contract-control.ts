@@ -15,9 +15,6 @@ import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 
-const COUNTEREXAMPLE_REVIEW =
-  "Independently challenge this candidate. Find one material way it could fail the Contract that existing evidence does not cover. Repair it or report the residual risk."
-
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
@@ -32,7 +29,7 @@ const layer = Layer.effectDiscard(
       .register({
         contract_propose: Tool.make({
           description:
-            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Describe outcomes and user-supplied acceptance criteria, not a generic implementation or test workflow. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
+            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the optimization objective and evidence.claim to the exact proposition the evidence may settle. An implementation Contract that promises a build command or user-named output artifact must include finite replay checks and every user-named artifact path. Do not guess implementation-specific source paths; the build check covers its inputs. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
           input: Schema.Struct({ spec: ProContract.Spec }),
           output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
           toModelOutput: ({ output }) => [
@@ -48,21 +45,17 @@ const layer = Layer.effectDiscard(
               if (!session.model)
                 return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
               const now = yield* Clock.currentTimeMillis
-              const draft = {
-                ...input.spec,
-                resolution: {
-                  ...input.spec.resolution,
-                  maxAttempts: Math.max(input.spec.resolution.maxAttempts, 2),
-                },
-                budget: {
-                  turns: Math.max(input.spec.budget.turns, 1_000),
-                  actions: Math.max(input.spec.budget.actions, 10_000),
-                  deadline: Math.max(input.spec.budget.deadline, now + 24 * 60 * 60 * 1_000),
-                },
-              }
-              const request = (yield* sessions.context(context.sessionID)).findLast(
-                (item) => item.type === "user",
-              )?.text
+              const request = (yield* sessions.context(context.sessionID)).find((item) => item.type === "user")?.text
+              const unnamedArtifacts = request
+                ? (input.spec.evidence.replay?.artifacts ?? []).filter(
+                    (artifact) => !request.includes(artifact) && !request.includes(`./${artifact}`),
+                  )
+                : []
+              if (unnamedArtifacts.length)
+                return yield* new ToolFailure({
+                  message: `Replay artifacts must be exact paths named by the user: ${unnamedArtifacts.join(", ")}`,
+                })
+              const draft = ProContract.normalizeSpec(input.spec)
               const spec = request
                 ? {
                     ...draft,
@@ -86,6 +79,7 @@ const layer = Layer.effectDiscard(
                     `Authority: ${spec.authority.join(", ")}`,
                     `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
                     `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
+                    `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                     `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
                     `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
                   ]
@@ -120,7 +114,7 @@ const layer = Layer.effectDiscard(
         }),
         contract_report_ready: Tool.make({
           description:
-            "Hand off the active contract for independent verification. State completed checks and only unresolved assumptions that could materially change acceptance; put informational limitations in the summary. The first successful handoff uses reserved attempt headroom for one fresh counterexample review. Use contract_report_blocked when an uncertainty prevents meaningful verification.",
+            "Petition independent verification when the issuer's stopping rule is met and the frozen evidence policy can adjudicate its settlement claim. The goal governs effort; the claim governs finality. State completed checks and unresolved assumptions that could materially affect the claim. Use contract_report_blocked or contract_propose_revision when evidence cannot settle it.",
           input: Schema.Struct({
             summary: Schema.NonEmptyString,
             uncertainties: Schema.Array(Schema.NonEmptyString),
@@ -132,41 +126,44 @@ const layer = Layer.effectDiscard(
               if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
               const contract = yield* contracts.get(binding.contractID)
               if (!contract) return yield* new ToolFailure({ message: "Contract not found" })
-              const subjectHash = yield* snapshots.capture()
-              if (!subjectHash) return yield* new ToolFailure({ message: "Contract handoff requires a snapshot" })
-              const replay = contract.spec.evidence.replay
-                ? yield* replayVerifier.verify({
-                    contractID: contract.id,
-                    policy: contract.spec.evidence.replay,
-                    subjectHash,
-                  })
-                : undefined
               const now = yield* Clock.currentTimeMillis
-              const reviewed = (yield* contracts.history({ contractID: contract.id })).some(
-                (entry) =>
-                  entry.decision.type === "accepted" &&
-                  entry.command.type === "report-ready" &&
-                  entry.command.revision === contract.revision &&
-                  entry.command.review !== undefined,
-              )
-              const review =
-                replay?.passed !== false && !reviewed && binding.attempts < contract.spec.resolution.maxAttempts
-                  ? {
-                      evidenceHash: Hash.sha256(
-                        JSON.stringify({
-                          contractID: contract.id,
-                          revision: contract.revision,
-                          subjectHash,
-                          uncertainties: input.uncertainties,
+              const subjectHash = yield* snapshots.capture()
+              if (!subjectHash) {
+                const message = "Contract handoff snapshot is unavailable"
+                const receipt = yield* contracts.escalate({
+                  contractID: contract.id,
+                  revision: contract.revision,
+                  reason: message,
+                  time: now,
+                })
+                if (receipt.decision.type === "rejected")
+                  return yield* new ToolFailure({ message: receipt.decision.reason })
+                return yield* new ToolFailure({ message })
+              }
+              const replay = contract.spec.evidence.replay
+                ? yield* replayVerifier
+                    .verify({
+                      contractID: contract.id,
+                      policy: contract.spec.evidence.replay,
+                      subjectHash,
+                    })
+                    .pipe(
+                      Effect.catch((error) =>
+                        Effect.gen(function* () {
+                          const message = `Independent verification unavailable for ${subjectHash}: ${error.message}`
+                          const receipt = yield* contracts.escalate({
+                            contractID: contract.id,
+                            revision: contract.revision,
+                            reason: message,
+                            time: now,
+                          })
+                          if (receipt.decision.type === "rejected")
+                            return yield* new ToolFailure({ message: receipt.decision.reason })
+                          return yield* new ToolFailure({ message })
                         }),
                       ),
-                      summary:
-                        COUNTEREXAMPLE_REVIEW +
-                        (input.uncertainties.length
-                          ? `\nExecutor-reported risks:\n${input.uncertainties.map((item) => `- ${item}`).join("\n")}`
-                          : ""),
-                    }
-                  : undefined
+                    )
+                : undefined
               const receipt = yield* contracts.reportReady({
                 contractID: binding.contractID,
                 revision: binding.revision,
@@ -174,7 +171,6 @@ const layer = Layer.effectDiscard(
                 uncertainties: input.uncertainties,
                 subjectHash,
                 replay,
-                review,
                 time: now,
               })
               if (receipt.decision.type === "rejected")

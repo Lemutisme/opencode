@@ -74,7 +74,7 @@ const layer = Layer.effect(
                 id: current.promptID,
                 sessionID: current.sessionID,
                 prompt: {
-                  text: "Reconcile the active contract against the existing candidate state. Inspect and reuse valid files, artifacts, and completed checks before new exploration, then advance within the delegated authority.",
+                  text: "Reconcile the active Contract against the existing workspace. Advance it, hand off a verifiable candidate, or report blocked work within the remaining authority and budget.",
                 },
                 delivery: "queue" as const,
               }

@@ -6171,11 +6171,11 @@ export type ProContractCapability = "filesystem.read" | "filesystem.write" | "pr
 
 export type ProContractBudget = {
   /**
-   * Total provider turns shared by every attempt. Use 1000 when the principal gives no tighter limit.
+   * Exact provider-turn ceiling shared by every attempt.
    */
   turns: number
   /**
-   * Total tool actions shared by every attempt. Use 10000 when the principal gives no tighter limit.
+   * Exact tool-action ceiling shared by every attempt.
    */
   actions: number
   /**
@@ -6187,6 +6187,9 @@ export type ProContractBudget = {
 export type ProContractReplayCheck = {
   argv: Array<string>
   cwd?: string
+  /**
+   * Timeout in milliseconds (1,000 to 600,000).
+   */
   timeout: number
   exit: number
 }
@@ -6202,6 +6205,7 @@ export type ProContractReplayPolicy = {
 
 export type ProContractEvidence = {
   type: "principal"
+  claim?: string
   replay?: ProContractReplayPolicy
 }
 

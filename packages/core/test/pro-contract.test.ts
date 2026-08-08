@@ -802,6 +802,12 @@ describe("ProContract kernel", () => {
       status: "dormant",
       challenge: { evidenceHash: "replay-fail", subjectHash },
     })
+    expect(
+      ProContract.transition(ready(true).state, {
+        ...discharge,
+        attestation: { ...discharge.attestation, evidenceHash: "replay-pass" },
+      }).decision,
+    ).toEqual({ type: "rejected", reason: "principal evidence must be independent of replay" })
     expect(ProContract.transition(ready(true).state, discharge).state.contracts[contractID]?.status).toBe("discharged")
   })
 })
@@ -809,6 +815,20 @@ describe("ProContract kernel", () => {
 const it = testEffect(LayerNode.compile(ProContract.node))
 
 describe("ProContract ledger", () => {
+  it.effect("normalizes legacy evidence claims without replacing the goal", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const legacy = { ...spec, evidence: { type: "principal" as const } }
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec: legacy, executor: "opencode" })
+
+      expect(issued.contract?.spec).toMatchObject({
+        goal: spec.goal,
+        evidence: { claim: spec.goal },
+      })
+      expect(issued.contract?.specHash).toBe(ProContract.hashSpec(ProContract.normalizeSpec(legacy)))
+    }),
+  )
+
   it.effect("serializes accepted and rejected decisions in one hash chain", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
@@ -1182,7 +1202,7 @@ describe("OpenCode Contract binding", () => {
           .pipe(Effect.orDie),
       ).toMatchObject({
         prompt: {
-          text: "Reconcile the active contract against the existing candidate state. Inspect and reuse valid files, artifacts, and completed checks before new exploration, then advance within the delegated authority.",
+          text: "Reconcile the active Contract against the existing workspace. Advance it, hand off a verifiable candidate, or report blocked work within the remaining authority and budget.",
         },
       })
       expect(wakeCalls).toEqual([binding.sessionID])

@@ -92,6 +92,8 @@ import { llmClient } from "../../effect/app-node-platform"
  * explicit loop starts the next provider turn after local settlement. Configured agent step limits bound the loop.
  */
 
+const SETTLEMENT_WINDOW = 20
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -202,16 +204,21 @@ const layer = Layer.effect(
                 entry.command.revision !== contract.revision
               )
                 return []
-              const review =
-                entry.command.review ?? (entry.command.replay?.passed === false ? entry.command.replay : undefined)
-              return review
+              const negativeReplay = entry.command.replay?.passed === false ? entry.command.replay : undefined
+              return negativeReplay
                 ? [
                     {
                       revision: entry.command.revision,
                       subjectHash: entry.command.subjectHash,
-                      evidenceHash: review.evidenceHash,
+                      evidenceHash: negativeReplay.evidenceHash,
                       disclosure: "executor" as const,
-                      summary: review.summary,
+                      summary: [
+                        `Previous handoff: ${entry.command.summary}`,
+                        ...(entry.command.uncertainties.length
+                          ? [`Residual risks:\n${entry.command.uncertainties.map((item) => `- ${item}`).join("\n")}`]
+                          : []),
+                        negativeReplay.summary,
+                      ].join("\n"),
                       time: entry.command.time,
                     },
                   ]
@@ -301,6 +308,11 @@ const layer = Layer.effect(
         ? undefined
         : yield* tools.materialize([...(agent.info?.permissions ?? []), ...contractPermissions])
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
+      const settlementWindow =
+        contract?.status === "active" &&
+        contractBinding !== undefined &&
+        (contract.spec.budget.turns - contractBinding.turnsUsed <= SETTLEMENT_WINDOW ||
+          contract.spec.budget.actions - contractBinding.actionsUsed <= SETTLEMENT_WINDOW)
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
@@ -310,12 +322,13 @@ const layer = Layer.effect(
           contract?.status === "active"
             ? [
                 `<pro_contract id="${contract.id}" revision="${contract.revision}">`,
-                contract.spec.goal,
+                `Optimization goal: ${contract.spec.goal}`,
+                `Settlement claim: ${ProContract.evidenceClaim(contract.spec)}`,
                 ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
                 ...(contract.blocked ? ["Previous attempt blocked:", contract.blocked.reason] : []),
                 ...(contractChallenges.length
                   ? [
-                      "Rejected attempts from this revision; these are diagnostic history, not new terms:",
+                      "Rejected attempts from this revision; reuse their completed checks before new exploration:",
                       ...contractChallenges.map(
                         (challenge) =>
                           `${challenge.summary ?? "Verification failed"}\nRejected subject: ${challenge.subjectHash}\nNegative witness: ${challenge.evidenceHash}`,
@@ -339,9 +352,10 @@ const layer = Layer.effect(
                     ]
                   : []),
                 `Delegated authority: ${contract.spec.authority.join(", ")}.`,
+                `Shared ceiling: ${contract.spec.budget.turns} provider turns and ${contract.spec.budget.actions} tool actions; deadline ${contract.spec.budget.deadline}. The institution enforces this ceiling.`,
+                `Evidence policy: ${JSON.stringify(contract.spec.evidence)}.`,
                 "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
-                "Produce a concrete candidate early. Before handoff, identify materially different ways it could fail the Contract. Within budget, test one discriminating counterexample for each uncovered material class; do not repeat covered checks, and report residual risks as uncertainties.",
-                "After completing the prescribed checks, call contract_report_ready with all known unresolved assumptions. A final answer alone does not hand work to the verifier.",
+                "Optimize the goal within the approved budget. The settlement claim is the proposition the institution may certify; it is a minimum admissibility boundary, not the optimization target. Petition verification when the issuer's stopping rule is met and the evidence policy can adjudicate its claim. Otherwise report blocked or petition a revision.",
                 "</pro_contract>",
               ].join("\n")
             : contractBinding && contract
@@ -350,7 +364,17 @@ const layer = Layer.effect(
         ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
-        messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
+        messages: [
+          ...toLLMMessages(context, model),
+          ...(settlementWindow
+            ? [
+                Message.system(
+                  "Settlement window active. Stop opening speculative work; petition verification when the evidence policy can adjudicate its claim, otherwise report blocked or petition revision.",
+                ),
+              ]
+            : []),
+          ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : []),
+        ],
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })

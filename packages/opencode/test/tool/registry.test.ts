@@ -2,7 +2,7 @@ import { afterEach, describe, expect } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { fileURLToPath, pathToFileURL } from "url"
-import { Cause, Effect, Layer, Result, Schema } from "effect"
+import { Effect, Layer, Result, Schema } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ToolRegistry } from "@/tool/registry"
 import { Tool } from "@/tool/tool"
@@ -167,10 +167,8 @@ describe("tool.registry", () => {
       const contract = yield* contracts.get(result.metadata.contractID)
       if (!contract) return yield* Effect.die("Contract was not issued")
       expect(contract.spec.brief).toBe("Original request:\nUse the prepared data at /home/data")
-      expect(contract.spec.budget.turns).toBe(1_000)
-      expect(contract.spec.budget.actions).toBe(10_000)
-      expect(contract.spec.budget.deadline).toBeGreaterThan(Date.now())
-      expect(contract.spec.resolution.maxAttempts).toBe(2)
+      expect(contract.spec.budget).toEqual(proposal.budget)
+      expect(contract.spec.resolution).toEqual(proposal.resolution)
       expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec)] }])
       expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({
         sessionID: result.metadata.sessionID,
@@ -196,7 +194,7 @@ describe("tool.registry", () => {
     }),
   )
 
-  it.instance("requires a formation decision before primary effectful tools", () =>
+  it.instance("allows ordinary tools until the Session delegates to a Contract", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const agents = yield* Agent.Service
@@ -209,9 +207,6 @@ describe("tool.registry", () => {
       const ref = { providerID: ProviderV2.ID.opencode, modelID: ModelV2.ID.make("test"), agent: build }
       const bash =
         (yield* registry.tools(ref)).find((item) => item.id === "bash") ?? (yield* Effect.die("bash not found"))
-      const continuation =
-        (yield* registry.all()).find((item) => item.id === "contract_continue") ??
-        (yield* Effect.die("contract_continue not found"))
       const context = {
         sessionID: session.id,
         messageID: MessageID.make("msg_contract_decision"),
@@ -223,30 +218,11 @@ describe("tool.registry", () => {
         ask: () => Effect.void,
       }
 
-      const blocked = yield* bash.execute({ command: "true" }, context).pipe(Effect.exit)
-      expect(blocked._tag).toBe("Failure")
-      if (blocked._tag === "Failure") expect(Cause.pretty(blocked.cause)).toContain("Decide Contract formation")
-
-      const denied = yield* continuation
-        .execute(
-          { reason: "This is a local one-step check" },
-          { ...context, ask: () => Effect.die("permission denied") },
-        )
-        .pipe(Effect.exit)
-      expect(denied._tag).toBe("Failure")
-      expect((yield* sessions.get(session.id)).metadata?.procontractFormation).toBeUndefined()
-
-      const asked: string[] = []
-      yield* continuation.execute(
-        { reason: "This is a local one-step check" },
-        { ...context, ask: (input) => Effect.sync(() => void asked.push(input.permission)) },
-      )
-      expect(asked).toEqual(["contract_continue"])
-      expect((yield* sessions.get(session.id)).metadata?.procontractFormation).toBe("ordinary")
       expect((yield* bash.execute({ command: "true" }, context).pipe(Effect.exit))._tag).toBe("Success")
+      expect(yield* registry.ids()).not.toContain("contract_continue")
 
       yield* sessions.setMetadata({ sessionID: session.id, metadata: { procontractFormation: "contract" } })
-      expect((yield* continuation.execute({ reason: "Take it back" }, context).pipe(Effect.exit))._tag).toBe("Failure")
+      expect((yield* bash.execute({ command: "true" }, context).pipe(Effect.exit))._tag).toBe("Failure")
       expect((yield* sessions.get(session.id)).metadata?.procontractFormation).toBe("contract")
     }),
   )

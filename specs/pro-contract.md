@@ -2,6 +2,8 @@
 
 Operational commands for building OpenCode and running ProContract with
 MLE-bench or ProgramBench are in [`pro-contract-runbook.md`](pro-contract-runbook.md).
+Non-default controller designs and their calibration results are indexed in
+[`pro-contract-experiments.md`](pro-contract-experiments.md).
 
 ## Thesis
 
@@ -243,6 +245,11 @@ Version 1 accepts issuer attestations bound to:
 contract ID + revision + specification hash + artifact hash + verifier identity
 ```
 
+The specification hash binds both the optimization goal and
+`evidence.claim`. The goal governs executor effort; the claim names the exact
+proposition an attestation may settle. Discharge recognizes the claim and does
+not assert that the goal reached a global optimum.
+
 The issuer attestation and discharge are one atomic institutional transition.
 The executor cannot submit evidence or discharge the contract.
 
@@ -252,7 +259,10 @@ paths inside the Contract specification, so `specHash` freezes it before
 execution. A replay result is bound to that policy and the exact handoff
 subject. Failed replay may challenge the handoff; successful replay is a
 mandatory mechanical prerequisite to, but does not replace, principal
-attestation in this conservative slice.
+attestation in this conservative slice. The principal evidence hash must differ
+from the replay report hash. A check that runs and rejects the candidate is
+negative evidence. Failure to materialize or start the verifier is instead an
+institutional escalation and never creates executor remediation.
 
 Failed verification is also an institutional transition. The challenger names
 the evaluated revision and handoff subject; the kernel rejects a mismatch
@@ -288,14 +298,15 @@ the earlier claim attributable.
 The human-facing document is:
 
 ```text
-trigger       future condition that should restore attention
-goal          intent shown to the executor
-brief         issuer-authored context the future executor must retain
-requires      exact upstream Contract revisions that must be evidenced first
-delegation    authority granted after activation
-budget        risk, cost, retry, and time bounds
-verifier      evidence policy for discharge
-resolution    expiry, revision, release, transfer, and escalation rights
+trigger          future condition that should restore attention
+goal             optimization objective shown to the executor
+brief            issuer-authored context and stopping rule
+requires         exact upstream Contract revisions that must be evidenced first
+delegation       authority granted after activation
+budget           risk, cost, retry, and time bounds
+evidence.claim   exact proposition the evidence may settle
+verifier         evidence policy for that claim
+resolution       expiry, revision, release, transfer, and escalation rights
 ```
 
 `requires` edges are fixed when a Contract is issued. They may name only an
@@ -347,9 +358,9 @@ principal intent
 ```
 
 Compilation is an intentional compression boundary. The Contract cannot retain
-all issuance-time context, so the issuer chooses a goal, brief, evidence policy,
-and assumptions that a future executor can reconcile without reconstructing the
-entire conversation. Failures caused by an insufficient brief are measured as
+all issuance-time context, so the issuer chooses an optimization goal, a
+settlement claim, brief, evidence policy, and assumptions that a future
+executor can reconcile without reconstructing the entire conversation. Failures caused by an insufficient brief are measured as
 reconciliation-context failures rather than silently attributed to planning.
 OpenCode preserves the latest user request verbatim in the approved brief, so a
 model-authored summary can compress context but cannot erase its source intent.
@@ -361,57 +372,59 @@ replaced with an executor-invented proxy.
 
 OpenCode exposes that compiler as `contract_propose`. The model supplies an
 existing Contract specification; the Session permission boundary binds
-approval to its exact hash before the shared issuer path persists it. Normal sessions ask the user,
-while an explicit auto-permission mode supplies standing approval. Rejection
-creates no obligation, and the executor never receives direct issue authority.
+approval to its exact hash before the shared issuer path persists it. Normal
+sessions ask the user, and automatic tool approval never supplies principal
+authority. Rejection creates no obligation, and the executor never receives
+direct issue authority. Trusted unattended adapters issue the frozen
+specification before execution.
+Legacy specifications without `evidence.claim` normalize it to `goal` at
+issuance. New proposals display both fields before principal approval.
 Legacy and V2 Session registries expose the same proposal name and converge on
 the same `ProContractOpenCode.issue` operation; the legacy adapter carries no
 separate lifecycle semantics.
-Legacy primary Sessions persist one formation decision before their first
-effectful tool: `contract_propose` delegates the work, while
-`contract_continue` records why it is ordinary single-Session work. Read-only
-exploration remains available before that decision. Work whose artifact is
-evaluated after the Session is Contract work even when execution itself is
-synchronous; `contract_continue` requires both work and validation to finish in
-the current Session and cannot replace an issued Contract. Once either decision
-is recorded, that Session cannot issue a second Contract for the same request.
-Implementation proposals that promise a build command or named output artifact
-must include finite replay checks and every required artifact path. Proposal
-deadlines are absolute Unix timestamps; past drafts receive the standard 24-hour deadline
-before the exact normalized specification is ratified. Model-authored proposals
-also receive a 1000-turn and 10000-action autonomy floor and at least two
-semantic attempts before approval. These budgets are total across all attempts,
-reserving a second semantic attempt for recovery or verifier-driven remediation
-while the principal still approves the exact expanded authority.
-The existing permission UI shows the exact goal, delegated authority, budget,
-dependencies, evidence policy, and specification hash. Headless `--auto` uses
-the same permission event and issuer path; it does not bypass adjudication.
+Ordinary work proceeds without a formation record. A primary Session may
+voluntarily propose one Contract and cannot continue effectful work after that
+obligation is issued to a dedicated executor.
+Implementation proposals that promise a build command or user-named output
+artifact must include finite replay checks and every user-named artifact path.
+They do not guess implementation-specific source paths; the build check covers
+its inputs. Proposal admission rejects model-authored artifact paths absent from
+the original request. Budgets, deadlines, and attempt limits are ratified exactly
+as proposed and remain total across all attempts.
+The existing permission UI shows the optimization goal, settlement claim,
+delegated authority, budget, dependencies, evidence policy, and specification hash. Headless `--auto`
+rejects principal governance requests; it cannot ratify a Contract or bypass
+adjudication.
 After issuance, process-local questions remain fenced; blocked work and proposed
 term changes use the durable Contract channels instead.
 
 ### Handoff and justification artifacts
 
 An executor handoff contains a concise claim, known unresolved assumptions, and
-an institution-captured subject hash. The executor produces a concrete
-candidate early, then tests discriminating counterexamples from materially
-different failure surfaces before handoff. External verification adjudicates
-the claim rather than making executor exploration exhaustive. Larger task
-artifacts remain adapter-owned and should form a content-addressed justification
-bundle:
+an institution-captured subject hash. Exploration, implementation, and local
+validation remain executor policy. ProContract governs the handoff boundary;
+external verification adjudicates the claim. Larger task artifacts remain
+adapter-owned and should form a content-addressed justification bundle:
 
-OpenCode does not depend on an executor discovering its own blind spots. The
-first handoff with reserved attempt headroom becomes a subject-bound visible
-challenge even when the executor reports no uncertainty. A fresh Session owns
-one counterexample review and remediation pass; the final attempt hands any
-residual uncertainty to the external verifier instead of opening another
-self-review loop.
+OpenCode records handoff uncertainties for principal or verifier adjudication.
+They never create an executor-authored challenge or automatic self-review loop.
+Only negative replay or issuer evidence admits remediation. Unknown blind spots
+require verifier or principal evidence; the institution does not invent a
+synthetic challenge.
+
+Replay and issuer challenges carry their subject and negative witness into the
+fresh attempt. The immutable ledger retains the preceding handoff. A new
+Session changes perspective without discarding candidate state.
 
 When replay is configured, OpenCode materializes that exact snapshot into a
 fresh temporary Git worktree and runs the frozen argv-based checks there. It
-hashes command outputs and required artifacts into a finite report stored
+then validates protected files and build outputs, and hashes them with command
+outputs into a finite report stored
 outside the candidate Location, then removes the temporary worktree. This
 isolates replay filesystem mutations from the candidate; host, credential, and
 network isolation still depend on the deployment boundary.
+Executor-visible failures name the failed command and exit, protected-file
+mutation, or missing post-check artifact instead of returning a bare path.
 Replay working directories and artifact paths are relative to the candidate
 root; absolute and parent-escaping paths are rejected before issuance.
 Replay timeouts are milliseconds and must be between one second and ten
@@ -518,6 +531,11 @@ A heartbeat proves process-local ownership, not progress. OpenCode therefore
 bounds silent provider pulls and filesystem reads at their execution
 boundaries. These mechanical timeouts interrupt transport or return a tool
 error; they do not claim that the task is semantically blocked or settled.
+
+Action budgets bound executor effects, not institutional control. Ready,
+blocked, and revision petitions remain callable after the effect-action ceiling
+so exhaustion cannot prevent the executor from handing responsibility back to
+the institution.
 
 One failed scheduler cycle is logged and retried; it cannot silently terminate
 the process-local attention loop.
@@ -691,6 +709,33 @@ holdout. Environment deviations such as emulated architectures, writable
 network egress, mutable evaluators, or uncommitted adapters are reported and
 exclude acceptance-grade claims even when the run is operationally useful.
 
+## Improvement without self-amendment
+
+ProContract may improve across Contracts, never by letting the current
+executor rewrite its own obligation or settlement rules. The safe learning
+loop is:
+
+```text
+ledger + artifacts + external outcomes
+  -> offline failure attribution
+  -> candidate compiler or verifier policy
+  -> disjoint holdout evaluation
+  -> principal-ratified version
+  -> future Contracts only
+```
+
+Useful learned policies include task-to-goal/claim decomposition, brief
+sufficiency, evidence coverage, budget selection, and verifier choice. They are
+advisory compiler or adapter versions, not authoritative state transitions.
+Every proposal records its training cohort, policy version, considered
+alternatives, and holdout result. A failed policy can be rolled back without
+rewriting Contract history.
+
+This is institutional self-improvement rather than executor self-modification:
+the system can learn how to draft and verify future duties, while no policy may
+approve itself, weaken an active claim, consume its own negative evidence, or
+certify its own deployment.
+
 ## OpenCode design
 
 The contract plane is logically independent of any harness. It should be a
@@ -745,10 +790,17 @@ challenges, revisions, started attempts with lost leases, and execution that
 ends without handoff start a fresh semantic attempt. Deleting, reverting,
 compacting, or ending any Session cannot settle the duty. Contract authority
 never appears in model input or tool arguments.
-Every new semantic attempt begins by reconciling the existing candidate state:
-it inspects and reuses valid files, artifacts, and completed checks before new
-exploration. Rotation therefore changes the executor, not ownership of work
-already materialized in the Location.
+Every new semantic attempt begins by reconciling the existing workspace. It
+must advance the duty, hand off a verifiable candidate, or report blocked work
+within the remaining authority and budget. Rotation therefore changes the
+executor, not ownership of work already materialized in the Location.
+The immutable turn/action ceiling and deadline remain in the initial system
+prefix. Remaining budget is enforced by the institution and is not injected as
+a changing countdown. A static request-local warning appears only within the
+last twenty turns or actions, preserving normal rolling prefix reuse while
+leaving enough authority to settle. The executor uses the budget to reduce
+acceptance-critical uncertainty; handoff is a verification petition, not a
+completion signal.
 Durable message or context-snapshot decode failures also replace the Session;
 raw transport and transient infrastructure failures retry the current semantic
 attempt. A provider-declared error is already a durable terminal result; it
@@ -773,7 +825,8 @@ Ready work captures the Location snapshot before recording handoff. Principal
 evidence can discharge only when its attestation names that exact subject hash;
 later workspace mutations do not change what was accepted.
 OpenCode therefore fails handoff closed when the Location cannot produce a
-content-addressed snapshot.
+content-addressed snapshot. This is institutional infrastructure failure, so it
+escalates immediately instead of consuming another semantic attempt.
 
 The execution binding must name its model explicitly. A proactive attempt may
 fail closed when that model or credential is unavailable, but it must never
@@ -785,24 +838,26 @@ OpenCode issuer entrypoints share one adapter operation that issues the
 normative Contract before creating its execution binding. A rejected issue
 never creates a binding; an accepted retry reconciles both records idempotently.
 
-### Candidate promotion
+### External adjudication
 
-Candidate state belongs to the harness adapter, not the normative Contract.
-The Contract only decides whether the adapter's promotion witness is sufficient.
-For a baseline artifact `B` and proposed artifact `C`, a performance-oriented
-adapter should require a finite non-regression witness such as:
+Candidate state and task-specific acceptance belong to the harness adapter,
+not the normative kernel. Before issuance, the issuer chooses a finite policy
+`A`; the adapter stores its canonical form and content hash, and the Contract
+brief binds both through `specHash`. After handoff, the adapter evaluates the
+exact subject and returns a content-addressed verdict. The executor may neither
+change `A` nor produce the authoritative verdict.
 
-```text
-compile(C)
-and smoke(C)
-and observed_probes(C) includes observed_probes(B)
-and timeouts(C) <= timeouts(B)
-```
+The goal governs how the executor spends its budget; `evidence.claim` governs
+what `A` may certify. Build, package, and preflight evidence may settle a
+delivery claim while the executor still optimizes a broader quality goal. An
+adequacy or non-regression claim requires independent, issuer-owned evidence;
+executor-selected replay remains diagnostic even when every check passes.
 
-Reference probes, seeds, exit codes, stdout, and stderr must be durable adapter
-evidence. A reviewer may mutate `C` in an isolated candidate workspace, but it
-cannot overwrite `B` or declare promotion. ProgramBench-specific packaging,
-cleanroom images, and test splits remain entirely outside Contract state.
+`A` may require tests, a rubric, a proof, a deployment receipt, human approval,
+or comparison with a named baseline. A baseline is one possible policy input,
+not a ProContract concept. Reference probes, seeds, commands, exit codes, and
+reports are durable adapter evidence. ProgramBench packaging, cleanroom images,
+scores, and test splits remain entirely outside Contract state.
 
 ### Delivery plan
 

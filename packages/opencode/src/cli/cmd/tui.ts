@@ -107,7 +107,7 @@ export const TuiThreadCommand = cmd({
       })
       .option("auto", {
         type: "boolean",
-        describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
+        describe: "auto-approve non-governance permissions that are not explicitly denied (dangerous!)",
         default: false,
       })
       .option("yolo", {

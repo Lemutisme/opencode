@@ -17,6 +17,7 @@ import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { ProContract } from "@opencode-ai/core/pro-contract"
@@ -34,7 +35,7 @@ import { Npm } from "../src/npm"
 import { Project } from "../src/project"
 import { ProjectTable } from "../src/project/sql"
 import { Reference } from "../src/reference"
-import { SessionTable } from "../src/session/sql"
+import { SessionMessageTable, SessionTable } from "../src/session/sql"
 import { ToolRegistry } from "../src/tool/registry"
 import { ApplicationTools } from "../src/tool/application-tools"
 import { settleTool, toolIdentity } from "./lib/tool"
@@ -193,6 +194,24 @@ describe("LocationServiceMap", () => {
             })
             .run()
             .pipe(Effect.orDie)
+          const request = "Produce dist/app and keep internal source layout flexible"
+          const requestMessageID = SessionMessage.ID.make("msg_contract_request")
+          const encoded = Schema.encodeSync(SessionMessage.Message)(
+            SessionMessage.User.make({
+              id: requestMessageID,
+              type: "user",
+              text: request,
+              files: [],
+              agents: [],
+              time: { created: DateTime.makeUnsafe(Date.now()) },
+            }),
+          )
+          const { id: _, type, ...data } = encoded
+          yield* db
+            .insert(SessionMessageTable)
+            .values({ id: requestMessageID, session_id: sessionID, type, seq: 1, time_created: Date.now(), data })
+            .run()
+            .pipe(Effect.orDie)
 
           yield* Effect.gen(function* () {
             const registry = yield* ToolRegistry.Service
@@ -216,7 +235,10 @@ describe("LocationServiceMap", () => {
                 deadline: defaults.budget.deadline + 24 * 60 * 60 * 1_000,
               },
             }
-            const expected = { ...proposal, resolution: { ...proposal.resolution, maxAttempts: 2 } }
+            const expected = {
+              ...proposal,
+              brief: [proposal.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
+            }
             expect((yield* registry.materialize()).definitions.map((item) => item.name)).toContain("contract_propose")
             const execution = yield* settleTool(registry, {
               sessionID,
@@ -243,6 +265,29 @@ describe("LocationServiceMap", () => {
             expect(settled.output?.structured).toMatchObject({ contractID })
             expect(yield* contracts.get(contractID)).toMatchObject({ id: contractID, spec: expected })
             expect(yield* bindings.get(contractID)).toMatchObject({ contractID, model: { id: "test" } })
+
+            const unnamedArtifact = yield* settleTool(registry, {
+              sessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-contract-unnamed-artifact",
+                name: "contract_propose",
+                input: {
+                  spec: {
+                    ...proposal,
+                    evidence: {
+                      type: "principal",
+                      replay: { checks: [], protected: [], artifacts: ["src/generated.ts"] },
+                    },
+                  },
+                },
+              },
+            })
+            expect(unnamedArtifact.result).toMatchObject({
+              type: "error",
+              value: "Replay artifacts must be exact paths named by the user: src/generated.ts",
+            })
 
             const rejected = yield* settleTool(registry, {
               sessionID,
@@ -398,6 +443,7 @@ describe("LocationServiceMap", () => {
             const base = ProContract.defaultSpec("Replay the frozen candidate", Date.now())
             const spec = {
               ...base,
+              budget: { ...base.budget, actions: 1 },
               evidence: {
                 type: "principal" as const,
                 replay: {
@@ -420,6 +466,7 @@ describe("LocationServiceMap", () => {
             const contractSessionID = claimed
               ? claimed.sessionID
               : yield* Effect.die("Contract attempt was not claimed")
+            expect(yield* bindings.reserveAction(contractSessionID, Date.now())).toBe(true)
 
             const settled = yield* settleTool(registry, {
               sessionID: contractSessionID,
@@ -437,17 +484,109 @@ describe("LocationServiceMap", () => {
               status: "dormant",
               challenge: {
                 disclosure: "executor",
-                summary: `Replay verification failed: ${process.execPath} -e process.exit(1)`,
+                summary: expect.stringContaining(`Replay check ${process.execPath} -e process.exit(1)`),
               },
             })
             expect(yield* contracts.history({ contractID })).toHaveLength(3)
+
+            const unavailableID = ProContract.ID.make("pct_replay_unavailable")
+            const unavailableSpec = {
+              ...base,
+              evidence: {
+                type: "principal" as const,
+                replay: {
+                  checks: [{ argv: [path.join(dir.path, "missing")], timeout: 10_000, exit: 0 }],
+                  protected: [],
+                  artifacts: [],
+                },
+              },
+            }
+            yield* contracts.issue({ id: unavailableID, scope: "replay", spec: unavailableSpec, executor: "opencode" })
+            yield* bindings.create({
+              contractID: unavailableID,
+              revision: 1,
+              location,
+              model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") }),
+              nextActionAt: 0,
+            })
+            yield* contracts.activate(unavailableID, 1, Date.now())
+            const unavailable = yield* bindings.claim(unavailableID, Date.now())
+            const unavailableSessionID = unavailable
+              ? unavailable.sessionID
+              : yield* Effect.die("Unavailable replay attempt was not claimed")
+            const failed = yield* settleTool(registry, {
+              sessionID: unavailableSessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-report-unavailable",
+                name: "contract_report_ready",
+                input: { summary: "candidate complete", uncertainties: [] },
+              },
+            })
+            expect(failed.result).toMatchObject({ type: "error" })
+            expect(yield* contracts.get(unavailableID)).toMatchObject({
+              status: "escalated",
+              escalation: { reason: expect.stringContaining("Independent verification unavailable") },
+            })
+            expect((yield* bindings.get(unavailableID))?.attempts).toBe(1)
+            expect((yield* contracts.get(unavailableID))?.challenge).toBeUndefined()
           }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
         }),
       ),
     ),
   )
 
-  it.live("reviews the first handoff once in a fresh attempt", () =>
+  it.live("escalates when handoff cannot capture a subject", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) => {
+        const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+        return Effect.gen(function* () {
+          const contracts = yield* ProContract.Service
+          const bindings = yield* ProContractOpenCode.Service
+          const contractID = ProContract.ID.make("pct_snapshot_unavailable")
+          yield* contracts.issue({
+            id: contractID,
+            scope: "snapshot",
+            spec: ProContract.defaultSpec("Hand off the candidate", Date.now()),
+            executor: "opencode",
+          })
+          const binding = yield* bindings.create({
+            contractID,
+            revision: 1,
+            location,
+            model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") }),
+            nextActionAt: 0,
+          })
+          yield* contracts.activate(contractID, 1, Date.now())
+          yield* bindings.claim(contractID, Date.now())
+
+          const settled = yield* settleTool(yield* ToolRegistry.Service, {
+            sessionID: binding.sessionID,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "call-report-no-snapshot",
+              name: "contract_report_ready",
+              input: { summary: "candidate complete", uncertainties: [] },
+            },
+          })
+
+          expect(settled.result).toMatchObject({ type: "error" })
+          expect(yield* contracts.get(contractID)).toMatchObject({
+            status: "escalated",
+            escalation: { reason: "Contract handoff snapshot is unavailable" },
+          })
+          expect((yield* bindings.get(contractID))?.attempts).toBe(1)
+        }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
+      }),
+    ),
+  )
+
+  it.live("preserves material handoff uncertainty for principal adjudication", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -494,43 +633,19 @@ describe("LocationServiceMap", () => {
                 name: "contract_report_ready",
                 input: {
                   summary: "candidate ready for review",
-                  uncertainties: [],
+                  uncertainties: ["CLI diagnostics may not match"],
                 },
               },
             })
 
             expect(settled.output?.structured).toEqual({ recorded: true })
             expect(yield* contracts.get(contractID)).toMatchObject({
-              status: "dormant",
-              challenge: {
-                disclosure: "executor",
-                summary:
-                  "Independently challenge this candidate. Find one material way it could fail the Contract that existing evidence does not cover. Repair it or report the residual risk.",
-              },
-            })
-            yield* contracts.activate(contractID, 1, Date.now())
-            const remediation = yield* bindings.claim(contractID, Date.now())
-            if (!remediation) return yield* Effect.die("Remediation attempt was not claimed")
-            expect(remediation.sessionID).not.toBe(contractSessionID)
-            yield* settleTool(registry, {
-              sessionID: remediation.sessionID,
-              ...toolIdentity,
-              call: {
-                type: "tool-call",
-                id: "call-report-residual-uncertainty",
-                name: "contract_report_ready",
-                input: {
-                  summary: "candidate remediated",
-                  uncertainties: ["CLI diagnostics may still vary by platform"],
-                },
-              },
-            })
-
-            expect(yield* contracts.get(contractID)).toMatchObject({
               status: "verification",
-              handoff: { uncertainties: ["CLI diagnostics may still vary by platform"] },
+              handoff: { uncertainties: ["CLI diagnostics may not match"] },
             })
-            expect(yield* contracts.history({ contractID })).toHaveLength(5)
+            expect((yield* contracts.get(contractID))?.challenge).toBeUndefined()
+            expect((yield* bindings.get(contractID))?.attempts).toBe(1)
+            expect(yield* contracts.history({ contractID })).toHaveLength(3)
           }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
         }),
       ),

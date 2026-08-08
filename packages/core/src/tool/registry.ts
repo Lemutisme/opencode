@@ -15,6 +15,11 @@ import { makeLocationNode } from "../effect/app-node"
 import { ProContractOpenCode } from "../pro-contract/open-code"
 
 const BOUNDED_CONTRACT_TOOLS = new Set(["read", "edit", "write", "apply_patch", "glob", "grep"])
+const CONTRACT_CONTROL_TOOLS = new Set([
+  "contract_report_ready",
+  "contract_report_blocked",
+  "contract_propose_revision",
+])
 
 export type ExecuteInput = {
   readonly sessionID: SessionSchema.ID
@@ -52,7 +57,10 @@ const registryLayer = Layer.effect(
     const local = new Map<string, Array<{ readonly token: object; readonly registration: Registration }>>()
 
     const settleWith = Effect.fn("ToolRegistry.settle")(function* (input: ExecuteInput, advertised?: object) {
-      if (!(yield* contracts.reserveAction(input.sessionID, yield* Clock.currentTimeMillis)))
+      if (
+        !CONTRACT_CONTROL_TOOLS.has(input.call.name) &&
+        !(yield* contracts.reserveAction(input.sessionID, yield* Clock.currentTimeMillis))
+      )
         return { result: { type: "error" as const, value: "Contract action budget exhausted" } }
       const registration =
         local.get(input.call.name)?.at(-1)?.registration ?? applications.entries().get(input.call.name)

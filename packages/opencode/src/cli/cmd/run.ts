@@ -241,7 +241,7 @@ export const RunCommand = effectCmd({
       })
       .option("auto", {
         type: "boolean",
-        describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
+        describe: "auto-approve non-governance permissions that are not explicitly denied (dangerous!)",
         default: false,
       })
       .option("yolo", {
@@ -796,8 +796,14 @@ export const RunCommand = effectCmd({
             if (event.type === "permission.asked") {
               const permission = event.properties
               if (permission.sessionID !== sessionID) continue
+              const governance = [
+                "contract_issue",
+                "contract_revision",
+                "contract_release",
+                "contract_attest",
+              ].includes(permission.permission)
 
-              if (auto) {
+              if (auto && !governance) {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",
@@ -806,7 +812,7 @@ export const RunCommand = effectCmd({
                 UI.println(
                   UI.Style.TEXT_WARNING_BOLD + "!",
                   UI.Style.TEXT_NORMAL +
-                    `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
+                    `${governance ? "principal permission" : "permission requested"}: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
                 )
                 await client.permission.reply({
                   requestID: permission.id,
@@ -818,18 +824,24 @@ export const RunCommand = effectCmd({
             if (event.type === "permission.v2.asked") {
               const permission = event.properties
               if (permission.sessionID !== sessionID) continue
+              const governance = [
+                "contract_issue",
+                "contract_revision",
+                "contract_release",
+                "contract_attest",
+              ].includes(permission.action)
 
-              if (!auto) {
+              if (!auto || governance) {
                 UI.println(
                   UI.Style.TEXT_WARNING_BOLD + "!",
                   UI.Style.TEXT_NORMAL +
-                    `permission requested: ${permission.action} (${permission.resources.join(", ")}); auto-rejecting`,
+                    `${governance ? "principal permission" : "permission requested"}: ${permission.action} (${permission.resources.join(", ")}); auto-rejecting`,
                 )
               }
               await client.v2.session.permission.reply({
                 sessionID,
                 requestID: permission.id,
-                reply: auto ? "once" : "reject",
+                reply: auto && !governance ? "once" : "reject",
               })
             }
           }

@@ -74,7 +74,7 @@ const layer = Layer.effect(
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
           ].join("\n"),
-          "Before using effectful tools, decide Contract formation. Call contract_propose when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite build/check argv and every required artifact path; use principal-only evidence only when no honest mechanical criterion exists. Preserve user-provided quality criteria, evaluation protocols, stopping rules, and assumptions in spec.brief. Do not invent generic exploration, edge-case, or validation requirements; execution policy is supplied separately. Budgets are ceilings, not targets; propose the smallest sufficient budget. Call contract_continue only when both the work and its validation can finish in this Session. When unsure, propose.",
+          "Proactively call contract_propose when the request creates a future trigger, asynchronous or multi-Session obligation, durable follow-up, or later external adjudication. Ordinary work may proceed directly. Keep the optimization goal separate from the exact evidence claim that may be settled. Preserve user-provided quality criteria, budgets, stopping rules, and assumptions; do not invent implementation paths or acceptance evidence.",
           references.length === 0
             ? undefined
             : [

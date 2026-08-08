@@ -32,6 +32,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
       description: `${contract.pendingRevision ? "revision pending" : contract.status} · ${contract.scope}`,
       details: [
         `Contract: ${contract.id}`,
+        `Settlement claim: ${contract.spec.evidence.claim ?? contract.spec.goal}`,
         `Brief: ${contract.spec.brief ? "provided" : "none"}`,
         `Requires: ${contract.spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
         ...(contract.handoff
@@ -71,8 +72,8 @@ export function DialogContracts(props: { scope?: string } = {}) {
           ...(contract.status === "verification" && contract.handoff && contract.spec.evidence.type === "principal"
             ? [
                 {
-                  title: "Attest completion",
-                  description: "Discharge with principal evidence",
+                  title: "Attest settlement claim",
+                  description: contract.spec.evidence.claim ?? contract.spec.goal,
                   value: "attest",
                   onSelect: () => void attest(contract),
                 },

@@ -14,7 +14,8 @@ const IssueCommand = effectCmd({
     yargs
       .option("id", { type: "string", describe: "contract ID" })
       .option("scope", { type: "string", demandOption: true, describe: "quiescence scope" })
-      .option("goal", { type: "string", demandOption: true, describe: "human-readable obligation" })
+      .option("goal", { type: "string", demandOption: true, describe: "optimization objective" })
+      .option("claim", { type: "string", describe: "exact proposition the evidence may settle" })
       .option("brief", { type: "string", describe: "context for the future executor" })
       .option("require", { type: "array", string: true, describe: "required Contract as ID@revision" })
       .option("model", { type: "string", demandOption: true, describe: "execution model as provider/model" })
@@ -47,6 +48,7 @@ const IssueCommand = effectCmd({
       requires: args.require === undefined ? base.requires : requires,
       authority: args.write ? (["filesystem.read", "filesystem.write", "process.execute"] as const) : base.authority,
       budget: args.turns === undefined ? base.budget : { ...base.budget, turns: args.turns },
+      evidence: args.claim === undefined ? base.evidence : { ...base.evidence, claim: args.claim },
       trigger: activateAt === undefined ? base.trigger : { type: "time" as const, at: activateAt },
     }
     const executionModel = ModelV2.Ref.make({

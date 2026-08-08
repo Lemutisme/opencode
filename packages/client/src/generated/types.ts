@@ -2828,6 +2828,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -2854,6 +2855,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -2880,6 +2882,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -2906,6 +2909,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -2932,6 +2936,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -2958,6 +2963,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -2984,6 +2990,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -3010,6 +3017,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -3036,6 +3044,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -3062,6 +3071,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -3088,6 +3098,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -3114,6 +3125,7 @@ export type ServerProContractIssueInput = {
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
+      readonly claim?: string
       readonly replay?: {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
@@ -3142,6 +3154,7 @@ export type ServerProContractIssueOutput = {
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
+        readonly claim?: string
         readonly replay?: {
           readonly checks: ReadonlyArray<{
             readonly argv: ReadonlyArray<string>
@@ -3193,6 +3206,7 @@ export type ServerProContractIssueOutput = {
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
+          readonly claim?: string
           readonly replay?: {
             readonly checks: ReadonlyArray<{
               readonly argv: ReadonlyArray<string>
@@ -3244,6 +3258,7 @@ export type ServerProContractListOutput = {
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
+        readonly claim?: string
         readonly replay?: {
           readonly checks: ReadonlyArray<{
             readonly argv: ReadonlyArray<string>
@@ -3295,6 +3310,7 @@ export type ServerProContractListOutput = {
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
+          readonly claim?: string
           readonly replay?: {
             readonly checks: ReadonlyArray<{
               readonly argv: ReadonlyArray<string>
@@ -3341,6 +3357,7 @@ export type ServerProContractGetOutput = {
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
+        readonly claim?: string
         readonly replay?: {
           readonly checks: ReadonlyArray<{
             readonly argv: ReadonlyArray<string>
@@ -3392,6 +3409,7 @@ export type ServerProContractGetOutput = {
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
+          readonly claim?: string
           readonly replay?: {
             readonly checks: ReadonlyArray<{
               readonly argv: ReadonlyArray<string>

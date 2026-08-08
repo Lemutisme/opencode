@@ -204,7 +204,10 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto") {
+          const governance = ["contract_issue", "contract_revision", "contract_release", "contract_attest"].includes(
+            request.permission,
+          )
+          if (permission.mode === "auto" && !governance) {
             void sdk.client.permission.reply({
               requestID: request.id,
               reply: "once",
@@ -235,7 +238,10 @@ export const {
 
         case "permission.v2.asked": {
           const input = event.properties
-          if (permission.mode === "auto") {
+          const governance = ["contract_issue", "contract_revision", "contract_release", "contract_attest"].includes(
+            input.action,
+          )
+          if (permission.mode === "auto" && !governance) {
             void sdk.client.v2.session.permission.reply({
               sessionID: input.sessionID,
               requestID: input.id,

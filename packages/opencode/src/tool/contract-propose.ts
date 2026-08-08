@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or an artifact whose correctness depends on later external evaluation. Describe outcomes and user-supplied acceptance criteria, not a generic implementation or test workflow. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Budgets are shared across all attempts, so reserve remediation headroom. budget.deadline is a Unix timestamp in milliseconds; shorter values use the standard 24-hour deadline. When unsure, propose. The exact normalized draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the optimization objective and evidence.claim to the exact proposition the evidence may settle. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -39,22 +39,9 @@ export const ContractProposeTool = Tool.define<
           const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
           if (session.metadata?.[formationMetadataKey] === "contract")
             return yield* Effect.die("This Session already delegated its obligation to a Contract")
-          if (session.metadata?.[formationMetadataKey] === "ordinary")
-            return yield* Effect.die("This Session already committed to ordinary execution")
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
-          const draft = {
-            ...input.spec,
-            resolution: {
-              ...input.spec.resolution,
-              maxAttempts: Math.max(input.spec.resolution.maxAttempts, 2),
-            },
-            budget: {
-              turns: Math.max(input.spec.budget.turns, 1_000),
-              actions: Math.max(input.spec.budget.actions, 10_000),
-              deadline: Math.max(input.spec.budget.deadline, now + 24 * 60 * 60 * 1_000),
-            },
-          }
+          const draft = ProContract.normalizeSpec(input.spec)
           const request = ctx.messages
             .findLast((item) => item.info.role === "user")
             ?.parts.flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
@@ -79,6 +66,7 @@ export const ContractProposeTool = Tool.define<
                 `Authority: ${spec.authority.join(", ")}`,
                 `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
                 `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
+                `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                 `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
                 `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
               ]
@@ -108,50 +96,6 @@ export const ContractProposeTool = Tool.define<
             title: "Contract issued",
             output: `Contract ${contractID} was approved and scheduled in Session ${issued.execution.sessionID}. Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
             metadata: { contractID, sessionID: issued.execution.sessionID },
-          }
-        }),
-    }
-  }),
-)
-
-const ContinueParameters = Schema.Struct({ reason: Schema.NonEmptyString })
-
-export const ContractContinueTool = Tool.define<
-  typeof ContinueParameters,
-  Record<string, never>,
-  Agent.Service | Session.Service
->(
-  "contract_continue",
-  Effect.gen(function* () {
-    const agents = yield* Agent.Service
-    const sessions = yield* Session.Service
-
-    return {
-      description:
-        "Declare that both the work and its validation can finish in this Session. Do not use when an artifact will be evaluated or reviewed later; when unsure, propose a Contract.",
-      parameters: ContinueParameters,
-      execute: (input, ctx) =>
-        Effect.gen(function* () {
-          const agent = yield* agents.get(ctx.agent)
-          if (!agent || agent.mode !== "primary")
-            return yield* Effect.die("Only a primary agent may decide Contract formation")
-          const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
-          if (session.metadata?.[formationMetadataKey] === "contract")
-            return yield* Effect.die("A signed Contract cannot be replaced by an ordinary-work decision")
-          yield* ctx.ask({
-            permission: "contract_continue",
-            patterns: [ctx.sessionID],
-            always: [],
-            metadata: { reason: input.reason },
-          })
-          yield* sessions.setMetadata({
-            sessionID: session.id,
-            metadata: { ...session.metadata, [formationMetadataKey]: "ordinary" },
-          })
-          return {
-            title: "Continuing without Contract",
-            output: `Formation decision recorded: ${input.reason}`,
-            metadata: {},
           }
         }),
     }

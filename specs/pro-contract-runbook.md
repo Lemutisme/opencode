@@ -3,7 +3,8 @@
 This runbook covers the local OpenCode build, interactive and unattended
 ProContract operation, one-competition MLE-bench calibration, and ProgramBench
 candidate evaluation. It is intentionally operational. The normative design is
-in [`pro-contract.md`](pro-contract.md).
+in [`pro-contract.md`](pro-contract.md). Non-default controller experiments are
+indexed in [`pro-contract-experiments.md`](pro-contract-experiments.md).
 
 ## 1. Operating boundary
 
@@ -29,6 +30,10 @@ The current deployment is cooperative: the plane, executor, credentials, and
 database may share one OS user. Do not claim adversarial non-bypass. Never open
 a live SQLite WAL with a host-side SQLite client; inspect state through HTTP, or
 stop the server before copying the database.
+
+An unattended adapter must deny `external_directory` unless the Contract
+explicitly delegates it. Otherwise a mistyped workdir can wait forever on an
+interactive permission request before the shell timeout begins.
 
 ## 2. Repository layout and prerequisites
 
@@ -137,14 +142,13 @@ durable-follow-up, or evidence-gated work, the model can call
 `contract_propose`. OpenCode displays the exact goal, authority, budget,
 dependencies, evidence policy, and `specHash`.
 
-Primary Sessions must record formation before their first effectful tool. For
-ordinary single-Session work the model calls `contract_continue` with a reason;
-read-only exploration is allowed before this decision. Later external review or
-evaluation makes a task Contract work even when its execution is synchronous.
-One primary Session may record only one formation outcome; duplicate proposals
-after delegation are rejected. An implementation proposal promising a build
-command or named output artifact is incomplete unless its evidence includes
-finite replay checks and every required artifact path.
+Ordinary work proceeds directly. When future attention or later adjudication is
+needed, a primary Session may voluntarily propose one Contract; duplicate
+proposals after delegation are rejected. An implementation proposal promising a build
+command or user-named output artifact is incomplete unless its evidence includes
+finite replay checks and every user-named artifact path. Do not guess source
+filenames before implementation; a build check covers its inputs. Proposal
+admission rejects artifact paths absent from the original request.
 
 The human choices are:
 
@@ -200,13 +204,12 @@ until curl --max-time 5 -fsS "http://127.0.0.1:$PORT/global/health" >/dev/null; 
   "<original task instruction>"
 ```
 
-`--auto` supplies standing approval for Permission requests that are not
-explicitly denied. It approves Contract formation; it does **not** attest
-completion or replace the independent verifier.
+`--auto` supplies standing approval only for executor actions. It rejects
+Contract formation and every other principal governance decision. An unattended
+benchmark adapter must issue its frozen Contract before starting the executor.
 
-For autonomous benchmark claims, do not manually issue a Contract if the model
-never proposes one. Failure to propose is a measured harness failure. Manual
-issue remains useful for debugging and controlled experiments.
+For autonomous benchmark claims, the trusted adapter owns issuance. Model
+proposal behavior is a separate interactive metric, not benchmark authority.
 
 ### 4.3 Manual issue and inspection
 
@@ -217,7 +220,8 @@ cd "$WORKSPACE"
 "$OPENCODE_BIN" contract issue \
   --id pct_example \
   --scope example-run \
-  --goal "Produce and independently verify the requested artifact" \
+  --goal "Maximize the requested artifact's quality within the approved budget" \
+  --claim "The exact artifact satisfies the frozen delivery checks" \
   --brief "Preserve unresolved assumptions in the handoff" \
   --model "$MODEL" \
   --variant "$VARIANT" \
@@ -345,14 +349,17 @@ artifacts, and ten-minute-per-check maximum timeout:
 At `contract_report_ready`, OpenCode captures the candidate subject,
 materializes that exact tree into a temporary worktree, runs the checks there,
 and stores a hashed finite report under the control-plane data directory. A
-failure becomes an executor-visible, subject-bound challenge and creates a new
-semantic attempt. A pass is recorded in the handoff and is required before the
-principal can attest; replay does not replace principal judgment in this
+completed check that returns the wrong exit, a protected-file mismatch, or a
+missing artifact becomes an executor-visible, subject-bound challenge. Failure
+to materialize or start the verifier escalates the Contract without creating a
+new executor attempt. A pass is recorded in the handoff and is required before
+the principal can attest; replay does not replace principal judgment in this
 conservative policy.
 
-The first replay-passing handoff with remaining attempt headroom also receives
-one fresh counterexample review, even when the executor reports no uncertainty.
-The next handoff proceeds to verification instead of opening another review.
+A replay-passing handoff proceeds to verification with every reported material
+uncertainty preserved. Uncertainty never triggers executor self-review; unknown
+blind spots require an actual verifier or principal challenge. Principal
+attestation must cite evidence independent of the replay report.
 
 Replay inherits the verifier process environment and network namespace. It
 isolates filesystem mutations from the candidate but does not provide host or
@@ -642,6 +649,47 @@ Formal ProgramBench images are Linux/amd64. macOS/QEMU runs are calibration.
 
 ### 6.2 Start from a cleanroom
 
+Freeze artifact-production acceptance before starting the executor. The
+ProgramBench Contract ends at a submission-ready artifact; official evaluation
+is a later benchmark measurement, not its settlement condition. Keep the
+behavioral optimization goal separate from the delivery claim:
+
+```json
+{
+  "version": 1,
+  "instance": "sitkevij__hex.61ae69b",
+  "claim": "submission-ready candidate with no known calibration mismatch",
+  "subject": "exact Contract handoff tree",
+  "accept": [
+    "required source and relocatable compile.sh are present",
+    "deterministic packaging succeeds",
+    "cleanroom preflight passes",
+    "preregistered calibration probes pass when supplied"
+  ],
+  "officialEvaluation": "external"
+}
+```
+
+Store this as `acceptance.json`, hash its exact bytes, and include the policy
+and hash in the pre-issued Contract brief. The run adapter must bind the exact
+subject to the deterministic archive and report package, preflight, and probe
+results. Attestation uses that report hash; a mismatch becomes a visible
+challenge. The later official result is recorded separately and is never fed
+back into the same run.
+
+Use the behavioral objective as `goal` and the JSON `claim` text as
+`evidence.claim`. The executor optimizes the former; package, preflight, and
+probe evidence may settle only the latter.
+
+If no preregistered probe suite exists, omit that criterion and issue a
+delivery-only Contract. Build, packaging, and preflight evidence cannot support
+a behavioral-adequacy or performance claim.
+
+Claim frozen source and a reproducible build rather than a prebuilt executable
+unless the evidence policy checks that binary in the exact Snapshot. Snapshot
+capture may omit large untracked files; ProgramBench preflight rebuilds the
+executable from the packaged source.
+
 Example instance:
 
 ```bash
@@ -687,9 +735,9 @@ or otherwise prove that shell commands cannot use inference egress.
 
 Submit the original task once:
 
-Every ProgramBench artifact is evaluated after the Session, so its adapter must
-set the existing `contract_continue` permission to `deny`. Interactive OpenCode
-keeps the default `ask`; do not encode this benchmark policy in Contract Core.
+Every ProgramBench artifact is evaluated after the Session, so its trusted
+adapter pre-issues the frozen Contract. Do not encode this benchmark policy in
+Contract Core or rely on executor-authored formation.
 
 ```bash
 "$OPENCODE_BIN" run \
