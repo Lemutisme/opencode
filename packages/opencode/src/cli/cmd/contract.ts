@@ -1,5 +1,6 @@
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
 import { buildLocationServiceMap, LocationServiceMap } from "@opencode-ai/core/location-services"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -151,6 +152,18 @@ const PolicyCommand = effectCmd({
         2,
       ),
     )
+  }),
+})
+
+const SweepCommand = effectCmd({
+  command: "sweep",
+  describe: "run one Contract recovery and dispatch cycle",
+  instance: false,
+  handler: Effect.fn("Cli.contract.sweep")(function* () {
+    const now = yield* Clock.currentTimeMillis
+    const due = yield* ProContractOpenCode.Service.use((bindings) => bindings.due(now))
+    yield* ProContractScheduler.Service.use((scheduler) => scheduler.runOnce())
+    console.log(JSON.stringify({ time: now, due: due.map((binding) => binding.contractID) }, null, 2))
   }),
 })
 
@@ -309,6 +322,7 @@ export const ContractCommand = effectCmd({
     yargs
       .command(IssueCommand)
       .command(PolicyCommand)
+      .command(SweepCommand)
       .command(ListCommand)
       .command(ShowCommand)
       .command(ExportCommand)
