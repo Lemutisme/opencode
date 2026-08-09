@@ -80,6 +80,24 @@ task-dependent and unverifiable by the normative kernel. Making them mandatory
 reduced Typst calibration scores. They belong in a replaceable compiler or
 executor policy, using ordinary Contract budget telemetry.
 
+### Evidence-frontier prompt
+
+A one-sentence executor policy asked the model to prefer the cheapest legal
+observation likely to falsify an implementation of a materially untested
+behavior class. On a same-instance Loop calibration it repaired 27 tests missed
+by the prior candidate, including fractional counts, sentinel values, and
+argument errors, but lost 149 prior passes. The final result was 530/710
+(74.65%), down from 652/710 (91.83%), despite nearly identical model cost.
+
+The candidate explored more broadly and handed off after 181 turns, but one
+missing finite-input termination invariant caused 154 of its 180 active
+failures to time out. Enumerating behavior classes did not preserve the
+cross-cutting invariants that connected those classes. The policy was therefore
+rejected and removed from the default prompt. This is calibration on an already
+observed instance, not holdout evidence; its value is the counterexample that
+more falsification language can still trade implementation discipline for
+exploration.
+
 ### Adaptive Contract graphs
 
 Immutable `requires` edges remain useful for real durable dependencies between
@@ -135,6 +153,7 @@ stochastic, and compute was not always matched.
 | `sclevine__yj.8016400` | goal/claim separation, Luna Max | 89.0482% | 1 attempt, 256 turns | New best; independent delivery discharge and quiet |
 | `sclevine__yj.8016400` | E2E artifact export, Luna Max | 81.0952% | 1 attempt, 173 turns | Exact CLI export consumed by external adapter |
 | `sitkevij__hex` | later controllers | 98.5419% | multiple variants | Plateau; added control logic did not improve the score |
+| `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -156,6 +175,7 @@ workspace layout documented by the runbook:
 - [YJ final core](../../run-artifacts/programbench-yj-final-core-luna-max-no-net-20260807-163701/RESULT.md)
 - [YJ goal/claim separation](../../run-artifacts/programbench-yj-goal-claim-luna-max-no-net-20260807-172413/RESULT.md)
 - [YJ E2E artifact export](../../run-artifacts/programbench-yj-e2e-export-luna-max-no-net-20260808-130711/RESULT.md)
+- [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 
 ## Decision rule for future additions
 
