@@ -168,6 +168,26 @@ cannot override its authority or settlement terms. Challenging the policy
 Contract invalidates its dependent support through the normal remediation
 path.
 
+To retain one principal-selected policy for future natural-language proposals,
+set it in the location's `opencode.json` after its Contract is discharged:
+
+```json
+{
+  "contract_policy": {
+    "contractID": "pct_policy_example",
+    "revision": 1,
+    "policy": true
+  }
+}
+```
+
+The setting is a default compiler input, not an authority grant. An explicit
+policy in a proposal overrides it, every inherited edge remains visible in the
+approval UI, and a challenged default causes new issuance to fail closed.
+Delete the setting to clear it or replace the exact ID and revision after a new
+policy is independently discharged. Existing Contracts keep their frozen
+policy edge.
+
 ### 4.2 Unattended formation
 
 Keep a server alive after the initial Session exits:

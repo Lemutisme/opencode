@@ -752,6 +752,15 @@ pointer. Principal selection remains explicit, failed candidates remain inert,
 and support loss automatically enters the existing dependency-remediation
 path.
 
+OpenCode may retain that explicit selection in location configuration as
+`contract_policy`. A new natural-language proposal inherits the configured
+edge unless its exact draft already names another policy. The inherited edge is
+shown at the ordinary permission boundary and becomes part of the new
+`specHash`; configuration never bypasses principal approval or kernel evidence
+checks. Removing or replacing the setting affects only future proposals. A
+challenged configured policy remains selected but fails new issuance closed
+until the principal clears or replaces it.
+
 ## OpenCode design
 
 The contract plane is logically independent of any harness. It should be a

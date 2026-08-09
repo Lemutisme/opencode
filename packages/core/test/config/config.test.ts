@@ -13,6 +13,7 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { Location } from "@opencode-ai/core/location"
 import { Policy } from "@opencode-ai/core/policy"
+import { ProContract } from "@opencode-ai/core/pro-contract"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { location } from "../fixture/location"
@@ -343,6 +344,7 @@ describe("Config", () => {
                 },
                 skills: ["./skills", "~/shared-skills", "https://example.com/.well-known/skills/"],
                 instructions: ["CONTRIBUTING.md", ".cursor/rules/*.md", "https://example.com/shared-rules.md"],
+                contract_policy: { contractID: "pct_policy", revision: 1, policy: true },
                 references: {
                   local: { path: "../library" },
                   sdk: { repository: "github.com/example/sdk", branch: "main" },
@@ -437,6 +439,11 @@ describe("Config", () => {
               ".cursor/rules/*.md",
               "https://example.com/shared-rules.md",
             ])
+            expect(documents[0]?.info.contract_policy).toEqual({
+              contractID: ProContract.ID.make("pct_policy"),
+              revision: 1,
+              policy: true,
+            })
             expect(documents[0]?.info.references).toEqual({
               local: { path: "../library" },
               sdk: { repository: "github.com/example/sdk", branch: "main" },

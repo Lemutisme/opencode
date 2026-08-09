@@ -5,6 +5,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Clock, Effect, Schema } from "effect"
 import { Agent } from "@/agent/agent"
+import { Config } from "@/config/config"
 import { Session } from "@/session/session"
 import * as Tool from "./tool"
 
@@ -19,12 +20,13 @@ type Metadata = {
 export const ContractProposeTool = Tool.define<
   typeof Parameters,
   Metadata,
-  Agent.Service | ProContractOpenCode.Service | Session.Service
+  Agent.Service | Config.Service | ProContractOpenCode.Service | Session.Service
 >(
   "contract_propose",
   Effect.gen(function* () {
     const bindings = yield* ProContractOpenCode.Service
     const agents = yield* Agent.Service
+    const config = yield* Config.Service
     const sessions = yield* Session.Service
 
     return {
@@ -42,13 +44,27 @@ export const ContractProposeTool = Tool.define<
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
           const draft = ProContract.normalizeSpec(input.spec)
+          const configuredPolicy = (yield* config.get()).contract_policy
+          const inherited =
+            configuredPolicy && !draft.requires.some((requirement) => requirement.policy)
+              ? {
+                  ...draft,
+                  requires: [
+                    ...draft.requires.filter((requirement) => requirement.contractID !== configuredPolicy.contractID),
+                    configuredPolicy,
+                  ],
+                }
+              : draft
           const request = ctx.messages
             .findLast((item) => item.info.role === "user")
             ?.parts.flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
             .join("\n")
           const spec = request
-            ? { ...draft, brief: [draft.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n") }
-            : draft
+            ? {
+                ...inherited,
+                brief: [inherited.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
+              }
+            : inherited
           const key = Hash.sha256(`${ctx.sessionID}:${ctx.messageID}:${ctx.callID ?? ""}`)
           const contractID = ProContract.ID.make(`pct_${key}`)
           const specHash = ProContract.hashSpec(spec)

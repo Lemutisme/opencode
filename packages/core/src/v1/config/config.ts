@@ -1,6 +1,7 @@
 export * as ConfigV1 from "./config"
 
 import { Schema } from "effect"
+import { ProContract } from "@opencode-ai/schema/pro-contract"
 import { NonNegativeInt, PositiveInt, type DeepMutable } from "../../schema"
 import { ConfigExperimental } from "../../config/experimental"
 import { ConfigReference } from "../../config/reference"
@@ -123,6 +124,11 @@ export const Info = Schema.Struct({
   }),
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Additional instruction files or patterns to include",
+  }),
+  contract_policy: Schema.optional(
+    Schema.Struct({ contractID: ProContract.ID, revision: PositiveInt, policy: Schema.Literal(true) }),
+  ).annotate({
+    description: "Principal-selected, evidenced Policy Contract inherited by new Contract proposals",
   }),
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),

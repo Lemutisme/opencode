@@ -2,6 +2,7 @@ export * as ContractControlTools from "./contract-control"
 
 import { ToolFailure } from "@opencode-ai/llm"
 import { Clock, Effect, Exit, Layer, Schema } from "effect"
+import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
@@ -18,6 +19,7 @@ import { Tools } from "./tools"
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
+    const config = yield* Config.Service
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
     const replayVerifier = yield* ProContractReplay.Service
@@ -56,12 +58,25 @@ const layer = Layer.effectDiscard(
                   message: `Replay artifacts must be exact paths named by the user: ${unnamedArtifacts.join(", ")}`,
                 })
               const draft = ProContract.normalizeSpec(input.spec)
+              const configuredPolicy = Config.latest(yield* config.entries(), "contract_policy")
+              const inherited =
+                configuredPolicy && !draft.requires.some((requirement) => requirement.policy)
+                  ? {
+                      ...draft,
+                      requires: [
+                        ...draft.requires.filter(
+                          (requirement) => requirement.contractID !== configuredPolicy.contractID,
+                        ),
+                        configuredPolicy,
+                      ],
+                    }
+                  : draft
               const spec = request
                 ? {
-                    ...draft,
-                    brief: [draft.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
+                    ...inherited,
+                    brief: [inherited.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
                   }
-                : draft
+                : inherited
               const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
               const contractID = ProContract.ID.make(`pct_${key}`)
               const specHash = ProContract.hashSpec(spec)
@@ -278,6 +293,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     ToolRegistry.node,
+    Config.node,
     PermissionV2.node,
     ProContract.node,
     ProContractOpenCode.node,

@@ -141,6 +141,13 @@ restored non-quiescence, and prevented a new dependent from being issued. This
 checks retention, future binding, and support-loss remediation; it does not
 claim automatic policy selection or task-quality improvement.
 
+A second fresh E2E placed that exact policy edge in location configuration. A
+normal natural-language proposal inherited it before principal permission, and
+the dedicated executor produced policy-only marker content. After the policy
+was challenged, another natural-language proposal inherited the same stale
+selection and failed issuance closed without creating a Contract. This checks
+durable default retention while leaving winner selection outside the executor.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -187,6 +194,7 @@ workspace layout documented by the runbook:
 - [YJ E2E artifact export](../../run-artifacts/programbench-yj-e2e-export-luna-max-no-net-20260808-130711/RESULT.md)
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 - [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
+- [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)
 
 ## Decision rule for future additions
 

@@ -5,11 +5,12 @@ import path from "path"
 import { type ParseError, parse } from "jsonc-parser"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Permission } from "@opencode-ai/schema/permission"
+import { ProContract } from "@opencode-ai/schema/pro-contract"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
 import { Location } from "./location"
 import { Policy } from "./policy"
-import { AbsolutePath } from "./schema"
+import { AbsolutePath, PositiveInt } from "./schema"
 import { ConfigAgent } from "./config/agent"
 import { ConfigAttachments } from "./config/attachments"
 import { ConfigCompaction } from "./config/compaction"
@@ -96,6 +97,11 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   instructions: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs supplying ambient instructions",
   }),
+  contract_policy: Schema.Struct({ contractID: ProContract.ID, revision: PositiveInt, policy: Schema.Literal(true) })
+    .pipe(Schema.optional)
+    .annotate({
+      description: "Principal-selected, evidenced Policy Contract inherited by new Contract proposals",
+    }),
   references: ConfigReference.Info.pipe(Schema.optional).annotate({
     description: "Named local directories or Git repositories available as external context",
   }),
