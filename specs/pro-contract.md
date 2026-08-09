@@ -379,6 +379,10 @@ executor can reconcile without reconstructing the entire conversation. Failures 
 reconciliation-context failures rather than silently attributed to planning.
 OpenCode preserves the latest user request verbatim in the approved brief, so a
 model-authored summary can compress context but cannot erase its source intent.
+When that preserved source says “this Session” or “the current Session,” the
+dedicated executor resolves the phrase to the issuer Session at issuance unless
+the ratified terms explicitly prohibit the dedicated Session too. This prevents
+temporal deixis from turning delegation instructions into a self-blocking duty.
 For open-ended optimization, that brief also preserves any user-provided
 evaluation protocol, quality floor, stopping rule, and known assumptions. It
 does not invent a generic implementation or validation workflow. Missing

@@ -327,6 +327,7 @@ const layer = Layer.effect(
                 `Optimization goal: ${contract.spec.goal}`,
                 `Settlement claim: ${ProContract.evidenceClaim(contract.spec)}`,
                 ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
+                "In preserved source requests, ‘this’ or ‘current’ Session refers to the issuer Session at issuance, not this dedicated Contract Session, unless the ratified terms explicitly say otherwise.",
                 ...(contractPolicy && contractPolicyText
                   ? [
                       `Ratified execution policy from ${contractPolicy.dependency.id}@${contractPolicy.dependency.revision}:`,
