@@ -148,6 +148,14 @@ was challenged, another natural-language proposal inherited the same stale
 selection and failed issuance closed without creating a Contract. This checks
 durable default retention while leaving winner selection outside the executor.
 
+A clean recursive E2E then used a ratified P0 policy to govern a MetaTask that
+generated the exact P1 policy text. P1 was built only from the exported MetaTask
+Snapshot, independently attested, selected by the principal policy command, and
+inherited by a later Task that produced a value absent from the user request.
+Challenging P1 retracted the Task's support. Failed and ambiguous policy
+candidates remained in history and were not promoted. This proves bounded
+recursive policy flow, not general capability improvement.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -195,6 +203,7 @@ workspace layout documented by the runbook:
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 - [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
 - [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)
+- [MetaContract recursive policy generation](../../run-artifacts/metacontract-rsi-e2e-final-20260809-161638/RESULT.md)
 
 ## Decision rule for future additions
 
