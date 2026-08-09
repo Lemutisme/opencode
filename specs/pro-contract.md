@@ -828,6 +828,10 @@ OpenCode therefore fails handoff closed when the Location cannot produce a
 content-addressed snapshot. This is institutional infrastructure failure, so it
 escalates immediately instead of consuming another semantic attempt.
 
+`opencode contract export` materializes the current handoff subject into a new
+directory. It never copies the mutable live workspace or falls back when the
+subject is unavailable.
+
 The execution binding must name its model explicitly. A proactive attempt may
 fail closed when that model or credential is unavailable, but it must never
 silently select another provider. Contract Sessions are permanently reserved

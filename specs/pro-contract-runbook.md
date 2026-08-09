@@ -231,6 +231,7 @@ cd "$WORKSPACE"
 "$OPENCODE_BIN" contract list --scope example-run
 "$OPENCODE_BIN" contract show pct_example
 "$OPENCODE_BIN" contract quiet example-run
+"$OPENCODE_BIN" contract export pct_example ./exact-subject
 ```
 
 The current manual CLI overrides provider turns only; its default action budget
@@ -757,14 +758,20 @@ not learned hints from earlier instances.
 Reference probes are calibration evidence, not official acceptance evidence:
 
 ```bash
+export CONTRACT_ID=pct_example
+"$OPENCODE_BIN" contract export "$CONTRACT_ID" "$RUN_DIR/subject"
+
+cp -a "$RUN_DIR/subject" "$RUN_DIR/probe-subject"
+(cd "$RUN_DIR/probe-subject" && ./compile.sh)
+
 cd "$PROGRAMBENCH_REPO"
 uv run programbench candidate probe \
   "$RUN_DIR/probes/cases.json" \
   "$RUN_DIR/probes/ledger.json" \
   "$WORKSPACE/reference" \
-  "$WORKSPACE/executable"
+  "$RUN_DIR/probe-subject/executable"
 
-uv run programbench candidate package "$WORKSPACE" "$RUN_DIR/submission" "$IID"
+uv run programbench candidate package "$RUN_DIR/subject" "$RUN_DIR/submission" "$IID"
 uv run programbench candidate preflight "$RUN_DIR/submission" "$IID" --docker-cpus 4
 ```
 

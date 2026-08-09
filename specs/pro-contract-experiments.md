@@ -133,6 +133,7 @@ stochastic, and compute was not always matched.
 | `sclevine__yj.8016400` | settlement/cache fix, Luna Max | 81.4863% | 3 attempts, 198 turns | Strong candidate; Contract released after exact subject omitted required binary |
 | `sclevine__yj.8016400` | final core, Luna Max | 77.5750% | 1 attempt, 119 turns | Exact replay, independent preflight, discharge, and quiet |
 | `sclevine__yj.8016400` | goal/claim separation, Luna Max | 89.0482% | 1 attempt, 256 turns | New best; independent delivery discharge and quiet |
+| `sclevine__yj.8016400` | E2E artifact export, Luna Max | 81.0952% | 1 attempt, 173 turns | Exact CLI export consumed by external adapter |
 | `sitkevij__hex` | later controllers | 98.5419% | multiple variants | Plateau; added control logic did not improve the score |
 
 The Pareto result is the simplified implementation at
@@ -154,6 +155,7 @@ workspace layout documented by the runbook:
 - [YJ settlement/cache fix](../../run-artifacts/programbench-yj-settlement-cachefix-luna-max-no-net-20260807-151834/RESULT.md)
 - [YJ final core](../../run-artifacts/programbench-yj-final-core-luna-max-no-net-20260807-163701/RESULT.md)
 - [YJ goal/claim separation](../../run-artifacts/programbench-yj-goal-claim-luna-max-no-net-20260807-172413/RESULT.md)
+- [YJ E2E artifact export](../../run-artifacts/programbench-yj-e2e-export-luna-max-no-net-20260808-130711/RESULT.md)
 
 ## Decision rule for future additions
 

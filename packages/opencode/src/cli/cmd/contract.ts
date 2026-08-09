@@ -1,8 +1,11 @@
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { buildLocationServiceMap, LocationServiceMap } from "@opencode-ai/core/location-services"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Clock, Effect } from "effect"
+import path from "path"
 import type { Argv } from "yargs"
 import { effectCmd, fail } from "../effect-cmd"
 
@@ -115,6 +118,34 @@ const ShowCommand = effectCmd({
   }),
 })
 
+const ExportCommand = effectCmd({
+  command: "export <contractID> <directory>",
+  describe: "materialize the exact contract handoff",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .positional("contractID", { type: "string", demandOption: true, describe: "contract ID" })
+      .positional("directory", { type: "string", demandOption: true, describe: "new output directory" }),
+  handler: Effect.fn("Cli.contract.export")(function* (args) {
+    const contractID = ProContract.ID.make(args.contractID)
+    const contract = yield* ProContract.Service.use((service) => service.get(contractID))
+    if (!contract) return yield* fail(`Contract not found: ${contractID}`)
+    const handoff = contract.handoff
+    if (!handoff) return yield* fail(`Contract has no current handoff: ${contractID}`)
+    const binding = yield* ProContractOpenCode.Service.use((service) => service.get(contractID))
+    if (!binding) return yield* fail(`OpenCode execution not found: ${contractID}`)
+    const directory = AbsolutePath.make(path.resolve(args.directory))
+    yield* Snapshot.Service.use((service) =>
+      service.materialize({ snapshot: Snapshot.ID.make(handoff.subjectHash), directory }),
+    ).pipe(
+      Effect.provide(LocationServiceMap.Service.get(binding.location)),
+      Effect.provide(buildLocationServiceMap()),
+      Effect.catchTag("Snapshot.Error", (error) => fail(error.message)),
+    )
+    console.log(JSON.stringify({ contractID, subjectHash: handoff.subjectHash, directory }, null, 2))
+  }),
+})
+
 const QuietCommand = effectCmd({
   command: "quiet <scope>",
   describe: "check whether a scope has outstanding contracts",
@@ -209,6 +240,7 @@ export const ContractCommand = effectCmd({
       .command(IssueCommand)
       .command(ListCommand)
       .command(ShowCommand)
+      .command(ExportCommand)
       .command(QuietCommand)
       .command(ReleaseCommand)
       .command(AttestCommand)
