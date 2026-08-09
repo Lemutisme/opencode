@@ -301,7 +301,7 @@ The human-facing document is:
 trigger          future condition that should restore attention
 goal             optimization objective shown to the executor
 brief            issuer-authored context and stopping rule
-requires         exact upstream Contract revisions that must be evidenced first
+requires         exact upstream Contract revisions that must be evidenced first; one may be the execution policy
 delegation       authority granted after activation
 budget           risk, cost, retry, and time bounds
 evidence.claim   exact proposition the evidence may settle
@@ -325,6 +325,15 @@ cycle. Activation rechecks the exact revision and attestation in the same
 transaction that changes status. Upstream replacement cannot invalidate a live
 edge, and an unresolved wait becomes a visible escalation rather than silent
 quiescence.
+
+One `requires` edge may set `policy: true`. Its source must already be
+discharged with an attestation when the dependent is issued. The source
+Contract's exact goal is then rendered as the dependent executor's ratified
+policy together with its specification, subject, evidence, and attestation
+identities. The dependent `specHash` freezes that reference, revision cannot
+rewire it, and a later challenge follows the ordinary dependency closure. The
+policy guides how work is attempted; it cannot alter the dependent's goal,
+claim, authority, budget, or settlement rules.
 
 The kernel commits to the complete document by hash. The goal is necessarily
 informal; the verifier is its executable projection. Their gap is construct
@@ -735,6 +744,13 @@ This is institutional self-improvement rather than executor self-modification:
 the system can learn how to draft and verify future duties, while no policy may
 approve itself, weaken an active claim, consume its own negative evidence, or
 certify its own deployment.
+
+A discharged policy becomes usable by a future Contract only through an
+explicit `requires` edge marked `policy: true`. This first retention boundary
+does not select the newest candidate or maintain a mutable global policy
+pointer. Principal selection remains explicit, failed candidates remain inert,
+and support loss automatically enters the existing dependency-remediation
+path.
 
 ## OpenCode design
 

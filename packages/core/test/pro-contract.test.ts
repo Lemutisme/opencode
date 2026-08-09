@@ -207,6 +207,58 @@ describe("ProContract kernel", () => {
     ).toEqual({ type: "rejected", reason: "required contract was released" })
   })
 
+  test("binds one evidenced Contract as an immutable execution policy", () => {
+    const policyID = ProContract.ID.make("pct_policy")
+    const policyAttestationID = ProContract.AttestationID.make("pca_policy")
+    const policySpec = { ...spec, goal: "Preserve established behavior before exploring new behavior" }
+    const policy = {
+      ...draft,
+      id: policyID,
+      spec: policySpec,
+      specHash: ProContract.hashSpec(policySpec),
+      revision: 1,
+      status: "discharged" as const,
+      handoff: { summary: "policy frozen", uncertainties: [], subjectHash: "policy-subject", time: 0 },
+      attestationID: policyAttestationID,
+    }
+    const state: ProContract.State = {
+      contracts: { [policyID]: policy },
+      attestations: {
+        [policyAttestationID]: {
+          id: policyAttestationID,
+          contractID: policyID,
+          revision: 1,
+          specHash: policy.specHash,
+          subjectHash: policy.handoff.subjectHash,
+          evidenceHash: "policy-evidence",
+          verifierID: draft.issuer,
+          class: "principal",
+        },
+      },
+    }
+    const policyRequirement = { contractID: policyID, revision: 1, policy: true as const }
+    const taskSpec = { ...spec, requires: [policyRequirement] }
+    const taskDraft = { ...draft, spec: taskSpec, specHash: ProContract.hashSpec(taskSpec) }
+
+    expect(
+      ProContract.transition(state, { type: "issue", actor: taskDraft.issuer, draft: taskDraft }).decision,
+    ).toEqual({ type: "accepted" })
+    expect(
+      ProContract.transition(
+        { ...state, contracts: { [policyID]: { ...policy, status: "dormant", attestationID: undefined } } },
+        { type: "issue", actor: taskDraft.issuer, draft: taskDraft },
+      ).decision,
+    ).toEqual({ type: "rejected", reason: "execution policy is not evidenced" })
+    const ambiguous = { ...taskSpec, requires: [policyRequirement, policyRequirement] }
+    expect(
+      ProContract.transition(state, {
+        type: "issue",
+        actor: taskDraft.issuer,
+        draft: { ...taskDraft, spec: ambiguous, specHash: ProContract.hashSpec(ambiguous) },
+      }).decision,
+    ).toEqual({ type: "rejected", reason: "contract may require only one execution policy" })
+  })
+
   test("rejects executor testimony and preserves authoritative state", () => {
     const activated = ProContract.transition(ProContract.transition(ProContract.empty, issue).state, {
       type: "activate",
@@ -540,7 +592,7 @@ describe("ProContract kernel", () => {
       handoff: { summary: "upstream", uncertainties: [], subjectHash: "upstream-subject", time: 0 },
       attestationID: upstreamAttestationID,
     }
-    const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
+    const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1, policy: true as const }] }
     const child = {
       ...draft,
       id: childID,
@@ -903,7 +955,7 @@ describe("ProContract ledger", () => {
     }),
   )
 
-  it.effect("persists challenged support and affected dependents atomically", () =>
+  it.effect("persists challenged policy support and affected dependents atomically", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const upstreamID = ProContract.ID.make("pct_ledger_support_upstream")
@@ -919,7 +971,7 @@ describe("ProContract ledger", () => {
         time: 0,
       })
       yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
-      const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
+      const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1, policy: true as const }] }
       yield* contracts.issue({ id: childID, scope: "support", spec: childSpec, executor: "child" })
       yield* contracts.activate(childID, 1, 1)
       yield* contracts.reportReady({

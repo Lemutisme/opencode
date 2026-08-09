@@ -52,6 +52,16 @@ describe("contract hygiene", () => {
     ).toThrow()
   })
 
+  test("contract requirements mark only explicit execution policies", () => {
+    const decode = Schema.decodeUnknownSync(ProContract.Requirement)
+    expect(decode({ contractID: "pct_policy", revision: 1, policy: true })).toEqual({
+      contractID: ProContract.ID.make("pct_policy"),
+      revision: 1,
+      policy: true,
+    })
+    expect(() => decode({ contractID: "pct_policy", revision: 1, policy: false })).toThrow()
+  })
+
   test("reusable public identifiers are stable and unique", () => {
     const identifiers = [
       Agent.Color,

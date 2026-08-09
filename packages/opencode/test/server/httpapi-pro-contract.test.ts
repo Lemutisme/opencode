@@ -40,7 +40,7 @@ describe("ProContract HttpApi", () => {
             model: { providerID: "openai", id: model },
           }),
         })
-      const rejected = await issue([{ contractID: "pct_missing", revision: 1 }], "gpt-5.3-codex")
+      const rejected = await issue([{ contractID: "pct_missing", revision: 1, policy: true }], "gpt-5.3-codex")
 
       expect(rejected.status).toBe(409)
       expect(

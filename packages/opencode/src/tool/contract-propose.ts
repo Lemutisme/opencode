@@ -29,7 +29,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the optimization objective and evidence.claim to the exact proposition the evidence may settle. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the optimization objective and evidence.claim to the exact proposition the evidence may settle. A requirement may set policy: true only when its discharged Contract's exact goal is the principal-ratified execution policy. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -65,7 +65,7 @@ export const ContractProposeTool = Tool.define<
                 `Trigger: ${JSON.stringify(spec.trigger)}`,
                 `Authority: ${spec.authority.join(", ")}`,
                 `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
-                `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
+                `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}${item.policy ? " (policy)" : ""}`).join(", ") || "none"}`,
                 `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                 `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
                 `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,

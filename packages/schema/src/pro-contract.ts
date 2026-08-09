@@ -19,6 +19,9 @@ export type AttestationID = typeof AttestationID.Type
 export const Requirement = Schema.Struct({
   contractID: ID,
   revision: PositiveInt,
+  policy: Schema.Literal(true).pipe(optional).annotate({
+    description: "Treat this evidenced Contract's exact goal as the execution policy for the dependent Contract.",
+  }),
 }).annotate({ identifier: "ProContract.Requirement" })
 export interface Requirement extends Schema.Schema.Type<typeof Requirement> {}
 

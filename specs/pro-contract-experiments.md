@@ -131,6 +131,16 @@ for example, an adapter-owned sealed comparator, repository protection, or an
 external deployment service. ProContract does not add an intermediate status,
 promotion operation, or automatic filesystem rollback.
 
+## MetaContract mechanism check
+
+A fresh local E2E bound one discharged Contract as the exact execution policy
+of a later Task Contract. Admission failed before policy attestation, succeeded
+after it, and the task followed the injected policy through replay and
+discharge. Challenging policy support then escalated the discharged dependent,
+restored non-quiescence, and prevented a new dependent from being issued. This
+checks retention, future binding, and support-loss remediation; it does not
+claim automatic policy selection or task-quality improvement.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -176,6 +186,7 @@ workspace layout documented by the runbook:
 - [YJ goal/claim separation](../../run-artifacts/programbench-yj-goal-claim-luna-max-no-net-20260807-172413/RESULT.md)
 - [YJ E2E artifact export](../../run-artifacts/programbench-yj-e2e-export-luna-max-no-net-20260808-130711/RESULT.md)
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
+- [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
 
 ## Decision rule for future additions
 

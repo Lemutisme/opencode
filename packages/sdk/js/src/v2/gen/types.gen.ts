@@ -6156,6 +6156,7 @@ export type ProjectCopyCopy = {
 export type ProContractRequirement = {
   contractID: string
   revision: number
+  policy?: true
 }
 
 export type ProContractTrigger =

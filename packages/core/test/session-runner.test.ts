@@ -687,7 +687,7 @@ describe("SessionRunnerLLM", () => {
       const spec = {
         ...ProContract.defaultSpec("Inspect the repository without changing it", Date.now()),
         brief: "The failing behavior is isolated to argument parsing.",
-        requires: [{ contractID: dependencyID, revision: 1 }],
+        requires: [{ contractID: dependencyID, revision: 1, policy: true as const }],
         evidence: { type: "principal" as const, claim: "Repository inspection evidence is available" },
       }
       const issued = yield* contracts.issue({
@@ -752,6 +752,11 @@ describe("SessionRunnerLLM", () => {
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Establish the runner prerequisite")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Ratified execution policy")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "the Contract terms and delegated authority remain controlling",
+      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("Verified prerequisites:")
       expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain("Remaining shared budget:")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         `Shared ceiling: ${spec.budget.turns} provider turns and ${spec.budget.actions} tool actions`,
