@@ -210,7 +210,11 @@ describe("ProContract kernel", () => {
   test("binds one evidenced Contract as an immutable execution policy", () => {
     const policyID = ProContract.ID.make("pct_policy")
     const policyAttestationID = ProContract.AttestationID.make("pca_policy")
-    const policySpec = { ...spec, goal: "Preserve established behavior before exploring new behavior" }
+    const policySpec = {
+      ...spec,
+      goal: "Ratify the candidate execution policy",
+      policy: "Preserve established behavior before exploring new behavior",
+    }
     const policy = {
       ...draft,
       id: policyID,
@@ -243,6 +247,12 @@ describe("ProContract kernel", () => {
     expect(
       ProContract.transition(state, { type: "issue", actor: taskDraft.issuer, draft: taskDraft }).decision,
     ).toEqual({ type: "accepted" })
+    expect(
+      ProContract.transition(
+        { ...state, contracts: { [policyID]: { ...policy, spec, specHash: draft.specHash } } },
+        { type: "issue", actor: taskDraft.issuer, draft: taskDraft },
+      ).decision,
+    ).toEqual({ type: "rejected", reason: "required contract defines no execution policy" })
     expect(
       ProContract.transition(
         { ...state, contracts: { [policyID]: { ...policy, status: "dormant", attestationID: undefined } } },
@@ -584,9 +594,12 @@ describe("ProContract kernel", () => {
     const upstreamAttestationID = ProContract.AttestationID.make("pca_support_upstream")
     const childAttestationID = ProContract.AttestationID.make("pca_support_child")
     const grandchildAttestationID = ProContract.AttestationID.make("pca_support_grandchild")
+    const upstreamSpec = { ...spec, policy: "Preserve supported prerequisites" }
     const upstream = {
       ...draft,
       id: upstreamID,
+      spec: upstreamSpec,
+      specHash: ProContract.hashSpec(upstreamSpec),
       revision: 1,
       status: "discharged" as const,
       handoff: { summary: "upstream", uncertainties: [], subjectHash: "upstream-subject", time: 0 },
@@ -960,7 +973,8 @@ describe("ProContract ledger", () => {
       const contracts = yield* ProContract.Service
       const upstreamID = ProContract.ID.make("pct_ledger_support_upstream")
       const childID = ProContract.ID.make("pct_ledger_support_child")
-      yield* contracts.issue({ id: upstreamID, scope: "support", spec, executor: "upstream" })
+      const policySpec = { ...spec, policy: "Preserve supported prerequisites" }
+      yield* contracts.issue({ id: upstreamID, scope: "support", spec: policySpec, executor: "upstream" })
       yield* contracts.activate(upstreamID, 1, 0)
       yield* contracts.reportReady({
         contractID: upstreamID,

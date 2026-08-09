@@ -668,10 +668,14 @@ describe("SessionRunnerLLM", () => {
       const bindings = yield* ProContractOpenCode.Service
       const session = yield* SessionV2.Service
       const dependencyID = ProContract.ID.make("pct_runner_dependency")
+      const dependencySpec = {
+        ...ProContract.defaultSpec("Establish the runner prerequisite", Date.now()),
+        policy: "Preserve established behavior before exploring new behavior",
+      }
       yield* contracts.issue({
         id: dependencyID,
         scope: "runner",
-        spec: ProContract.defaultSpec("Establish the runner prerequisite", Date.now()),
+        spec: dependencySpec,
         executor: "dependency",
       })
       yield* contracts.activate(dependencyID, 1, Date.now())
@@ -751,7 +755,7 @@ describe("SessionRunnerLLM", () => {
         "The failing behavior is isolated to argument parsing.",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Establish the runner prerequisite")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(dependencySpec.policy)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Ratified execution policy")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         "the Contract terms and delegated authority remain controlling",

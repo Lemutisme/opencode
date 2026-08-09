@@ -7039,6 +7039,7 @@ export class ProContract extends HeyApiClient {
       id?: string
       scope?: string
       goal?: string
+      policy?: string
       brief?: string
       requires?: Array<ProContractRequirement>
       location?: LocationRef
@@ -7059,6 +7060,7 @@ export class ProContract extends HeyApiClient {
             { in: "body", key: "id" },
             { in: "body", key: "scope" },
             { in: "body", key: "goal" },
+            { in: "body", key: "policy" },
             { in: "body", key: "brief" },
             { in: "body", key: "requires" },
             { in: "body", key: "location" },

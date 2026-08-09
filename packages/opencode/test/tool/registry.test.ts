@@ -138,7 +138,10 @@ describe("tool.registry", () => {
       const sessions = yield* Session.Service
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
-      const policySpec = ProContract.defaultSpec("Preserve verified behavior", Date.now())
+      const policySpec = {
+        ...ProContract.defaultSpec("Ratify the default execution policy", Date.now()),
+        policy: "Preserve verified behavior",
+      }
       yield* contracts.issue({ id: policyID, scope: "policy", spec: policySpec, executor: "policy" })
       yield* contracts.activate(policyID, 1, Date.now())
       yield* contracts.reportReady({

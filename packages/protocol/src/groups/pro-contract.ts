@@ -41,6 +41,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
         id: ProContract.ID.pipe(Schema.optional),
         scope: Schema.NonEmptyString,
         goal: Schema.NonEmptyString,
+        policy: Schema.NonEmptyString.pipe(Schema.optional),
         brief: Schema.String.pipe(Schema.optional),
         requires: Schema.Array(ProContract.Requirement).pipe(Schema.optional),
         location: Location.Ref,

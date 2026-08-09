@@ -36,6 +36,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
           const spec = {
             trigger: ctx.payload.trigger ?? defaults.trigger,
             goal: ctx.payload.goal,
+            policy: ctx.payload.policy ?? defaults.policy,
             brief: ctx.payload.brief ?? defaults.brief,
             requires: ctx.payload.requires ?? defaults.requires,
             authority: ctx.payload.authority ?? defaults.authority,

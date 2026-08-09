@@ -1017,6 +1017,7 @@ export function make(options: ClientOptions) {
               id: input["id"],
               scope: input["scope"],
               goal: input["goal"],
+              policy: input["policy"],
               brief: input["brief"],
               requires: input["requires"],
               location: input["location"],

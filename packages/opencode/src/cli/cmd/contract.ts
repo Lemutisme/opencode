@@ -5,6 +5,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Clock, Effect } from "effect"
+import { applyEdits, modify, type ParseError, parse } from "jsonc-parser"
 import path from "path"
 import type { Argv } from "yargs"
 import { effectCmd, fail } from "../effect-cmd"
@@ -18,6 +19,7 @@ const IssueCommand = effectCmd({
       .option("id", { type: "string", describe: "contract ID" })
       .option("scope", { type: "string", demandOption: true, describe: "quiescence scope" })
       .option("goal", { type: "string", demandOption: true, describe: "optimization objective" })
+      .option("execution-policy", { type: "string", describe: "exact policy offered to future Contracts" })
       .option("claim", { type: "string", describe: "exact proposition the evidence may settle" })
       .option("brief", { type: "string", describe: "context for the future executor" })
       .option("require", { type: "array", string: true, describe: "required Contract as ID@revision" })
@@ -47,6 +49,7 @@ const IssueCommand = effectCmd({
     const spec = {
       ...base,
       goal: args.goal,
+      policy: args.executionPolicy ?? base.policy,
       brief: args.brief ?? base.brief,
       requires: args.require === undefined ? base.requires : requires,
       authority: args.write ? (["filesystem.read", "filesystem.write", "process.execute"] as const) : base.authority,
@@ -81,6 +84,73 @@ const IssueCommand = effectCmd({
       return yield* fail("Contract execution binding does not match")
     console.log(JSON.stringify({ contract: ProContract.info(contract), execution }, null, 2))
     return undefined
+  }),
+})
+
+const PolicyCommand = effectCmd({
+  command: "policy [contractID]",
+  describe: "select an evidenced Contract as the default execution policy",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .positional("contractID", { type: "string", describe: "discharged Policy Contract ID" })
+      .option("clear", { type: "boolean", default: false, describe: "remove the default execution policy" })
+      .option("config", { type: "string", default: "opencode.json", describe: "location configuration file" }),
+  handler: Effect.fn("Cli.contract.policy")(function* (args) {
+    if (args.clear === (args.contractID !== undefined)) return yield* fail("Provide one Policy Contract ID or --clear")
+    const file = path.resolve(args.config)
+    const source = (yield* Effect.promise(() => Bun.file(file).exists()))
+      ? yield* Effect.promise(() => Bun.file(file).text())
+      : "{}"
+    const errors: ParseError[] = []
+    parse(source, errors, { allowTrailingComma: true })
+    if (errors.length) return yield* fail(`Invalid JSONC configuration: ${file}`)
+    if (args.clear) {
+      yield* Effect.promise(() =>
+        Bun.write(
+          file,
+          applyEdits(
+            source,
+            modify(source, ["contract_policy"], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
+          ),
+        ),
+      )
+      console.log(JSON.stringify({ config: file, policy: null }, null, 2))
+      return
+    }
+    const contractID = ProContract.ID.make(args.contractID)
+    const contracts = yield* ProContract.Service
+    const contract = yield* contracts.get(contractID)
+    if (!contract) return yield* fail(`Contract not found: ${contractID}`)
+    if (contract.status !== "discharged" || !contract.spec.policy || !contract.attestationID || !contract.handoff)
+      return yield* fail(`Policy Contract is not evidenced: ${contractID}`)
+    const attestation = yield* contracts.getAttestation(contract.attestationID)
+    if (!attestation) return yield* fail(`Policy attestation not found: ${contract.attestationID}`)
+    const policy = { contractID, revision: contract.revision, policy: true as const }
+    yield* Effect.promise(() =>
+      Bun.write(
+        file,
+        applyEdits(
+          source,
+          modify(source, ["contract_policy"], policy, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
+        ),
+      ),
+    )
+    console.log(
+      JSON.stringify(
+        {
+          config: file,
+          policy,
+          policyText: contract.spec.policy,
+          specHash: contract.specHash,
+          subjectHash: attestation.subjectHash,
+          evidenceHash: attestation.evidenceHash,
+          attestationID: attestation.id,
+        },
+        null,
+        2,
+      ),
+    )
   }),
 })
 
@@ -238,6 +308,7 @@ export const ContractCommand = effectCmd({
   builder: (yargs: Argv) =>
     yargs
       .command(IssueCommand)
+      .command(PolicyCommand)
       .command(ListCommand)
       .command(ShowCommand)
       .command(ExportCommand)

@@ -1994,6 +1994,11 @@ export type Config = {
             }
       }
   instructions?: Array<string>
+  contract_policy?: {
+    contractID: string
+    revision: number
+    policy: true
+  }
   layout?: LayoutConfig
   permission?: PermissionConfig
   tools?: {
@@ -6218,6 +6223,7 @@ export type ProContractResolution = {
 export type ProContractSpec = {
   trigger: ProContractTrigger
   goal: string
+  policy?: string
   /**
    * Self-contained handoff brief. Preserve user-stated quality criteria. For open-ended optimization, state the evaluation protocol, required exploration, known quality floor, stopping rule, and assumptions; expose missing criteria instead of inventing them.
    */
@@ -13778,6 +13784,7 @@ export type V2ProContractIssueData = {
     id?: string
     scope: string
     goal: string
+    policy?: string
     brief?: string
     requires?: Array<ProContractRequirement>
     location: LocationRef

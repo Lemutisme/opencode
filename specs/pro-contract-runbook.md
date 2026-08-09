@@ -162,14 +162,24 @@ Rejecting a proposal creates neither a Contract nor an execution binding.
 
 A proposal may bind one previously discharged Contract as its execution policy
 by setting `policy: true` on that requirement. OpenCode injects the policy
-Contract's exact goal and evidence identities into the dedicated Session. The
-policy is part of the approved `specHash`, applies only to the new Contract, and
-cannot override its authority or settlement terms. Challenging the policy
-Contract invalidates its dependent support through the normal remediation
-path.
+Contract's exact `spec.policy` and evidence identities into the dedicated
+Session. A Policy Contract keeps its current ratification work in `goal` and
+the future execution rule in `policy`; the two must not be conflated. The policy
+is part of the approved `specHash`, applies only to the new Contract, and cannot
+override its authority or settlement terms. Challenging the Policy Contract
+invalidates its dependent support through the normal remediation path.
 
 To retain one principal-selected policy for future natural-language proposals,
-set it in the location's `opencode.json` after its Contract is discharged:
+select it in the location's `opencode.json` after its Contract is discharged:
+
+```bash
+opencode contract policy pct_policy_example --config ./opencode.json
+```
+
+The command fails unless the exact Contract is discharged with a current
+handoff and attestation, then prints the specification, subject, evidence, and
+attestation identities written into the selection. Its resulting configuration
+is equivalent to:
 
 ```json
 {
@@ -187,6 +197,10 @@ approval UI, and a challenged default causes new issuance to fail closed.
 Delete the setting to clear it or replace the exact ID and revision after a new
 policy is independently discharged. Existing Contracts keep their frozen
 policy edge.
+
+```bash
+opencode contract policy --clear --config ./opencode.json
+```
 
 ### 4.2 Unattended formation
 

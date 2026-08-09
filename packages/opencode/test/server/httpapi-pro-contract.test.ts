@@ -120,6 +120,7 @@ describe("ProContract HttpApi", () => {
         id: "pct_http",
         scope: "http",
         goal: "Exercise the contract ledger",
+        policy: "Preserve verified behavior in future Contracts",
         brief: "Preserve this handoff across future execution.",
         location: { directory: process.cwd() },
         model: { providerID: "openai", id: "gpt-5.3-codex" },
@@ -143,6 +144,7 @@ describe("ProContract HttpApi", () => {
           status: "dormant",
           spec: {
             goal: "Exercise the contract ledger",
+            policy: "Preserve verified behavior in future Contracts",
             brief: "Preserve this handoff across future execution.",
             requires: [],
           },

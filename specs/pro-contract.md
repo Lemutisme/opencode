@@ -300,6 +300,7 @@ The human-facing document is:
 ```text
 trigger          future condition that should restore attention
 goal             optimization objective shown to the executor
+policy           optional exact execution policy offered to future Contracts
 brief            issuer-authored context and stopping rule
 requires         exact upstream Contract revisions that must be evidenced first; one may be the execution policy
 delegation       authority granted after activation
@@ -328,12 +329,17 @@ quiescence.
 
 One `requires` edge may set `policy: true`. Its source must already be
 discharged with an attestation when the dependent is issued. The source
-Contract's exact goal is then rendered as the dependent executor's ratified
+Contract's exact `policy` is then rendered as the dependent executor's ratified
 policy together with its specification, subject, evidence, and attestation
 identities. The dependent `specHash` freezes that reference, revision cannot
 rewire it, and a later challenge follows the ordinary dependency closure. The
 policy guides how work is attempted; it cannot alter the dependent's goal,
 claim, authority, budget, or settlement rules.
+
+The source Contract's current `goal` remains distinct: it governs production,
+verification, or ratification of the policy candidate. This prevents the
+Policy Contract executor from being required to perform the future policy that
+it is only establishing for later dependents.
 
 The kernel commits to the complete document by hash. The goal is necessarily
 informal; the verifier is its executable projection. Their gap is construct
@@ -760,6 +766,12 @@ shown at the ordinary permission boundary and becomes part of the new
 checks. Removing or replacing the setting affects only future proposals. A
 challenged configured policy remains selected but fails new issuance closed
 until the principal clears or replaces it.
+
+The local `opencode contract policy` command is the principal promotion effect.
+It refuses candidates without a current handoff and attestation, writes only
+the exact Contract ID and revision to location configuration, and reports the
+bound specification, subject, evidence, and attestation identities. It does not
+evaluate candidates or infer a winner.
 
 ## OpenCode design
 

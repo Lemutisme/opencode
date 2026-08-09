@@ -153,6 +153,7 @@ export function transition(state: State, command: Command): Result {
       if (dependency.issuer !== command.draft.issuer) return reject("required contract issuer does not match")
       if (dependency.revision !== requirement.revision) return reject("required contract revision does not match")
       if (dependency.status === "released") return reject("required contract was released")
+      if (requirement.policy && !dependency.spec.policy) return reject("required contract defines no execution policy")
       if (requirement.policy && (dependency.status !== "discharged" || !dependency.attestationID))
         return reject("execution policy is not evidenced")
     }

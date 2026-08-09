@@ -239,6 +239,7 @@ const layer = Layer.effect(
             )).filter((item) => item !== undefined)
           : []
       const contractPolicy = contractDependencies.find((item) => item.requirement.policy)
+      const contractPolicyText = contractPolicy?.dependency.spec.policy
       const now = yield* Clock.currentTimeMillis
       const contractAttemptChanged =
         contractBinding &&
@@ -326,10 +327,10 @@ const layer = Layer.effect(
                 `Optimization goal: ${contract.spec.goal}`,
                 `Settlement claim: ${ProContract.evidenceClaim(contract.spec)}`,
                 ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
-                ...(contractPolicy
+                ...(contractPolicy && contractPolicyText
                   ? [
                       `Ratified execution policy from ${contractPolicy.dependency.id}@${contractPolicy.dependency.revision}:`,
-                      contractPolicy.dependency.spec.goal,
+                      contractPolicyText,
                       `Policy evidence: spec ${contractPolicy.dependency.specHash}, attestation ${contractPolicy.attestation.id}, evidence ${contractPolicy.attestation.evidenceHash}, subject ${contractPolicy.attestation.subjectHash}.`,
                       "This policy guides execution only; the Contract terms and delegated authority remain controlling.",
                     ]

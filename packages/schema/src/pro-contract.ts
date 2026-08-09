@@ -20,7 +20,7 @@ export const Requirement = Schema.Struct({
   contractID: ID,
   revision: PositiveInt,
   policy: Schema.Literal(true).pipe(optional).annotate({
-    description: "Treat this evidenced Contract's exact goal as the execution policy for the dependent Contract.",
+    description: "Treat this evidenced Contract's exact policy as the execution policy for the dependent Contract.",
   }),
 }).annotate({ identifier: "ProContract.Requirement" })
 export interface Requirement extends Schema.Schema.Type<typeof Requirement> {}
@@ -129,6 +129,9 @@ export interface Resolution extends Schema.Schema.Type<typeof Resolution> {}
 export const Spec = Schema.Struct({
   trigger: Trigger,
   goal: Schema.NonEmptyString,
+  policy: Schema.NonEmptyString.pipe(optional).annotate({
+    description: "Exact execution policy offered to future Contracts after this Contract is independently evidenced.",
+  }),
   brief: Schema.String.annotate({
     description:
       "Self-contained handoff brief. Preserve user-stated quality criteria. For open-ended optimization, state the evaluation protocol, required exploration, known quality floor, stopping rule, and assumptions; expose missing criteria instead of inventing them.",
