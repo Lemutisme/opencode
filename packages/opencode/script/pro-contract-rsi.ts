@@ -119,10 +119,8 @@ if (expectedKeys.every((key) => records.has(key))) {
     reasons.push(`cost ratio ${overall.costRatio ?? "undefined"} exceeds ${manifest.selection.maxCostRatio}`)
   if (overall.attemptRegression !== null && overall.attemptRegression > manifest.selection.maxAttemptRegression)
     reasons.push(`attempt regression ${overall.attemptRegression} exceeds ${manifest.selection.maxAttemptRegression}`)
-  overall.tasks.forEach((task) => {
-    if (task.delta < -manifest.selection.maxTaskRegression)
-      reasons.push(`task ${task.task} regressed by ${-task.delta}, limit ${manifest.selection.maxTaskRegression}`)
-  })
+  if (overall.worstPairDelta !== null && overall.worstPairDelta < -manifest.selection.maxTaskRegression)
+    reasons.push(`paired utility regression ${-overall.worstPairDelta} exceeds ${manifest.selection.maxTaskRegression}`)
 }
 
 const manifestHasher = new Bun.CryptoHasher("sha256")
@@ -177,6 +175,8 @@ function summarize(selected: ReadonlyArray<(typeof Splits)[number]>) {
     baselineUtility: mean(pairs.map((pair) => pair.baseline.utility)),
     candidateUtility: mean(pairs.map((pair) => pair.candidate.utility)),
     meanDelta: mean(pairs.map((pair) => pair.candidate.utility - pair.baseline.utility)),
+    worstPairDelta:
+      pairs.length === 0 ? null : Math.min(...pairs.map((pair) => pair.candidate.utility - pair.baseline.utility)),
     costRatio: baselineCost === 0 ? (candidateCost === 0 ? 1 : null) : candidateCost / baselineCost,
     attemptRegression: mean(pairs.map((pair) => pair.candidate.attempts - pair.baseline.attempts)),
     tasks,

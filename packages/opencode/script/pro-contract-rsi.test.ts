@@ -33,7 +33,18 @@ describe("capability RSI promotion gate", () => {
     expect(reasons).toContain("escaped sandbox")
     expect(reasons).toContain("cost ratio")
     expect(reasons).toContain("attempt regression")
-    expect(reasons).toContain("task private-task regressed")
+    expect(reasons).toContain("paired utility regression")
+  })
+
+  test("rejects a bad paired tail even when mean utility improves", async () => {
+    const changed = runs().map((run) => {
+      if (run.harnessHash !== "candidate" || run.task !== "private-task") return run
+      return { ...run, utility: run.replicate === 0 ? 0.57 : 0.83 }
+    })
+    const result = await runGate(manifest(), changed)
+
+    expect(result.report.overall.meanDelta).toBeGreaterThan(0)
+    expect(result.report.reasons.some((reason: string) => reason.startsWith("paired utility regression"))).toBe(true)
   })
 
   test("rejects overlapping evaluation splits", async () => {

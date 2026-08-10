@@ -923,6 +923,9 @@ the candidate cannot modify. `replicates: n` means the exact indices `0` through
 `accept` and writes a deterministic report containing per-task and per-split
 summaries plus hashes of the manifest, run records, and report.
 
+`maxTaskRegression` bounds the worst paired task replicate, not only the task
+mean. This prevents one lucky replicate from hiding a severe stochastic tail.
+
 Do not feed confirmation or OOD details back into the same candidate search.
 Do not use ProgramBench official hidden evaluation as iterative training data.
 Use owned private tasks for search, freeze the candidate, and reserve official
