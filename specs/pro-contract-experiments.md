@@ -156,6 +156,16 @@ Challenging P1 retracted the Task's support. Failed and ambiguous policy
 candidates remained in history and were not promoted. This proves bounded
 recursive policy flow, not general capability improvement.
 
+A development artifact-selection E2E reused the existing mechanism without a
+new selector state machine. Two independently discharged Loop candidates became
+requirements of an ordinary read-only Selection Contract. Its frozen report,
+replay, independent attestation, and exact export selected the 670/710 candidate
+over the 513/710 candidate, whose run had 146 timeouts. A fresh network-disabled
+Linux cleanroom reproduced the winner's executable hash and regression pass.
+This proves evidence-backed artifact selection, not policy improvement: the
+candidate policy remains rejected, and no policy, validation, or holdout stage
+was opened.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -208,6 +218,7 @@ workspace layout documented by the runbook:
 - [MetaContract recursive policy generation](../../run-artifacts/metacontract-rsi-e2e-final-20260809-161638/RESULT.md)
 - [Loop policy screening](../../run-artifacts/meta-policy-screen-loop-20260809-165038/RESULT.md)
 - [Decision-frontier screening](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/RESULT.md)
+- [Decision-frontier artifact selection](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/SELECTION_RESULT.md)
 
 ## Decision rule for future additions
 
