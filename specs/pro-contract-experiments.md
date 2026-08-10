@@ -185,6 +185,14 @@ natural-language policy retention did not prevent unbounded probes. CMatrix was
 already saturated by the baseline and remains a calibration task; promotion
 still requires repeated private runs and disjoint confirmation/OOD tasks.
 
+A subsequent private Tailspin experiment used two matched GPT-5.5 high
+replicates per arm. A MetaContract-generated policy reduced total cost by 32.9%,
+turns by 28.2%, and actions by 25.5%, but mean official utility fell from 75.57%
+to 74.10% and one paired replicate regressed by 5.54 points. The capability
+gate rejected the candidate before holdouts. The observed bad tail also led the
+gate to enforce its existing regression tolerance on every paired run instead
+of only a task's replicate mean.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -213,6 +221,8 @@ stochastic, and compute was not always matched.
 | `abishekvashok__cmatrix.5c082c6` | capability-RSI baseline, Luna Max | solved; 768/769 raw | 59 turns, 83 actions | Retained |
 | `abishekvashok__cmatrix.5c082c6` | first-order policy, Luna Max | solved; 768/769 raw | 71 turns, 98 actions | Rejected for cost regression and missing holdouts |
 | `abishekvashok__cmatrix.5c082c6` | second-order policy, Luna Max | not evaluated | 91 turns, 113 actions | Rejected before confirmation for cost and process violations |
+| `bensadeh__tailspin.6278437` | P0 baseline, GPT-5.5 high | 72.48% / 78.66% | 116 / 100 turns | Retained |
+| `bensadeh__tailspin.6278437` | MetaContract P1, GPT-5.5 high | 75.08% / 73.13% | 96 / 59 turns | Cheaper but weaker; rejected before holdouts |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -242,6 +252,7 @@ workspace layout documented by the runbook:
 - [Decision-frontier screening](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/RESULT.md)
 - [Decision-frontier artifact selection](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/SELECTION_RESULT.md)
 - [CMatrix capability-RSI calibration](../../run-artifacts/programbench-cmatrix-rsi-luna-max-20260810-102617/RESULT.md)
+- [Tailspin private capability-RSI](../../run-artifacts/programbench-tailspin-rsi-gpt55-high-20260810-125520/RESULT.md)
 
 ## Decision rule for future additions
 
