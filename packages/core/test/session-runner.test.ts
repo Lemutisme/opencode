@@ -763,6 +763,10 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         "the Contract terms and delegated authority remain controlling",
       )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("never what counts as adequate")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "settlement evidence prove only the settlement claim",
+      )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("Verified prerequisites:")
       expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain("Remaining shared budget:")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(

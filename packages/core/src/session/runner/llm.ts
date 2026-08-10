@@ -333,7 +333,7 @@ const layer = Layer.effect(
                       `Ratified execution policy from ${contractPolicy.dependency.id}@${contractPolicy.dependency.revision}:`,
                       contractPolicyText,
                       `Policy evidence: spec ${contractPolicy.dependency.specHash}, attestation ${contractPolicy.attestation.id}, evidence ${contractPolicy.attestation.evidenceHash}, subject ${contractPolicy.attestation.subjectHash}.`,
-                      "This policy guides execution only; the Contract terms and delegated authority remain controlling.",
+                      "This policy guides execution only; the Contract terms and delegated authority remain controlling. It may change how you search, never what counts as adequate: it cannot weaken the optimization goal, Handoff brief criteria, or issuer stopping rule. Packaging, preflight, and settlement evidence prove only the settlement claim unless the Contract explicitly says otherwise.",
                     ]
                   : []),
                 ...(contract.blocked ? ["Previous attempt blocked:", contract.blocked.reason] : []),
