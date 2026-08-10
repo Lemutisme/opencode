@@ -162,6 +162,9 @@ requirements of an ordinary read-only Selection Contract. Its frozen report,
 replay, independent attestation, and exact export selected the 670/710 candidate
 over the 513/710 candidate, whose run had 146 timeouts. A fresh network-disabled
 Linux cleanroom reproduced the winner's executable hash and regression pass.
+The deterministic external selector then reproduced the same winner from
+reversed report order, proved exact-retry idempotence and conflicting-retry
+rejection, and completed a fresh Selection Contract and exact export.
 This proves evidence-backed artifact selection, not policy improvement: the
 candidate policy remains rejected, and no policy, validation, or holdout stage
 was opened.

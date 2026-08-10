@@ -755,6 +755,15 @@ the system can learn how to draft and verify future duties, while no policy may
 approve itself, weaken an active claim, consume its own negative evidence, or
 certify its own deployment.
 
+Capability experiments use the same boundary for executable successors. A
+candidate Contract hands off an exact executor bundle; an external evaluator
+scores that subject under a frozen protocol; a deterministic selector writes a
+content-addressed decision; and an ordinary Selection Contract recognizes the
+decision before an adapter exports the winner as the next executor. Generation,
+evaluation, selection, and inheritance remain separate authorities. The ledger
+needs no campaign, generation, or winner state: exact requirements and artifacts
+already preserve the lineage.
+
 A discharged policy becomes usable by a future Contract only through an
 explicit `requires` edge marked `policy: true`. This first retention boundary
 does not select the newest candidate or maintain a mutable global policy
