@@ -194,6 +194,9 @@ stochastic, and compute was not always matched.
 | `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 | `miserlou__loop.209927c` | policy screening, Luna Max | P0 93.38%; invariants 92.68%/80.00%; probes 75.92%; simplicity 81.55% | matched development runs | No candidate survived replicate/tail-risk gates; no validation or holdout opened |
 | `miserlou__loop.209927c` | decision frontier, Luna Max | 94.37% / 72.25% | 2 matched replicates | Rejected; second run had 146 timeouts and lost 150 tests versus the first |
+| `altdesktop__i3-style.f93821b` | current ProContract, Luna Max | 88.1262% | 1 attempt, 126 turns | Fresh instance; exact discharge and quiet, no causal control |
+| `chmln__sd.87d1ba5` | current ProContract, Luna Max | 93.5802% | 1 attempt, 124 turns | Fresh instance; one timed-out probe left an orphaned container process |
+| `abishekvashok__cmatrix.5c082c6` | current ProContract, Luna Max | measurement unavailable | 1 attempt, 60 turns | Contract discharged; official evaluator did not terminate |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -222,6 +225,7 @@ workspace layout documented by the runbook:
 - [Loop policy screening](../../run-artifacts/meta-policy-screen-loop-20260809-165038/RESULT.md)
 - [Decision-frontier screening](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/RESULT.md)
 - [Decision-frontier artifact selection](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/SELECTION_RESULT.md)
+- [Fresh three-instance calibration](../../run-artifacts/programbench-rsi-fresh-three-luna-max-20260809-214234/RESULT.md)
 
 ## Decision rule for future additions
 
