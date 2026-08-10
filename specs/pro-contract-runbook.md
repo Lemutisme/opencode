@@ -857,7 +857,85 @@ do not repeatedly expose official failures to the executor.
 For a harness-only fixture smoke test, use Section 4 “Local Fixture Check” of
 the ProgramBench runbook. Fixture results are never acceptance-grade.
 
-## 7. Reproducibility record
+## 7. Capability RSI promotion
+
+Run the promotion gate from `packages/opencode`. It compares externally
+produced records; it does not execute a benchmark or reveal hidden tests.
+
+```bash
+bun script/pro-contract-rsi.ts \
+  /path/to/manifest.json \
+  /path/to/runs.json \
+  /path/to/report.json
+```
+
+The manifest is frozen before evaluation:
+
+```json
+{
+  "version": 1,
+  "baselineHash": "sha256:baseline",
+  "candidateHash": "sha256:candidate",
+  "budgetHash": "sha256:budget",
+  "splits": {
+    "private": ["task-a"],
+    "confirmation": ["task-b"],
+    "ood": ["task-c"]
+  },
+  "evaluators": {
+    "private": "sha256:evaluator-a",
+    "confirmation": "sha256:evaluator-b",
+    "ood": "sha256:evaluator-c"
+  },
+  "selection": {
+    "replicates": 2,
+    "minMeanDelta": 0,
+    "maxTaskRegression": 0.02,
+    "maxCostRatio": 1,
+    "maxAttemptRegression": 0
+  }
+}
+```
+
+`runs.json` is an array with one record for each exact
+`split/task/replicate/harnessHash` pair:
+
+```json
+{
+  "split": "confirmation",
+  "task": "task-b",
+  "replicate": 0,
+  "harnessHash": "sha256:candidate",
+  "evaluatorHash": "sha256:evaluator-b",
+  "budgetHash": "sha256:budget",
+  "budgetCompliant": true,
+  "utility": 0.81,
+  "cost": 1,
+  "attempts": 1,
+  "manualInterventions": 0,
+  "violations": []
+}
+```
+
+Adapters normalize utility to `[0, 1]` and produce records from an evaluator
+the candidate cannot modify. `replicates: n` means the exact indices `0` through
+`n - 1`; extra and missing runs both reject. The command exits zero only for
+`accept` and writes a deterministic report containing per-task and per-split
+summaries plus hashes of the manifest, run records, and report.
+
+Do not feed confirmation or OOD details back into the same candidate search.
+Do not use ProgramBench official hidden evaluation as iterative training data.
+Use owned private tasks for search, freeze the candidate, and reserve official
+benchmarks for external confirmation.
+
+An accepted JSON report is still a petition, not authority. Capture it in a
+read-only Evaluation Contract, independently attest its exact hashes, and let a
+Selection Contract require both the candidate and evaluation before placing
+the accepted text in `spec.policy`. Only then may the principal run
+`opencode contract policy` to make that exact policy the default for future
+Contracts.
+
+## 8. Reproducibility record
 
 Every run directory should contain:
 
@@ -892,7 +970,7 @@ Mechanism validation and performance attribution are different claims. A run
 can prove that ProContract preserved duty and rejected false completion without
 proving that it raised benchmark score.
 
-## 8. Cleanup
+## 9. Cleanup
 
 Stop persistent services after artifacts are frozen:
 

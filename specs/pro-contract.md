@@ -755,6 +755,44 @@ the system can learn how to draft and verify future duties, while no policy may
 approve itself, weaken an active claim, consume its own negative evidence, or
 certify its own deployment.
 
+### Capability-level RSI
+
+Capability improvement is an outer experiment, not a new kernel transition.
+The candidate generator may rewrite any future harness policy, but it cannot
+choose the evaluator, alter the frozen budget, omit a failed run, or promote
+its own output. The minimal loop is:
+
+```text
+frozen baseline + frozen candidate
+  -> paired runs under one preregistered manifest
+  -> private, confirmation, and OOD evaluation
+  -> deterministic accept/reject report
+  -> independently attested Evaluation Contract
+  -> principal-approved Selection Contract
+  -> exact policy hash available to future Contracts
+```
+
+The manifest fixes both harness hashes, evaluator and budget hashes, disjoint
+tasks, replicate count, and selection thresholds before evaluation. Every task
+and replicate must contain one baseline and one candidate record. Promotion
+fails closed on missing pairs, manual intervention, budget violations, mean
+utility failure, excessive cost or attempts, or a per-task regression beyond
+the declared tolerance.
+
+`packages/opencode/script/pro-contract-rsi.ts` performs only this adjudication.
+It neither generates candidates nor runs benchmarks. External runners own task
+execution and utility normalization; an ordinary Evaluation Contract binds the
+resulting run-record hash and report hash. A Selection Contract may then expose
+the accepted candidate as `spec.policy`, with the candidate and Evaluation
+Contracts as requirements. Existing dependency invalidation retracts that
+selection if its evidence later loses support.
+
+This is the smallest useful RSI boundary: arbitrary intelligence at candidate
+generation, deterministic comparison at promotion. It proves that one frozen
+candidate satisfied one frozen evaluation policy. It does not prove open-ended
+recursive improvement, evaluator validity, run-record honesty, or improvement
+on tasks outside the registered distributions.
+
 A discharged policy becomes usable by a future Contract only through an
 explicit `requires` edge marked `policy: true`. This first retention boundary
 does not select the newest candidate or maintain a mutable global policy
