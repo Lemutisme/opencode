@@ -166,6 +166,25 @@ This proves evidence-backed artifact selection, not policy improvement: the
 candidate policy remains rejected, and no policy, validation, or holdout stage
 was opened.
 
+## Capability-RSI calibration
+
+A reused CMatrix calibration ran a fresh matched baseline and one MetaContract-
+generated policy with Luna Max. Both artifacts solved the official evaluation
+with the same 768/769 raw result, while the candidate used 20.3% more turns,
+18.1% more actions, and 3.9% more cost. The capability gate rejected it for
+cost regression and absent confirmation/OOD evidence. A bounded second-order
+MetaContract then removed completeness-before-implementation; its new executor
+started implementation earlier but finished with 54.2% more turns, 36.1% more
+actions, 78.0% more cost, and two unbounded-process incidents, so it was rejected
+before official confirmation.
+
+This run demonstrates conservative policy selection rather than capability
+gain. It also localizes one non-policy requirement: process-group deadlines and
+descendant cancellation must be enforced at the shell effect boundary because
+natural-language policy retention did not prevent unbounded probes. CMatrix was
+already saturated by the baseline and remains a calibration task; promotion
+still requires repeated private runs and disjoint confirmation/OOD tasks.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -191,6 +210,9 @@ stochastic, and compute was not always matched.
 | `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 | `miserlou__loop.209927c` | policy screening, Luna Max | P0 93.38%; invariants 92.68%/80.00%; probes 75.92%; simplicity 81.55% | matched development runs | No candidate survived replicate/tail-risk gates; no validation or holdout opened |
 | `miserlou__loop.209927c` | decision frontier, Luna Max | 94.37% / 72.25% | 2 matched replicates | Rejected; second run had 146 timeouts and lost 150 tests versus the first |
+| `abishekvashok__cmatrix.5c082c6` | capability-RSI baseline, Luna Max | solved; 768/769 raw | 59 turns, 83 actions | Retained |
+| `abishekvashok__cmatrix.5c082c6` | first-order policy, Luna Max | solved; 768/769 raw | 71 turns, 98 actions | Rejected for cost regression and missing holdouts |
+| `abishekvashok__cmatrix.5c082c6` | second-order policy, Luna Max | not evaluated | 91 turns, 113 actions | Rejected before confirmation for cost and process violations |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -219,6 +241,7 @@ workspace layout documented by the runbook:
 - [Loop policy screening](../../run-artifacts/meta-policy-screen-loop-20260809-165038/RESULT.md)
 - [Decision-frontier screening](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/RESULT.md)
 - [Decision-frontier artifact selection](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/SELECTION_RESULT.md)
+- [CMatrix capability-RSI calibration](../../run-artifacts/programbench-cmatrix-rsi-luna-max-20260810-102617/RESULT.md)
 
 ## Decision rule for future additions
 
