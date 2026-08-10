@@ -180,6 +180,7 @@ stochastic, and compute was not always matched.
 | `sitkevij__hex` | later controllers | 98.5419% | multiple variants | Plateau; added control logic did not improve the score |
 | `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 | `miserlou__loop.209927c` | policy screening, Luna Max | P0 93.38%; invariants 92.68%/80.00%; probes 75.92%; simplicity 81.55% | matched development runs | No candidate survived replicate/tail-risk gates; no validation or holdout opened |
+| `miserlou__loop.209927c` | decision frontier, Luna Max | 94.37% / 72.25% | 2 matched replicates | Rejected; second run had 146 timeouts and lost 150 tests versus the first |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -206,6 +207,7 @@ workspace layout documented by the runbook:
 - [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)
 - [MetaContract recursive policy generation](../../run-artifacts/metacontract-rsi-e2e-final-20260809-161638/RESULT.md)
 - [Loop policy screening](../../run-artifacts/meta-policy-screen-loop-20260809-165038/RESULT.md)
+- [Decision-frontier screening](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/RESULT.md)
 
 ## Decision rule for future additions
 
