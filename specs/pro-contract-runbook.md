@@ -938,6 +938,18 @@ the accepted text in `spec.policy`. Only then may the principal run
 `opencode contract policy` to make that exact policy the default for future
 Contracts.
 
+Generate a capability policy only from an exact, signed private Evaluation
+Contract. Aggregate trajectory telemetry without behavioral utility may propose
+an efficiency experiment, but cannot support a capability claim. Materialize
+the approved text as `spec.policy` and bind it through `requires.policy`; never
+paste learned policy into the Task Contract brief. The brief owns immutable
+quality criteria and stopping, while inherited policy owns execution strategy.
+
+Reject a failed private candidate before confirmation/OOD. Do not make the
+inner executor stop earlier merely to save evaluation cost: outer search stops
+bad lineages, while inner execution continues until the issuer stopping rule or
+budget is reached.
+
 ## 8. Reproducibility record
 
 Every run directory should contain:

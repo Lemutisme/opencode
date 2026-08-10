@@ -793,6 +793,21 @@ candidate satisfied one frozen evaluation policy. It does not prove open-ended
 recursive improvement, evaluator validity, run-record honesty, or improvement
 on tasks outside the registered distributions.
 
+Capability RSI has two different stopping boundaries:
+
+```text
+inner execution  stops only at the immutable issuer stopping rule or budget
+outer search     stops a policy lineage when private evaluation rejects it
+```
+
+A learned policy may reorder search but cannot weaken the Contract goal, brief
+criteria, or issuer stopping rule. Packaging, preflight, and settlement evidence
+prove the settlement claim, not behavioral adequacy. A trajectory-only proposal
+is therefore an efficiency hypothesis, not capability self-improvement. A
+capability candidate must depend on a signed private Evaluation Contract from
+its training cohort; confirmation and OOD outcomes remain sealed until the
+candidate is frozen.
+
 A discharged policy becomes usable by a future Contract only through an
 explicit `requires` edge marked `policy: true`. This first retention boundary
 does not select the newest candidate or maintain a mutable global policy
