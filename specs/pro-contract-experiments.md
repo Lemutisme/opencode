@@ -238,6 +238,15 @@ does not claim the model supplies per-case timeouts. This remains executor-edge
 guidance rather than a normative kernel invariant, and the single fresh run is
 strong diagnostic evidence rather than a causal performance theorem.
 
+A subsequent preregistered Grex pilot compared ordinary OpenCode with an active
+ProContract using the same binary, GPT-5.5 high model, frozen task text,
+cleanroom, reference, network policy, and evaluator. Ordinary OpenCode reached
+80.87% in 100 turns for $4.07; ProContract reached 88.57% in 58 turns for
+$2.66. The Contract arm explicitly acquired zero-boundary and CLI-error
+evidence, while ordinary OpenCode missed it. Both evaluators terminated. This
+validates the matched protocol and supplies a strong Pareto signal, but remains
+one stochastic pair on a development instance.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -284,6 +293,8 @@ stochastic, and compute was not always matched.
 | `sharkdp__fd.40d8eb3` | bounded evidence frontier, GPT-5.5 high | 78.2996% | 53 turns, 58 actions | +1.86 points at 0.54x current cost |
 | `pemistahl__grex.fa3e8ed` | bounded evidence frontier, GPT-5.5 high | measurement unavailable | 91 turns, 87 actions | Rejected: zero-boundary candidate hung evaluator |
 | `pemistahl__grex.fa3e8ed` | boundary-evidence correction, GPT-5.5 high | 88.3384% | 61 turns, 63 actions | Exact hang fixed; +33.84 points at baseline cost |
+| `pemistahl__grex.fa3e8ed` | matched ordinary OpenCode, GPT-5.5 high | 80.8689% | 100 turns, 99 actions | Paired protocol pilot baseline; $4.07 |
+| `pemistahl__grex.fa3e8ed` | matched ProContract, GPT-5.5 high | 88.5671% | 58 turns, 59 actions | +7.70 points at 34.6% lower cost |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -320,6 +331,7 @@ workspace layout documented by the runbook:
 - [Historical Pareto three-instance retest](../../run-artifacts/programbench-pareto-retest-20260810-215501/RESULT.md)
 - [Evidence-frontier three-instance treatment](../../run-artifacts/programbench-evidence-frontier-20260811-105706/RESULT.md)
 - [Grex boundary-evidence validation](../../run-artifacts/programbench-grex-boundary-20260811-192100/RESULT.md)
+- [Grex matched A/B pilot](../../run-artifacts/programbench-procontract-pilot-20260811-150337/RESULT.md)
 
 ## Decision rule for future additions
 
