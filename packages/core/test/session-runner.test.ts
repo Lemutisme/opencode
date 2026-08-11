@@ -754,9 +754,7 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         "The failing behavior is isolated to argument parsing.",
       )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "refers to the issuer Session at issuance",
-      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("refers to the issuer Session at issuance")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(dependencySpec.policy)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Ratified execution policy")
@@ -774,6 +772,9 @@ describe("SessionRunnerLLM", () => {
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         "minimum admissibility boundary, not the optimization target",
+      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "delivery replay alone is not a behavioral stopping condition",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         `Evidence policy: ${JSON.stringify(spec.evidence)}`,
