@@ -39,6 +39,7 @@ test("selects an exact evidenced candidate and freezes the result", async () => 
         score: 0.8,
         timeouts: 0,
         admissible: true,
+        incumbent: true,
       },
       b: {
         contractID: "pct_b",
@@ -47,12 +48,13 @@ test("selects an exact evidenced candidate and freezes the result", async () => 
         score: 0.9,
         timeouts: 1,
         admissible: true,
+        incumbent: false,
       },
     }
     await Promise.all([Bun.write(a, JSON.stringify(reports.a)), Bun.write(b, JSON.stringify(reports.b))])
 
-    const run = () =>
-      Bun.spawn(["bun", "run", "script/select-contract-artifact.ts", output, b, a], {
+    const run = (target = output) =>
+      Bun.spawn(["bun", "run", "script/select-contract-artifact.ts", target, b, a], {
         cwd: path.join(import.meta.dir, "../.."),
         env: {
           ...Bun.env,
@@ -80,6 +82,11 @@ test("selects an exact evidenced candidate and freezes the result", async () => 
     const conflict = run()
     expect(await conflict.exited).toBe(1)
     expect(await Bun.file(output).json()).toMatchObject({ winner: { contractID: "pct_b" } })
+
+    const retained = path.join(dir, "retained.json")
+    const keep = run(retained)
+    expect(await keep.exited).toBe(0)
+    expect(await Bun.file(retained).json()).toMatchObject({ winner: { contractID: "pct_a" } })
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

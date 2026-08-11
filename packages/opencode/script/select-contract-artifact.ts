@@ -9,6 +9,7 @@ const Evaluation = Schema.Struct({
   score: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
   timeouts: NonNegativeInt,
   admissible: Schema.Boolean,
+  incumbent: Schema.Boolean,
 })
 const Contract = Schema.Struct({
   data: Schema.Struct({
@@ -59,6 +60,8 @@ const evaluations = await Promise.all(
 
 if (new Set(evaluations.map((item) => item.contractID)).size !== evaluations.length)
   throw new Error("candidate contracts must be unique")
+if (evaluations.filter((item) => item.incumbent).length !== 1)
+  throw new Error("selection requires exactly one incumbent")
 
 const candidates = evaluations.toSorted((a, b) => (a.contractID < b.contractID ? -1 : 1))
 const winner = candidates
@@ -71,7 +74,7 @@ const selection =
     {
       version: 1,
       use: "development artifact selection only",
-      rule: "require an exact discharged handoff and passed replay; maximize normalized score; break ties by fewer timeouts, then contract ID",
+      rule: "require one incumbent plus exact discharged handoffs and passed replay; maximize normalized score; break ties by fewer timeouts, then contract ID",
       candidates,
       winner: {
         contractID: winner.contractID,

@@ -524,7 +524,8 @@ route. It accepts two or more finite evaluator reports with normalized scores:
   "subjectHash": "exact-handoff-subject",
   "score": 0.91,
   "timeouts": 0,
-  "admissible": true
+  "admissible": true,
+  "incumbent": true
 }
 ```
 
@@ -552,7 +553,7 @@ candidate. The selector cannot issue, attest, export, promote a policy, or open
 validation or holdout work. Benchmark score construction and admissibility
 remain evaluator-owned and outside ProContract.
 
-For successor selection, include the incumbent artifact as a candidate. A
+Successor selection requires exactly one incumbent artifact. A
 challenger that fails to beat the incumbent cannot become authoritative merely
 because it is newer; exact retry then retains the same winner.
 
