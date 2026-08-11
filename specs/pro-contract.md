@@ -772,6 +772,13 @@ frozen baseline + frozen candidate
   -> exact policy hash available to future Contracts
 ```
 
+Within an arm, candidate Contracts may hand off exact executor bundles. The
+development selector can choose one evidenced artifact under a frozen external
+protocol, but it cannot promote policy or open holdouts. The cohort gate then
+compares the frozen baseline and candidate. Generation, artifact selection,
+evaluation, and promotion remain separate authorities; exact requirements and
+artifacts preserve lineage without campaign or winner state in the kernel.
+
 The manifest fixes both harness hashes, evaluator and budget hashes, disjoint
 tasks, replicate count, and selection thresholds before evaluation. Every task
 and replicate must contain one baseline and one candidate record. Promotion

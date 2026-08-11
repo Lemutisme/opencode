@@ -75,8 +75,8 @@ Linux environment.
 
 ## 3. Build OpenCode
 
-The repository default branch is `dev`; this ProContract work currently lives
-on `semantic-attempts`.
+The repository default branch is `dev`; consolidated ProContract development
+currently lives on `capability-rsi`. Record the exact commit for every run.
 
 ```bash
 cd "$OPENCODE_REPO"
@@ -496,6 +496,50 @@ authoritative promotion-> separate verifier/principal service
 Filesystem capabilities expose tools inside the Location. External paths still
 require the existing permission fence; adapters should not compensate with a
 global external-directory allow rule.
+
+### 4.10 Deterministic artifact selection
+
+`script/select-contract-artifact.ts` is a development adapter, not a principal
+route. It accepts two or more finite evaluator reports with normalized scores:
+
+```json
+{
+  "contractID": "pct_candidate_a",
+  "revision": 1,
+  "subjectHash": "exact-handoff-subject",
+  "score": 0.91,
+  "timeouts": 0,
+  "admissible": true
+}
+```
+
+Run it from `packages/opencode` while the Contract server exposes the same
+ledger. It uses `OPENCODE_SERVER_PASSWORD` when the server is protected:
+
+```bash
+PRO_CONTRACT_API="http://127.0.0.1:$PORT" \
+  bun run script/select-contract-artifact.ts \
+  "$SELECTION_DIR/selection.json" \
+  "$RUN_DIR/candidate-a.json" \
+  "$RUN_DIR/candidate-b.json"
+```
+
+The selector requires every report to match an exact discharged revision,
+subject, attestation, and passing replay. It considers only candidates admitted
+by the frozen external protocol, maximizes score, and breaks ties by fewer
+timeouts and then Contract ID. Input order has no effect. An exact retry is
+idempotent; changed evidence cannot overwrite an existing selection.
+
+Commit `selection.json`, then use an ordinary read-only Selection Contract that
+requires every candidate revision. Independent evidence may discharge that
+Contract, after which `opencode contract export` materializes the selected
+candidate. The selector cannot issue, attest, export, promote a policy, or open
+validation or holdout work. Benchmark score construction and admissibility
+remain evaluator-owned and outside ProContract.
+
+An artifact selected here may become the frozen candidate evaluated by the
+capability gate in Section 7. Development selection never substitutes for that
+cohort evaluation or for principal promotion.
 
 ## 5. MLE-bench: one CPU-friendly instance
 
