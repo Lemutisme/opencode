@@ -199,6 +199,18 @@ positive lineage with append-only `falsified` and `repaired` witness events.
 These are mechanism upgrades; no new capability or RSI result is inferred until
 a successor uses the unresolved witnesses and is evaluated on fresh campaigns.
 
+A real YJ mechanism run then exercised both hereditary closures. A 77.57%
+candidate produced five reproducible public witnesses; an 83.18% candidate
+repaired all five. The 89.05% incumbent was stronger on the official aggregate
+yet reintroduced one protected JSON-key behavior, so its unsupported assurance
+transition was rejected. A one-line witness-directed successor restored the
+exact reference failure, closed the journal, and advanced the checker to
+generation two. Its single frozen official evaluation had exactly the same 825
+raw test statuses and 89.0482% score as its parent. This demonstrates cumulative
+finite repair without hidden-test regression, not score improvement or recursive
+metaproductivity; the mutation was manual and the checker used a deterministic
+Contract API fixture.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -220,6 +232,7 @@ stochastic, and compute was not always matched.
 | `sclevine__yj.8016400` | final core, Luna Max | 77.5750% | 1 attempt, 119 turns | Exact replay, independent preflight, discharge, and quiet |
 | `sclevine__yj.8016400` | goal/claim separation, Luna Max | 89.0482% | 1 attempt, 256 turns | New best; independent delivery discharge and quiet |
 | `sclevine__yj.8016400` | E2E artifact export, Luna Max | 81.0952% | 1 attempt, 173 turns | Exact CLI export consumed by external adapter |
+| `sclevine__yj.8016400` | witness inheritance + assurance v2 | 89.0482% | 5 falsifiers, 2 accepted generations | Higher-scoring regression rejected; directed repair preserved all 825 official statuses |
 | `sitkevij__hex` | later controllers | 98.5419% | multiple variants | Plateau; added control logic did not improve the score |
 | `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 | `miserlou__loop.209927c` | policy screening, Luna Max | P0 93.38%; invariants 92.68%/80.00%; probes 75.92%; simplicity 81.55% | matched development runs | No candidate survived replicate/tail-risk gates; no validation or holdout opened |
@@ -248,6 +261,7 @@ workspace layout documented by the runbook:
 - [YJ final core](../../run-artifacts/programbench-yj-final-core-luna-max-no-net-20260807-163701/RESULT.md)
 - [YJ goal/claim separation](../../run-artifacts/programbench-yj-goal-claim-luna-max-no-net-20260807-172413/RESULT.md)
 - [YJ E2E artifact export](../../run-artifacts/programbench-yj-e2e-export-luna-max-no-net-20260808-130711/RESULT.md)
+- [YJ witness inheritance and assurance tiling](../../run-artifacts/procontract-witness-yj-20260811/RESULT.md)
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 - [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
 - [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)
