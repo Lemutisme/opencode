@@ -196,6 +196,15 @@ gate rejected the candidate before holdouts. The observed bad tail also led the
 gate to enforce its existing regression tolerance on every paired run instead
 of only a task's replicate mean.
 
+After consolidating MetaContract artifact selection and the RSI gate, a
+three-instance smoke batch exercised the merged branch without an inherited
+policy. CMatrix reached 99.60% but leaked two timed-out executor descendants;
+Tailspin fell to 32.08% despite valid delivery evidence; and the previously
+unseen XSV reached 78.85%, below the public same-model 87.14%. All three exact
+handoffs passed package/preflight, independently discharged, and became quiet.
+The merge is mechanically sound, but the batch provides no capability-gain
+evidence and reinforces process cleanup as an adapter responsibility.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -229,6 +238,9 @@ stochastic, and compute was not always matched.
 | `abishekvashok__cmatrix.5c082c6` | second-order policy, Luna Max | not evaluated | 91 turns, 113 actions | Rejected before confirmation for cost and process violations |
 | `bensadeh__tailspin.6278437` | P0 baseline, GPT-5.5 high | 72.48% / 78.66% | 116 / 100 turns | Retained |
 | `bensadeh__tailspin.6278437` | MetaContract P1, GPT-5.5 high | 75.08% / 73.13% | 96 / 59 turns | Cheaper but weaker; rejected before holdouts |
+| `abishekvashok__cmatrix.5c082c6` | consolidated smoke, Luna Max | 99.6047% | 45 turns, 67 actions | Delivery passed; executor leaked two descendants |
+| `bensadeh__tailspin.6278437` | consolidated smoke, GPT-5.5 high | 32.0847% | 61 turns, 64 actions | Valid artifact, severe stochastic capability regression |
+| `burntsushi__xsv.f430466` | consolidated smoke, GPT-5.5 high | 78.8494% | 81 turns, 81 actions | Unseen locally; useful but below public same-model result |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -260,6 +272,7 @@ workspace layout documented by the runbook:
 - [Fresh three-instance calibration](../../run-artifacts/programbench-rsi-fresh-three-luna-max-20260809-214234/RESULT.md)
 - [CMatrix capability-RSI calibration](../../run-artifacts/programbench-cmatrix-rsi-luna-max-20260810-102617/RESULT.md)
 - [Tailspin private capability-RSI](../../run-artifacts/programbench-tailspin-rsi-gpt55-high-20260810-125520/RESULT.md)
+- [Post-merge three-instance calibration](../../run-artifacts/programbench-postmerge-three-20260810-180829/RESULT.md)
 
 ## Decision rule for future additions
 
