@@ -215,6 +215,13 @@ negative report challenged the exact Delivery and left Evaluation outstanding;
 all scopes remained non-quiet. The fenced Docker adapter also reaped a Grex fuzz
 probe at its hard deadline without leaking descendants.
 
+Retesting the historical Pareto commit `af579a44e` on the same three tasks
+showed a quality/cost tradeoff rather than uniform superiority. HTML improved
+0.68 points and FD improved 10.93 points, but cost rose 3.3x and 6.2x. Grex cost
+$22.90 and produced a nonterminating evaluator path, so no score was available.
+The old controller acquired more behavioral evidence but predates prompt-cache,
+finality, and liveness fixes; it should not replace the current core wholesale.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -254,6 +261,9 @@ stochastic, and compute was not always matched.
 | `pemistahl__grex.fa3e8ed` | evaluated delivery, GPT-5.5 high | 54.4970% | 53 turns, 53 actions | Floor failed; Delivery reopened, quiet false |
 | `johanneskaufmann__html-to-markdown.3006818` | evaluated delivery, GPT-5.5 high | 83.3898% | 83 turns, 88 actions | Floor failed; Delivery reopened, quiet false |
 | `sharkdp__fd.40d8eb3` | evaluated delivery, GPT-5.5 high | 76.4372% | 112 turns, 111 actions | Floor failed; Delivery reopened, quiet false |
+| `pemistahl__grex.fa3e8ed` | historical Pareto retest, GPT-5.5 high | measurement unavailable | 108 turns, 110 actions | Expensive candidate hung evaluator on invalid input |
+| `johanneskaufmann__html-to-markdown.3006818` | historical Pareto retest, GPT-5.5 high | 84.0678% | 77 turns, 81 actions | +0.68 points at 3.3x current cost |
+| `sharkdp__fd.40d8eb3` | historical Pareto retest, GPT-5.5 high | 87.3684% | 104 turns, 107 actions | +10.93 points at 6.2x current cost |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -287,6 +297,7 @@ workspace layout documented by the runbook:
 - [Tailspin private capability-RSI](../../run-artifacts/programbench-tailspin-rsi-gpt55-high-20260810-125520/RESULT.md)
 - [Post-merge three-instance calibration](../../run-artifacts/programbench-postmerge-three-20260810-180829/RESULT.md)
 - [Three-instance evaluated delivery](../../run-artifacts/programbench-evaluated-three-20260810-192321/RESULT.md)
+- [Historical Pareto three-instance retest](../../run-artifacts/programbench-pareto-retest-20260810-215501/RESULT.md)
 
 ## Decision rule for future additions
 
