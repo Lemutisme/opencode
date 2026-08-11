@@ -180,6 +180,17 @@ directly as the next tile's frontier for a judge transition. It is not evidence
 of capability improvement, indirect independence, or semantic equivalence
 between judges.
 
+A fresh Luna Max private screen then used aggregate historical evidence to have
+MetaContract generate one task-independent coverage-to-closure policy. Against
+one fixed current baseline, H1 improved unseen Srgn from 62.74% to 71.00% while
+using 67 fewer turns, but regressed unseen Cheat from 70.03% to 67.34% while
+using 42 more turns. Macro and micro utility improved, yet the -2.69-point worst
+pair exceeded the frozen one-point tolerance. An independently attested
+Evaluation Contract rejected H1 before replication or holdout. The run also
+validated container-scoped tool cancellation across 518 process calls. Failure
+analysis points to a mutable, externally retained behavior-surface regression
+corpus rather than more global policy wording.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -237,6 +248,7 @@ workspace layout documented by the runbook:
 - [Decision-frontier screening](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/RESULT.md)
 - [Decision-frontier artifact selection](../../run-artifacts/meta-decision-frontier-loop-20260809-183654/SELECTION_RESULT.md)
 - [Fresh three-instance calibration](../../run-artifacts/programbench-rsi-fresh-three-luna-max-20260809-214234/RESULT.md)
+- [Luna Max MetaContract private screen](../../run-artifacts/programbench-rsi-private-srgn-cheat-luna-max-20260810-185302/RESULT.md)
 
 ## Decision rule for future additions
 
