@@ -208,6 +208,13 @@ The resulting Docker shell adapter was then exercised against a real
 Linux/amd64 container: normal exit, an in-container hard timeout, and host
 interruption all left no execution-tagged descendants.
 
+A subsequent three-instance run pre-issued dependent Evaluation Contracts for
+Grex, HTML-to-Markdown, and FD. All Delivery handoffs passed package/preflight,
+but official utilities of 54.50%, 83.39%, and 76.44% missed frozen floors. Each
+negative report challenged the exact Delivery and left Evaluation outstanding;
+all scopes remained non-quiet. The fenced Docker adapter also reaped a Grex fuzz
+probe at its hard deadline without leaking descendants.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -244,6 +251,9 @@ stochastic, and compute was not always matched.
 | `abishekvashok__cmatrix.5c082c6` | consolidated smoke, Luna Max | 99.6047% | 45 turns, 67 actions | Delivery passed; executor leaked two descendants |
 | `bensadeh__tailspin.6278437` | consolidated smoke, GPT-5.5 high | 32.0847% | 61 turns, 64 actions | Valid artifact, severe stochastic capability regression |
 | `burntsushi__xsv.f430466` | consolidated smoke, GPT-5.5 high | 78.8494% | 81 turns, 81 actions | Unseen locally; useful but below public same-model result |
+| `pemistahl__grex.fa3e8ed` | evaluated delivery, GPT-5.5 high | 54.4970% | 53 turns, 53 actions | Floor failed; Delivery reopened, quiet false |
+| `johanneskaufmann__html-to-markdown.3006818` | evaluated delivery, GPT-5.5 high | 83.3898% | 83 turns, 88 actions | Floor failed; Delivery reopened, quiet false |
+| `sharkdp__fd.40d8eb3` | evaluated delivery, GPT-5.5 high | 76.4372% | 112 turns, 111 actions | Floor failed; Delivery reopened, quiet false |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -276,6 +286,7 @@ workspace layout documented by the runbook:
 - [CMatrix capability-RSI calibration](../../run-artifacts/programbench-cmatrix-rsi-luna-max-20260810-102617/RESULT.md)
 - [Tailspin private capability-RSI](../../run-artifacts/programbench-tailspin-rsi-gpt55-high-20260810-125520/RESULT.md)
 - [Post-merge three-instance calibration](../../run-artifacts/programbench-postmerge-three-20260810-180829/RESULT.md)
+- [Three-instance evaluated delivery](../../run-artifacts/programbench-evaluated-three-20260810-192321/RESULT.md)
 
 ## Decision rule for future additions
 
