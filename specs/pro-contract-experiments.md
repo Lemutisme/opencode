@@ -191,6 +191,14 @@ validated container-scoped tool cancellation across 518 process calls. Failure
 analysis points to a mutable, externally retained behavior-surface regression
 corpus rather than more global policy wording.
 
+The original transition calibration above exercised the version 1 direct
+predecessor check. The version 2 checker now carries one discharged Assurance
+Contract in every frontier and requires its successor to depend on it. The
+ProgramBench adapter's version 2 retained-regression ledger complements that
+positive lineage with append-only `falsified` and `repaired` witness events.
+These are mechanism upgrades; no new capability or RSI result is inferred until
+a successor uses the unresolved witnesses and is evaluated on fresh campaigns.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The

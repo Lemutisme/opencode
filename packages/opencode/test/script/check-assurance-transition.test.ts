@@ -5,13 +5,15 @@ import path from "node:path"
 
 const root = mkdtempSync(path.join(tmpdir(), "opencode-assurance-transition-"))
 const refs = Object.fromEntries(
-  ["h0", "h1", "j0", "j1", "eval", "bridge"].map((id) => [
+  ["h0", "h1", "j0", "j1", "a0", "a1", "a2", "weak", "bridge"].map((id) => [
     id,
     { contractID: `pct_${id}`, revision: 1, attestationID: `pca_${id}`, subjectHash: `subject-${id}` },
   ]),
 ) as Record<string, { contractID: string; revision: number; attestationID: string; subjectHash: string }>
-const requirements = {
-  eval: [refs.h1, refs.j0],
+const requirements: Record<string, Array<(typeof refs)[string]>> = {
+  a1: [refs.h1, refs.j0, refs.a0],
+  a2: [refs.h1, refs.j0, refs.a1, refs.bridge],
+  weak: [refs.h1, refs.j0],
   bridge: [refs.j0, refs.j1],
 }
 let sequence = 0
@@ -34,7 +36,7 @@ beforeAll(() => {
           attestationID: ref.attestationID,
           handoff: { subjectHash: ref.subjectHash },
           spec: {
-            requires: (requirements[id as keyof typeof requirements] ?? []).map((item) => ({
+            requires: (requirements[id] ?? []).map((item) => ({
               contractID: item.contractID,
               revision: item.revision,
             })),
@@ -45,8 +47,8 @@ beforeAll(() => {
   })
 })
 
-afterAll(() => {
-  server.stop(true)
+afterAll(async () => {
+  await server.stop(true)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -63,6 +65,7 @@ test("accepts an executor transition and freezes the next frontier", async () =>
     lineageHash: expect.any(String),
     executor: refs.h1,
     judge: refs.j0,
+    assurance: refs.a1,
   })
   expect(result.report.risk.used).toBeCloseTo(0.005)
 
@@ -71,23 +74,35 @@ test("accepts an executor transition and freezes the next frontier", async () =>
   expect(repeated.stdout).toBe(result.stdout)
 })
 
-test("uses an accepted report as the base of a predecessor-grounded judge bridge", async () => {
+test("inherits assurance through an accepted report and a predecessor-grounded judge bridge", async () => {
   const first = await run(transition())
-  const result = await run(fromFrontier(first.stdout, { judge: refs.j1, bridge: refs.bridge }))
+  const result = await run(
+    fromFrontier(first.stdout, { judge: refs.j1, assurance: refs.a2, bridge: refs.bridge }),
+  )
 
   expect(result.code).toBe(0)
-  expect(result.report).toMatchObject({ judge: refs.j1, generation: 2 })
+  expect(result.report).toMatchObject({ judge: refs.j1, assurance: refs.a2, generation: 2 })
   expect(result.report.lineageHash).not.toBe(first.report.lineageHash)
 })
 
 test("rejects self-grounding, missing bridges, stale support, and excess risk", async () => {
+  const staleFrontier = frontier()
+  staleFrontier.assurance = { ...refs.a0, attestationID: "pca_stale" }
   const cases = [
-    { input: transition({ evidence: [refs.h1] }), reason: "cannot certify itself" },
-    { input: transition({ evidence: [refs.h0] }), reason: "lacks predecessor-grounded requirement" },
+    { input: transition({ assurance: refs.h1 }), reason: "cannot certify itself" },
+    { input: transition({ assurance: refs.weak }), reason: "lacks inherited requirement pct_a0" },
+    { input: transition({ assurance: refs.a0 }), reason: "does not advance assurance" },
     { input: transition({ judge: refs.j1 }), reason: "requires a bridge" },
-    { input: transition({ judge: refs.j1, bridge: refs.eval }), reason: "bridge pct_eval lacks requirement pct_j1" },
     {
-      input: transition({ executor: { ...refs.h1, attestationID: "pca_stale" } }),
+      input: transition({ judge: refs.j1, assurance: refs.a2, bridge: refs.weak }),
+      reason: "bridge pct_weak lacks requirement pct_j1",
+    },
+    {
+      input: transition({ assurance: { ...refs.a1, attestationID: "pca_stale" } }),
+      reason: "stale or unsupported",
+    },
+    {
+      input: fromFrontier(`${JSON.stringify(staleFrontier)}\n`),
       reason: "stale or unsupported",
     },
     { input: transition({ riskIncrement: 0.1 }), reason: "cumulative risk limit" },
@@ -102,12 +117,13 @@ test("rejects self-grounding, missing bridges, stale support, and excess risk", 
 
 function frontier() {
   return {
-    version: 1,
+    version: 2,
     decision: "accept",
     generation: 0,
     lineageHash: "root-lineage",
     executor: refs.h0,
     judge: refs.j0,
+    assurance: refs.a0,
     risk: { used: 0, limit: 0.05 },
   }
 }
@@ -127,16 +143,17 @@ function fromFrontier(source: string, change: Record<string, unknown> = {}) {
     lineageHash: current.lineageHash,
     executor: current.executor,
     judge: current.judge,
+    assurance: current.assurance,
     risk: current.risk,
   }
   return {
     frontier: source,
     transition: {
-      version: 1,
+      version: 2,
       previousHash: new Bun.CryptoHasher("sha256").update(JSON.stringify(value)).digest("hex"),
       executor: value.executor,
       judge: value.judge,
-      evidence: [refs.eval],
+      assurance: refs.a1,
       riskIncrement: 0.005,
       provenance: ["world-model-hash"],
       ...change,

@@ -770,7 +770,7 @@ When the executor or assurance regime can evolve, each generation is
 represented by a small assurance frontier:
 
 ```text
-F_t = executor + judge + cumulative risk
+F_t = executor + judge + assurance + cumulative risk
 ```
 
 The frontier also carries a lineage hash over the predecessor lineage and exact
@@ -779,11 +779,13 @@ assurance cases therefore remain distinguishable without storing a graph in the
 kernel.
 
 A transition may activate a successor only from exact, currently supported
-Contract references. Evaluation Contracts must require the proposed executor
-and the predecessor judge. The judge is the complete evaluation regime,
-including metrics, aggregation, and selection rules. Changing it additionally
-requires a Bridge Contract that depends on both old and new judges. This gives
-the minimal temporal invariant:
+Contract references. Each frontier carries one discharged Assurance Contract
+that aggregates the evidence supporting that generation. Its successor must
+require the proposed executor, predecessor judge, and predecessor assurance.
+The judge is the complete evaluation regime, including metrics, aggregation,
+and selection rules. Changing it additionally requires a Bridge Contract that
+depends on both old and new judges, and the successor assurance must require
+that bridge. This gives the minimal temporal invariant:
 
 ```text
 no transition may derive its authority from the state it creates
@@ -792,10 +794,12 @@ no transition may derive its authority from the state it creates
 `packages/opencode/script/check-assurance-transition.ts` checks that invariant
 outside the normative kernel. It resolves current Contract support, rejects
 direct self-certification and stale attestations, requires predecessor-grounded
-evaluation and bridges, preserves a cumulative risk ceiling, and emits the next
-content-addressed frontier. An ordinary read-only Transition Contract freezes
-its inputs and report before independent attestation. No campaign, graph, or
-generation state is added to ProContract Core.
+assurance and bridges, preserves a cumulative risk ceiling, and emits the next
+content-addressed frontier. The next frontier inherits the exact Assurance
+Contract rather than merely recording that some evidence existed. An ordinary
+read-only Transition Contract freezes its inputs and report before independent
+attestation. No campaign, graph, or generation state is added to ProContract
+Core.
 
 A World Model remains advisory. It may summarize observations, predict a useful
 mutation, and record falsifiers, but its hashes are transition provenance rather
@@ -806,9 +810,20 @@ bridge. MetaContract is therefore a mutation-and-assurance compiler: it proposes
 the mutation locus, candidate, affected claims, prediction, and required bridge;
 it cannot certify the resulting transition.
 
-This first checker establishes direct predecessor grounding, not complete
-independence or semantic equivalence. Authority-domain isolation and the
-substantive validity of a Bridge Contract remain external assurance obligations.
+This checker establishes rooted cross-generation assurance, not complete
+independence, semantic equivalence, or capability monotonicity. Authority-domain
+isolation and the substantive validity of Assurance and Bridge Contracts remain
+external assurance obligations.
+
+Capability growth additionally needs negative evidence to survive until repair.
+A task adapter may maintain a content-addressed witness journal with only two
+events: `falsified`, which records a reproducible counterexample against an exact
+subject, and `repaired`, which records a later exact subject satisfying it. The
+journal is adapter evidence, not Contract state. An executor-visible Challenge
+binds its current head through `evidenceHash`, reopening the existing obligation;
+an independently discharged Assurance Contract binds the later head after every
+protected witness passes. Thus failures are inherited as obligations until
+repair, while verified repairs are inherited as assurance after adoption.
 
 A discharged policy becomes usable by a future Contract only through an
 explicit `requires` edge marked `policy: true`. This first retention boundary

@@ -13,20 +13,21 @@ const Ref = Schema.Struct({
 })
 const Risk = Schema.Struct({ used: NonNegative, limit: NonNegative })
 const Frontier = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
   decision: Schema.Literal("accept"),
   generation: NonNegativeInt,
   lineageHash: Schema.NonEmptyString,
   executor: Ref,
   judge: Ref,
+  assurance: Ref,
   risk: Risk,
 })
 const Transition = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
   previousHash: Schema.NonEmptyString,
   executor: Ref,
   judge: Ref,
-  evidence: Schema.Array(Ref),
+  assurance: Ref,
   bridge: Ref.pipe(Schema.optional),
   riskIncrement: NonNegative,
   provenance: Schema.Array(Schema.NonEmptyString),
@@ -66,23 +67,23 @@ if (frontier.risk.used + transition.riskIncrement > frontier.risk.limit)
   reasons.push("transition exceeds the cumulative risk limit")
 if (same(frontier.executor, transition.executor) && !judgeChanged)
   reasons.push("transition changes no governed component")
-if (transition.evidence.length === 0) reasons.push("transition has no evaluation evidence")
+if (same(frontier.assurance, transition.assurance)) reasons.push("transition does not advance assurance")
 if (judgeChanged !== (transition.bridge !== undefined))
   reasons.push(judgeChanged ? "judge change requires a bridge" : "unchanged judge needs no bridge")
 
 const successorKeys = new Set([key(transition.executor), key(transition.judge)])
-transition.evidence.forEach((item) => {
-  if (successorKeys.has(key(item))) reasons.push(`successor component cannot certify itself: ${item.contractID}`)
-})
+if (successorKeys.has(key(transition.assurance)))
+  reasons.push(`successor component cannot certify itself: ${transition.assurance.contractID}`)
 if (transition.bridge && successorKeys.has(key(transition.bridge)))
   reasons.push(`successor component cannot be its own bridge: ${transition.bridge.contractID}`)
 
 const refs = [
   frontier.executor,
   frontier.judge,
+  frontier.assurance,
   transition.executor,
   transition.judge,
-  ...transition.evidence,
+  transition.assurance,
   ...(transition.bridge ? [transition.bridge] : []),
 ]
 const unique = [...new Map(refs.map((item) => [key(item), item])).values()]
@@ -107,14 +108,16 @@ const resolved = new Map(
   ),
 )
 
-transition.evidence.forEach((item) => {
-  const contract = resolved.get(key(item))
-  if (!contract) return
-  const predecessorGrounding = [transition.executor, frontier.judge]
-  predecessorGrounding.forEach((required) => {
-    if (!requires(contract, required))
-      reasons.push(`evidence ${item.contractID} lacks predecessor-grounded requirement ${required.contractID}`)
-  })
+const assurance = resolved.get(key(transition.assurance))
+const predecessorGrounding = [
+  transition.executor,
+  frontier.judge,
+  frontier.assurance,
+  ...(transition.bridge ? [transition.bridge] : []),
+]
+predecessorGrounding.forEach((required) => {
+  if (assurance && !requires(assurance, required))
+    reasons.push(`assurance ${transition.assurance.contractID} lacks inherited requirement ${required.contractID}`)
 })
 
 if (transition.bridge) {
@@ -127,12 +130,13 @@ if (transition.bridge) {
 }
 
 const nextFrontier = {
-  version: 1,
+  version: 2,
   decision: "accept" as const,
   generation: frontier.generation + 1,
   lineageHash: new Bun.CryptoHasher("sha256").update(`${frontier.lineageHash}:${transitionHash}`).digest("hex"),
   executor: transition.executor,
   judge: transition.judge,
+  assurance: transition.assurance,
   risk: { used: frontier.risk.used + transition.riskIncrement, limit: frontier.risk.limit },
 }
 const decision = reasons.length === 0 ? ("accept" as const) : ("reject" as const)

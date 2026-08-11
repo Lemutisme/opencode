@@ -541,11 +541,12 @@ remain evaluator-owned and outside ProContract.
 
 Keep World Model output in a human-readable artifact such as `WORLD.md`. It is
 advisory provenance for MetaContract, not adoption evidence. A frontier contains
-only exact governed components and cumulative risk:
+only exact governed components, one inherited assurance root, and cumulative
+risk:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "decision": "accept",
   "generation": 0,
   "lineageHash": "root-frontier-lineage-sha256",
@@ -561,6 +562,12 @@ only exact governed components and cumulative risk:
     "attestationID": "pca_j0",
     "subjectHash": "subject-j0"
   },
+  "assurance": {
+    "contractID": "pct_a0",
+    "revision": 1,
+    "attestationID": "pca_a0",
+    "subjectHash": "subject-a0"
+  },
   "risk": { "used": 0, "limit": 0.05 }
 }
 ```
@@ -569,7 +576,7 @@ An executor-only transition keeps the predecessor judge:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "previousHash": "canonical-frontier-sha256",
   "executor": {
     "contractID": "pct_h1",
@@ -583,23 +590,24 @@ An executor-only transition keeps the predecessor judge:
     "attestationID": "pca_j0",
     "subjectHash": "subject-j0"
   },
-  "evidence": [
-    {
-      "contractID": "pct_eval_h1",
-      "revision": 1,
-      "attestationID": "pca_eval_h1",
-      "subjectHash": "subject-eval-h1"
-    }
-  ],
+  "assurance": {
+    "contractID": "pct_a1",
+    "revision": 1,
+    "attestationID": "pca_a1",
+    "subjectHash": "subject-a1"
+  },
   "riskIncrement": 0.005,
   "provenance": ["world-model-sha256"]
 }
 ```
 
-The Evaluation Contract must require `pct_h1` and `pct_j0`. The judge Contract
-freezes evaluator, metric, aggregation, and selection semantics. If it changes,
-add its proposed exact reference and a `bridge` reference; the Bridge Contract
-must require both predecessor and proposed judges.
+The `pct_a1` Assurance Contract must require `pct_h1`, `pct_j0`, and `pct_a0`.
+It is the single root that aggregates evaluation reports, retained-regression
+heads, and any subordinate evidence. The judge Contract freezes evaluator,
+metric, aggregation, and selection semantics. If it changes, add its proposed
+exact reference and a `bridge` reference; the Bridge Contract must require both
+predecessor and proposed judges, and the successor assurance must require that
+bridge.
 
 Run the checker from `packages/opencode` against the server that owns those
 Contracts:
@@ -617,12 +625,12 @@ Contract. Its hash is computed from the decoded canonical structure, so JSON
 formatting does not change its identity. The transition hash binds exact input
 bytes; the report hash binds its canonical structure. Exact retries are
 idempotent, while a conflicting existing report fails closed. An
-accepted report contains the next frontier fields at top level and can therefore
-become the next tile's direct input. A rejected report cannot decode as a
-frontier because its decision is not `accept`. The checker never issues, attests,
-promotes, runs an evaluator, or interprets World Model predictions. Capture an
-accepted report in an ordinary read-only Transition Contract; its exact handoff
-is the next frontier.
+accepted report contains the next frontier fields, including the inherited
+assurance root, and can therefore become the next tile's direct input. A
+rejected report cannot decode as a frontier because its decision is not
+`accept`. The checker never issues, attests, promotes, runs an evaluator, or
+interprets World Model predictions. Capture an accepted report in an ordinary
+read-only Transition Contract; its exact handoff is the next frontier.
 
 ## 5. MLE-bench: one CPU-friendly instance
 
@@ -951,6 +959,12 @@ uv run programbench candidate probe \
   "$WORKSPACE/reference" \
   "$RUN_DIR/probe-subject/executable"
 
+uv run programbench candidate retain \
+  "$RUN_DIR/probes/discoveries.json" \
+  "$RUN_DIR/probes/regressions.json" \
+  "$WORKSPACE/reference" \
+  "$RUN_DIR/probe-subject/executable"
+
 uv run programbench candidate package "$RUN_DIR/subject" "$RUN_DIR/submission" "$IID"
 uv run programbench candidate preflight "$RUN_DIR/submission" "$IID" --docker-cpus 4
 ```
@@ -958,6 +972,14 @@ uv run programbench candidate preflight "$RUN_DIR/submission" "$IID" --docker-cp
 `candidate probe` does not invent `cases.json`; the ProgramBench adapter must
 materialize those black-box cases before this command. Skip the probe step when
 no preregistered case set exists—never synthesize cases from official tests.
+
+`candidate retain` is the development witness path. A reproducible mismatch
+appends a `falsified` event immediately; a later matching candidate appends a
+`repaired` event, and every invocation replays all known cases. Bind its printed
+`head_sha256` into the exact Assurance Contract artifact. A challenge may cite
+that artifact hash as executor-visible negative evidence; the next assurance
+must require the predecessor assurance. Official hidden-test failures remain
+sealed and must never be converted into executor-visible cases.
 
 The candidate adapter owns `cases.json`, cleanroom packaging, and preflight. It
 does not change ProContract semantics.
