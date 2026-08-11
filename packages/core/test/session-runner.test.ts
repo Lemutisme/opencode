@@ -774,7 +774,7 @@ describe("SessionRunnerLLM", () => {
         "minimum admissibility boundary, not the optimization target",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "delivery replay alone is not a behavioral stopping condition",
+        "boundary and error semantics",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         `Evidence policy: ${JSON.stringify(spec.evidence)}`,
