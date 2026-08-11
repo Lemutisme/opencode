@@ -5,7 +5,7 @@ import { buildLocationServiceMap, LocationServiceMap } from "@opencode-ai/core/l
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Snapshot } from "@opencode-ai/core/snapshot"
-import { Clock, Effect } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { applyEdits, modify, type ParseError, parse } from "jsonc-parser"
 import path from "path"
 import type { Argv } from "yargs"
@@ -86,6 +86,97 @@ const IssueCommand = effectCmd({
     console.log(JSON.stringify({ contract: ProContract.info(contract), execution }, null, 2))
     return undefined
   }),
+})
+
+const EvaluationReport = Schema.Struct({
+  version: Schema.Literal(1),
+  deliveryContractID: ProContract.ID,
+  deliveryRevision: Schema.Int.check(Schema.isGreaterThan(0)),
+  subjectHash: Schema.NonEmptyString,
+  evaluatorHash: Schema.NonEmptyString,
+  passed: Schema.Boolean,
+  disclosure: Schema.Literals(["executor", "sealed"]),
+  summary: Schema.NonEmptyString,
+})
+
+const EvaluationIssueCommand = effectCmd({
+  command: "issue <deliveryContractID>",
+  describe: "persist evaluation of one exact delivery handoff",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .positional("deliveryContractID", { type: "string", demandOption: true, describe: "Delivery Contract ID" })
+      .option("evaluator-hash", { type: "string", demandOption: true, describe: "frozen evaluator identity" })
+      .option("deadline", { type: "string", demandOption: true, describe: "evaluation deadline as ISO time" }),
+  handler: Effect.fn("Cli.contract.evaluation.issue")(function* (args) {
+    const deadline = Date.parse(args.deadline)
+    if (!Number.isFinite(deadline)) return yield* fail(`Invalid evaluation deadline: ${args.deadline}`)
+    const receipt = yield* ProContract.Service.use((service) =>
+      service.issueEvaluation({
+        deliveryContractID: ProContract.ID.make(args.deliveryContractID),
+        evaluatorHash: args.evaluatorHash,
+        deadline,
+      }),
+    )
+    if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
+    if (!receipt.contract) return yield* Effect.die("Evaluation Contract was not loaded")
+    console.log(
+      JSON.stringify(
+        { data: ProContract.info(receipt.contract), receipt: { frontier: receipt.frontier, hash: receipt.hash } },
+        null,
+        2,
+      ),
+    )
+    return undefined
+  }),
+})
+
+const EvaluationSettleCommand = effectCmd({
+  command: "settle <evaluationContractID>",
+  describe: "settle evaluation from an external report",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .positional("evaluationContractID", {
+        type: "string",
+        demandOption: true,
+        describe: "Evaluation Contract ID",
+      })
+      .option("report", { type: "string", demandOption: true, describe: "external evaluation report JSON" }),
+  handler: Effect.fn("Cli.contract.evaluation.settle")(function* (args) {
+    const source = yield* Effect.promise(() => Bun.file(path.resolve(args.report)).text())
+    const report = Schema.decodeUnknownSync(Schema.fromJsonString(EvaluationReport))(source)
+    const now = yield* Clock.currentTimeMillis
+    const receipt = yield* ProContract.Service.use((service) =>
+      service.settleEvaluation({
+        contractID: ProContract.ID.make(args.evaluationContractID),
+        report,
+        evidenceHash: new Bun.CryptoHasher("sha256").update(source).digest("hex"),
+        time: now,
+      }),
+    )
+    if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
+    const contract = yield* ProContract.Service.use((service) =>
+      service.get(ProContract.ID.make(args.evaluationContractID)),
+    )
+    if (!contract) return yield* Effect.die("Evaluation Contract was not loaded")
+    console.log(
+      JSON.stringify(
+        { data: ProContract.info(contract), receipt: { frontier: receipt.frontier, hash: receipt.hash } },
+        null,
+        2,
+      ),
+    )
+    return undefined
+  }),
+})
+
+const EvaluationCommand = effectCmd({
+  command: "evaluation",
+  describe: "manage dependent external evaluation",
+  instance: false,
+  builder: (yargs: Argv) => yargs.command(EvaluationIssueCommand).command(EvaluationSettleCommand).demandCommand(),
+  handler: Effect.fn("Cli.contract.evaluation")(function* () {}),
 })
 
 const PolicyCommand = effectCmd({
@@ -321,6 +412,7 @@ export const ContractCommand = effectCmd({
   builder: (yargs: Argv) =>
     yargs
       .command(IssueCommand)
+      .command(EvaluationCommand)
       .command(PolicyCommand)
       .command(SweepCommand)
       .command(ListCommand)

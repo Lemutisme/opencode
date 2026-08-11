@@ -25,16 +25,19 @@ const layer = Layer.effect(
         yield* contracts.due(now),
         (contract) =>
           Effect.gen(function* () {
-            if (contract.executor !== "opencode") return
             if (now >= contract.spec.budget.deadline) {
               yield* contracts.escalate({
                 contractID: contract.id,
                 revision: contract.revision,
-                reason: "OpenCode deadline exhausted while waiting",
+                reason:
+                  contract.executor === "opencode"
+                    ? "OpenCode deadline exhausted while waiting"
+                    : "External evaluation deadline exhausted while waiting",
                 time: now,
               })
               return
             }
+            if (contract.executor !== "opencode") return
             if (!(yield* bindings.get(contract.id))) {
               yield* contracts.escalate({
                 contractID: contract.id,

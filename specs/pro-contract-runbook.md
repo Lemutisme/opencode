@@ -561,6 +561,48 @@ An artifact selected here may become the frozen candidate evaluated by the
 capability gate in Section 7. Development selection never substitutes for that
 cohort evaluation or for principal promotion.
 
+### 4.11 Evaluated delivery
+
+When package/preflight cannot establish the user goal, persist evaluation before
+the Delivery Contract finishes:
+
+```bash
+opencode contract evaluation issue pct_delivery \
+  --evaluator-hash sha256:frozen-evaluator \
+  --deadline 2026-08-12T00:00:00Z
+```
+
+The resulting Contract shares the delivery scope, requires its exact revision,
+has no filesystem or process authority, and uses an `external-evaluator:*`
+executor. The OpenCode scheduler cannot run it.
+
+After evaluating the exported delivery handoff, submit a finite report:
+
+```json
+{
+  "version": 1,
+  "deliveryContractID": "pct_delivery",
+  "deliveryRevision": 1,
+  "subjectHash": "exact-delivery-subject",
+  "evaluatorHash": "sha256:frozen-evaluator",
+  "passed": false,
+  "disclosure": "executor",
+  "summary": "Behavioral compatibility floor was not met"
+}
+```
+
+```bash
+opencode contract evaluation settle pct_eval_... --report evaluation.json
+```
+
+A passing report discharges Evaluation. A failed report challenges the exact
+Delivery handoff: visible evidence returns Delivery to dormant remediation,
+while sealed evidence escalates it without disclosing feedback. Evaluation
+remains outstanding in both cases, so `contract quiet <scope>` stays false. The
+command validates the deterministic evaluation ID, exact dependency, delivery
+attestation, subject hash, and evaluator identity before accepting the report
+hash as evidence.
+
 ## 5. MLE-bench: one CPU-friendly instance
 
 The recommended local smoke instance is:

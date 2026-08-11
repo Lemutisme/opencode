@@ -938,6 +938,107 @@ describe("ProContract ledger", () => {
     }),
   )
 
+  it.effect("keeps evaluation outstanding until external evidence accepts the exact delivery", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      const evaluation = yield* contracts.issueEvaluation({
+        deliveryContractID: contractID,
+        evaluatorHash: "evaluator-v1",
+        deadline: 100,
+      })
+      const evaluationID = ProContract.evaluationID(contractID, 1, "evaluator-v1")
+
+      expect(evaluation.contract).toMatchObject({ id: evaluationID, status: "dormant" })
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({
+        quiet: false,
+        outstanding: expect.arrayContaining([contractID, evaluationID]),
+      })
+
+      yield* contracts.activate(contractID, 1, 0)
+      yield* contracts.reportReady({
+        contractID,
+        revision: 1,
+        summary: "candidate complete",
+        uncertainties: [],
+        subjectHash,
+        time: 1,
+      })
+      yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
+      expect((yield* contracts.due(2)).map((contract) => contract.id)).toContain(evaluationID)
+
+      const settled = yield* contracts.settleEvaluation({
+        contractID: evaluationID,
+        evidenceHash: "evaluation-evidence",
+        time: 2,
+        report: {
+          deliveryContractID: contractID,
+          deliveryRevision: 1,
+          subjectHash,
+          evaluatorHash: "evaluator-v1",
+          passed: true,
+          disclosure: "sealed",
+          summary: "secret score",
+        },
+      })
+
+      expect(settled.state.contracts[evaluationID]).toMatchObject({
+        status: "discharged",
+        handoff: { summary: "External evaluator accepted sealed evidence" },
+      })
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: true, outstanding: [] })
+    }),
+  )
+
+  it.effect("reopens failed delivery and preserves evaluation duty", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      const evaluation = yield* contracts.issueEvaluation({
+        deliveryContractID: contractID,
+        evaluatorHash: "evaluator-v1",
+        deadline: 100,
+      })
+      const evaluationID = ProContract.evaluationID(contractID, 1, "evaluator-v1")
+      expect(evaluation.contract?.id).toBe(evaluationID)
+      yield* contracts.activate(contractID, 1, 0)
+      yield* contracts.reportReady({
+        contractID,
+        revision: 1,
+        summary: "candidate complete",
+        uncertainties: [],
+        subjectHash,
+        time: 1,
+      })
+      yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
+
+      yield* contracts.settleEvaluation({
+        contractID: evaluationID,
+        evidenceHash: "negative-evidence",
+        time: 2,
+        report: {
+          deliveryContractID: contractID,
+          deliveryRevision: 1,
+          subjectHash,
+          evaluatorHash: "evaluator-v1",
+          passed: false,
+          disclosure: "executor",
+          summary: "behavior rejected",
+        },
+      })
+
+      expect(yield* contracts.get(contractID)).toMatchObject({
+        status: "dormant",
+        challenge: { evidenceHash: "negative-evidence", summary: "behavior rejected" },
+      })
+      expect(yield* contracts.get(evaluationID)).toMatchObject({ status: "dormant" })
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({
+        quiet: false,
+        outstanding: expect.arrayContaining([contractID, evaluationID]),
+      })
+    }),
+  )
+
   it.effect("reactivates executor-visible verification challenges", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
@@ -1408,6 +1509,29 @@ describe("OpenCode Contract binding", () => {
       })
       yield* scheduler.runOnce()
       expect(yield* contracts.history({ contractID })).toHaveLength(2)
+    }),
+  )
+
+  schedulerIt.effect("escalates external evaluation after its deadline", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const scheduler = yield* ProContractScheduler.Service
+      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "upstream" })
+      const evaluation = yield* contracts.issueEvaluation({
+        deliveryContractID: contractID,
+        evaluatorHash: "evaluator-v1",
+        deadline: 10,
+      })
+      const evaluationID = ProContract.evaluationID(contractID, 1, "evaluator-v1")
+      expect(evaluation.contract?.id).toBe(evaluationID)
+      yield* TestClock.setTime(11)
+
+      yield* scheduler.runOnce()
+
+      expect(yield* contracts.get(evaluationID)).toMatchObject({
+        status: "escalated",
+        escalation: { reason: "External evaluation deadline exhausted while waiting", time: 11 },
+      })
     }),
   )
 

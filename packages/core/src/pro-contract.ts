@@ -37,6 +37,15 @@ const ZERO_HASH = "0".repeat(64)
 export type Receipt = ProContractKernel.Result & { readonly frontier: number; readonly hash: string }
 export type IssueReceipt = Receipt & { readonly contract?: ProContractKernel.Contract }
 export type HistoryEntry = typeof ProContractEventTable.$inferSelect
+export type EvaluationReport = {
+  readonly deliveryContractID: Schema.ID
+  readonly deliveryRevision: number
+  readonly subjectHash: string
+  readonly evaluatorHash: string
+  readonly passed: boolean
+  readonly disclosure: "executor" | "sealed"
+  readonly summary: string
+}
 
 export interface Interface {
   readonly issue: (input: {
@@ -45,6 +54,17 @@ export interface Interface {
     readonly spec: Schema.Spec
     readonly executor: string
   }) => Effect.Effect<IssueReceipt>
+  readonly issueEvaluation: (input: {
+    readonly deliveryContractID: Schema.ID
+    readonly evaluatorHash: string
+    readonly deadline: number
+  }) => Effect.Effect<IssueReceipt>
+  readonly settleEvaluation: (input: {
+    readonly contractID: Schema.ID
+    readonly report: EvaluationReport
+    readonly evidenceHash: string
+    readonly time: number
+  }) => Effect.Effect<Receipt>
   readonly release: (input: { readonly contractID: Schema.ID; readonly reason: string }) => Effect.Effect<Receipt>
   readonly challenge: (input: {
     readonly contractID: Schema.ID
@@ -113,6 +133,10 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Pr
 
 export function evidenceClaim(spec: Schema.Spec) {
   return spec.evidence.claim ?? spec.goal
+}
+
+export function evaluationID(deliveryContractID: Schema.ID, revision: number, evaluatorHash: string) {
+  return Schema.ID.make(`pct_eval_${Hash.sha256(JSON.stringify([deliveryContractID, revision, evaluatorHash]))}`)
 }
 
 export function normalizeSpec(spec: Schema.Spec) {
@@ -271,26 +295,122 @@ const layer = Layer.effect(
         )
     })
 
+    const issue = Effect.fn("ProContract.issue")(function* (input: {
+      readonly id?: Schema.ID
+      readonly scope: string
+      readonly spec: Schema.Spec
+      readonly executor: string
+    }) {
+      const id = input.id ?? Schema.ID.create()
+      const spec = normalizeSpec(input.spec)
+      const receipt = yield* execute({
+        type: "issue",
+        actor: "local-owner",
+        draft: {
+          id,
+          scope: input.scope,
+          spec,
+          issuer: "local-owner",
+          executor: input.executor,
+          specHash: ProContractKernel.hashSpec(spec),
+        },
+      })
+      if (receipt.decision.type === "rejected") return receipt
+      const contract = receipt.state.contracts[id]
+      if (!contract) return yield* Effect.die("Issued contract was not loaded")
+      return { ...receipt, contract }
+    })
+
     return Service.of({
-      issue: Effect.fn("ProContract.issue")(function* (input) {
-        const id = input.id ?? Schema.ID.create()
-        const spec = normalizeSpec(input.spec)
-        const receipt = yield* execute({
-          type: "issue",
-          actor: "local-owner",
-          draft: {
-            id,
-            scope: input.scope,
-            spec,
-            issuer: "local-owner",
-            executor: input.executor,
-            specHash: ProContractKernel.hashSpec(spec),
-          },
+      issue,
+      issueEvaluation: Effect.fn("ProContract.issueEvaluation")(function* (input) {
+        const delivery = yield* get(input.deliveryContractID)
+        if (!delivery) return yield* Effect.die(`Contract not found: ${input.deliveryContractID}`)
+        if (!input.evaluatorHash) return yield* Effect.die("Evaluator hash is required")
+        const id = evaluationID(delivery.id, delivery.revision, input.evaluatorHash)
+        return yield* issue({
+          id,
+          scope: delivery.scope,
+          executor: `external-evaluator:${input.evaluatorHash}`,
+          spec: Schema.Spec.make({
+            trigger: { type: "immediate" },
+            goal: `Independently evaluate the exact handoff for: ${delivery.spec.goal}`,
+            brief: `Evaluate ${delivery.id}@${delivery.revision} with evaluator ${input.evaluatorHash}. Delivery evidence alone does not settle this obligation.`,
+            requires: [{ contractID: delivery.id, revision: delivery.revision }],
+            authority: [],
+            budget: { turns: 1, actions: 1, deadline: input.deadline },
+            evidence: {
+              type: "principal",
+              claim: `Evaluator ${input.evaluatorHash} accepted the exact handoff from ${delivery.id}@${delivery.revision}.`,
+            },
+            resolution: { maxAttempts: 1, retryDelay: 0 },
+          }),
         })
-        if (receipt.decision.type === "rejected") return receipt
-        const contract = receipt.state.contracts[id]
-        if (!contract) return yield* Effect.die("Issued contract was not loaded")
-        return { ...receipt, contract }
+      }),
+      settleEvaluation: Effect.fn("ProContract.settleEvaluation")(function* (input) {
+        const evaluation = yield* get(input.contractID)
+        if (!evaluation) return yield* Effect.die(`Contract not found: ${input.contractID}`)
+        const report = input.report
+        const expectedID = evaluationID(report.deliveryContractID, report.deliveryRevision, report.evaluatorHash)
+        if (evaluation.id !== expectedID) return yield* Effect.die("Evaluation identity does not match report")
+        if (evaluation.executor !== `external-evaluator:${report.evaluatorHash}`)
+          return yield* Effect.die("Evaluator identity does not match Contract")
+        if (
+          evaluation.spec.requires.length !== 1 ||
+          evaluation.spec.requires[0]?.contractID !== report.deliveryContractID ||
+          evaluation.spec.requires[0]?.revision !== report.deliveryRevision
+        )
+          return yield* Effect.die("Evaluation dependency does not match report")
+        const delivery = yield* get(report.deliveryContractID)
+        if (!delivery?.handoff || delivery.status !== "discharged" || !delivery.attestationID)
+          return yield* Effect.die("Delivery Contract is not independently evidenced")
+        if (delivery.revision !== report.deliveryRevision || delivery.handoff.subjectHash !== report.subjectHash)
+          return yield* Effect.die("Evaluation subject does not match delivery handoff")
+
+        if (!report.passed)
+          return yield* execute({
+            type: "challenge",
+            actor: delivery.issuer,
+            contractID: delivery.id,
+            challenge: {
+              revision: delivery.revision,
+              subjectHash: report.subjectHash,
+              evidenceHash: input.evidenceHash,
+              disclosure: report.disclosure,
+              summary: report.disclosure === "executor" ? report.summary : undefined,
+              time: input.time,
+            },
+          })
+
+        const activated =
+          evaluation.status === "dormant"
+            ? yield* execute({
+                type: "activate",
+                actor: "institution",
+                contractID: evaluation.id,
+                revision: evaluation.revision,
+                time: input.time,
+              })
+            : undefined
+        if (activated?.decision.type === "rejected") return activated
+        const current = activated?.state.contracts[evaluation.id] ?? evaluation
+        const ready =
+          current.status === "active"
+            ? yield* execute({
+                type: "report-ready",
+                actor: "institution",
+                contractID: current.id,
+                revision: current.revision,
+                summary:
+                  report.disclosure === "sealed" ? "External evaluator accepted sealed evidence" : report.summary,
+                uncertainties: [],
+                subjectHash: report.subjectHash,
+                time: input.time,
+              })
+            : undefined
+        if (ready?.decision.type === "rejected") return ready
+        const handedOff = ready?.state.contracts[current.id] ?? current
+        return yield* discharge(handedOff, input.evidenceHash)
       }),
       release: (input) => execute({ type: "release", actor: "local-owner", ...input }),
       challenge: (input) =>

@@ -372,6 +372,19 @@ principal intent
   -> issue a quiet snapshot only when no scoped duty remains outstanding
 ```
 
+When delivery evidence does not establish the optimization goal, compile two
+ordinary obligations. Issue a dependent Evaluation Contract immediately after
+the Delivery Contract, before execution completes. Its deterministic identity
+binds the delivery revision and evaluator hash. Delivery may discharge on exact
+artifact evidence, but the shared scope remains non-quiet until an external
+report accepts the same subject hash. A failed report challenges Delivery while
+Evaluation remains outstanding. This composition adds no lifecycle state:
+
+```text
+Delivery: artifact exists and reproduces
+Evaluation: exact artifact satisfies the behavioral claim
+```
+
 Compilation is an intentional compression boundary. The Contract cannot retain
 all issuance-time context, so the issuer chooses an optimization goal, a
 settlement claim, brief, evidence policy, and assumptions that a future
