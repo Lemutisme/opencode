@@ -965,6 +965,10 @@ uv run programbench candidate retain \
   "$WORKSPACE/reference" \
   "$RUN_DIR/probe-subject/executable"
 
+uv run programbench candidate replay \
+  "$RUN_DIR/probes/regressions.json" \
+  "$RUN_DIR/probe-subject/executable"
+
 uv run programbench candidate package "$RUN_DIR/subject" "$RUN_DIR/submission" "$IID"
 uv run programbench candidate preflight "$RUN_DIR/submission" "$IID" --docker-cpus 4
 ```
@@ -980,6 +984,11 @@ appends a `falsified` event immediately; a later matching candidate appends a
 that artifact hash as executor-visible negative evidence; the next assurance
 must require the predecessor assurance. Official hidden-test failures remain
 sealed and must never be converted into executor-visible cases.
+
+`candidate replay` is the executor-facing read path. It returns exact
+case/expected/actual mismatches and never writes the ledger. The executor may
+use it to direct a repair, while only the external adapter may call `retain` to
+admit the resulting witness or repair event.
 
 The candidate adapter owns `cases.json`, cleanroom packaging, and preflight. It
 does not change ProContract semantics.

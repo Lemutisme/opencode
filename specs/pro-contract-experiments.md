@@ -211,6 +211,26 @@ finite repair without hidden-test regression, not score improvement or recursive
 metaproductivity; the mutation was manual and the checker used a deterministic
 Contract API fixture.
 
+That successful YJ trajectory was then compiled by MetaContract into a
+167-word task-independent successor-repair policy. In paired Luna Max campaigns
+on Jot and Gron, the policy-bearing improver produced 867/976 active passes
+versus 856/976 for the original improver (+1.13 micro points) while reducing
+tool actions from 75 to 55, reference calls from 32 to 15, and recorded cost by
+32.8%. Jot supplied the capability difference: the original improver repaired
+only the observed help literal, while the successor localized and repaired the
+shared help-template boundary. Gron quality tied, but the successor used a
+15-line typed parser error instead of an approximately 64-line parallel parser.
+This is preliminary one-step metaproductivity evidence, not promotion: there was
+one replicate per arm, the confirmation rule was not preregistered, and Jot's
+broader repair gained 17 tests relative to the control but also regressed six.
+Both campaigns initially needed a copied read-only replay script so the
+improver could consume retained cases without authority to mutate their ledger.
+That repeated boundary was folded back into the ProgramBench adapter as
+`candidate replay`: it emits exact case/expected/actual mismatches, exits
+nonzero while any remain, and never admits evidence. External `candidate
+retain` remains the sole witness/repair writer. No ProContract Core state or
+policy was added.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -233,6 +253,7 @@ stochastic, and compute was not always matched.
 | `sclevine__yj.8016400` | goal/claim separation, Luna Max | 89.0482% | 1 attempt, 256 turns | New best; independent delivery discharge and quiet |
 | `sclevine__yj.8016400` | E2E artifact export, Luna Max | 81.0952% | 1 attempt, 173 turns | Exact CLI export consumed by external adapter |
 | `sclevine__yj.8016400` | witness inheritance + assurance v2 | 89.0482% | 5 falsifiers, 2 accepted generations | Higher-scoring regression rejected; directed repair preserved all 825 official statuses |
+| `shashwatah__jot.a92aad8` + `tomnomnom__gron.88a6234` | m0 vs MetaContract m1 | 856/976 → 867/976 | 2 paired campaigns | +1.13 micro pp with 26.7% fewer actions and 32.8% lower cost; not promoted |
 | `sitkevij__hex` | later controllers | 98.5419% | multiple variants | Plateau; added control logic did not improve the score |
 | `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 | `miserlou__loop.209927c` | policy screening, Luna Max | P0 93.38%; invariants 92.68%/80.00%; probes 75.92%; simplicity 81.55% | matched development runs | No candidate survived replicate/tail-risk gates; no validation or holdout opened |
@@ -262,6 +283,7 @@ workspace layout documented by the runbook:
 - [YJ goal/claim separation](../../run-artifacts/programbench-yj-goal-claim-luna-max-no-net-20260807-172413/RESULT.md)
 - [YJ E2E artifact export](../../run-artifacts/programbench-yj-e2e-export-luna-max-no-net-20260808-130711/RESULT.md)
 - [YJ witness inheritance and assurance tiling](../../run-artifacts/procontract-witness-yj-20260811/RESULT.md)
+- [One-step governed improver self-improvement](../../run-artifacts/procontract-rsi-metaproductivity-luna-max-20260811/RESULT.md)
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 - [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
 - [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)
