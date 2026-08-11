@@ -868,6 +868,12 @@ disable the existing external-directory fence. Adapters place read-only inputs
 and writable candidate state inside that Location while keeping control-plane
 state, credentials, and authoritative promotion outside it.
 
+When execution crosses `docker exec`, killing the host client does not own the
+container descendants. The bundled Docker shell adapter tags each command with
+an execution identity and reaps that identity on normal exit, timeout, or host
+interruption. This enforces effect cleanup without adding process state to the
+Contract kernel.
+
 The intended flow is:
 
 ```text

@@ -497,6 +497,21 @@ Filesystem capabilities expose tools inside the Location. External paths still
 require the existing permission fence; adapters should not compensate with a
 global external-directory allow rule.
 
+For a host control plane with a Docker executor, configure
+`script/pro-contract-docker-shell` instead of a raw `docker exec` wrapper:
+
+```bash
+export OPENCODE_DOCKER_CONTAINER=procontract-executor
+export OPENCODE_DOCKER_HOST_ROOT="$WORKSPACE"
+export OPENCODE_DOCKER_CONTAINER_ROOT=/workspace
+export OPENCODE_DOCKER_HARD_TIMEOUT_SECONDS=600
+```
+
+The adapter gives every command a unique execution identity. Normal exit,
+timeout, and host interruption all terminate only matching container
+descendants; an in-container hard deadline remains if the host wrapper is
+killed before its cleanup trap runs.
+
 ### 4.10 Deterministic artifact selection
 
 `script/select-contract-artifact.ts` is a development adapter, not a principal

@@ -204,6 +204,9 @@ unseen XSV reached 78.85%, below the public same-model 87.14%. All three exact
 handoffs passed package/preflight, independently discharged, and became quiet.
 The merge is mechanically sound, but the batch provides no capability-gain
 evidence and reinforces process cleanup as an adapter responsibility.
+The resulting Docker shell adapter was then exercised against a real
+Linux/amd64 container: normal exit, an in-container hard timeout, and host
+interruption all left no execution-tagged descendants.
 
 ## Calibration results
 
