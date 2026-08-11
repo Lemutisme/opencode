@@ -537,6 +537,93 @@ candidate. The selector cannot issue, attest, export, promote a policy, or open
 validation or holdout work. Benchmark score construction and admissibility
 remain evaluator-owned and outside ProContract.
 
+### 4.11 Assurance-carrying transitions
+
+Keep World Model output in a human-readable artifact such as `WORLD.md`. It is
+advisory provenance for MetaContract, not adoption evidence. A frontier contains
+only exact governed components and cumulative risk:
+
+```json
+{
+  "version": 1,
+  "decision": "accept",
+  "generation": 0,
+  "lineageHash": "root-frontier-lineage-sha256",
+  "executor": {
+    "contractID": "pct_h0",
+    "revision": 1,
+    "attestationID": "pca_h0",
+    "subjectHash": "subject-h0"
+  },
+  "judge": {
+    "contractID": "pct_j0",
+    "revision": 1,
+    "attestationID": "pca_j0",
+    "subjectHash": "subject-j0"
+  },
+  "risk": { "used": 0, "limit": 0.05 }
+}
+```
+
+An executor-only transition keeps the predecessor judge:
+
+```json
+{
+  "version": 1,
+  "previousHash": "canonical-frontier-sha256",
+  "executor": {
+    "contractID": "pct_h1",
+    "revision": 1,
+    "attestationID": "pca_h1",
+    "subjectHash": "subject-h1"
+  },
+  "judge": {
+    "contractID": "pct_j0",
+    "revision": 1,
+    "attestationID": "pca_j0",
+    "subjectHash": "subject-j0"
+  },
+  "evidence": [
+    {
+      "contractID": "pct_eval_h1",
+      "revision": 1,
+      "attestationID": "pca_eval_h1",
+      "subjectHash": "subject-eval-h1"
+    }
+  ],
+  "riskIncrement": 0.005,
+  "provenance": ["world-model-sha256"]
+}
+```
+
+The Evaluation Contract must require `pct_h1` and `pct_j0`. The judge Contract
+freezes evaluator, metric, aggregation, and selection semantics. If it changes,
+add its proposed exact reference and a `bridge` reference; the Bridge Contract
+must require both predecessor and proposed judges.
+
+Run the checker from `packages/opencode` against the server that owns those
+Contracts:
+
+```bash
+PRO_CONTRACT_API="http://127.0.0.1:$PORT" \
+  bun run script/check-assurance-transition.ts \
+  "$RUN_DIR/frontier.json" \
+  "$RUN_DIR/transition.json" \
+  "$RUN_DIR/transition-report.json"
+```
+
+The frontier file must be the exact export of the predecessor Root or Transition
+Contract. Its hash is computed from the decoded canonical structure, so JSON
+formatting does not change its identity. The transition hash binds exact input
+bytes; the report hash binds its canonical structure. Exact retries are
+idempotent, while a conflicting existing report fails closed. An
+accepted report contains the next frontier fields at top level and can therefore
+become the next tile's direct input. A rejected report cannot decode as a
+frontier because its decision is not `accept`. The checker never issues, attests,
+promotes, runs an evaluator, or interprets World Model predictions. Capture an
+accepted report in an ordinary read-only Transition Contract; its exact handoff
+is the next frontier.
+
 ## 5. MLE-bench: one CPU-friendly instance
 
 The recommended local smoke instance is:

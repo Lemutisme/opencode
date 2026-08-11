@@ -764,6 +764,52 @@ evaluation, selection, and inheritance remain separate authorities. The ledger
 needs no campaign, generation, or winner state: exact requirements and artifacts
 already preserve the lineage.
 
+### Assurance-carrying transitions
+
+When the executor or assurance regime can evolve, each generation is
+represented by a small assurance frontier:
+
+```text
+F_t = executor + judge + cumulative risk
+```
+
+The frontier also carries a lineage hash over the predecessor lineage and exact
+transition bytes. Two identical runtime configurations reached through different
+assurance cases therefore remain distinguishable without storing a graph in the
+kernel.
+
+A transition may activate a successor only from exact, currently supported
+Contract references. Evaluation Contracts must require the proposed executor
+and the predecessor judge. The judge is the complete evaluation regime,
+including metrics, aggregation, and selection rules. Changing it additionally
+requires a Bridge Contract that depends on both old and new judges. This gives
+the minimal temporal invariant:
+
+```text
+no transition may derive its authority from the state it creates
+```
+
+`packages/opencode/script/check-assurance-transition.ts` checks that invariant
+outside the normative kernel. It resolves current Contract support, rejects
+direct self-certification and stale attestations, requires predecessor-grounded
+evaluation and bridges, preserves a cumulative risk ceiling, and emits the next
+content-addressed frontier. An ordinary read-only Transition Contract freezes
+its inputs and report before independent attestation. No campaign, graph, or
+generation state is added to ProContract Core.
+
+A World Model remains advisory. It may summarize observations, predict a useful
+mutation, and record falsifiers, but its hashes are transition provenance rather
+than support for adoption. Independent evaluation justifies the successor. If a
+World Model chooses evidence, metrics, or promotion instead of merely proposing
+experiments, it has become part of the judge and must itself cross an assurance
+bridge. MetaContract is therefore a mutation-and-assurance compiler: it proposes
+the mutation locus, candidate, affected claims, prediction, and required bridge;
+it cannot certify the resulting transition.
+
+This first checker establishes direct predecessor grounding, not complete
+independence or semantic equivalence. Authority-domain isolation and the
+substantive validity of a Bridge Contract remain external assurance obligations.
+
 A discharged policy becomes usable by a future Contract only through an
 explicit `requires` edge marked `policy: true`. This first retention boundary
 does not select the newest candidate or maintain a mutable global policy

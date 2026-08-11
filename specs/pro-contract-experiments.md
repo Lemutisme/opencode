@@ -169,6 +169,17 @@ This proves evidence-backed artifact selection, not policy improvement: the
 candidate policy remains rejected, and no policy, validation, or holdout stage
 was opened.
 
+A focused assurance-transition check then treated the existing fixed-root flow
+as generation zero. It accepted an executor successor only when its Evaluation
+Contract required the exact successor plus the predecessor judge. A judge
+replacement additionally required a Bridge Contract depending on both old and
+new regimes. The checker rejected direct self-certification, missing
+bridges, stale attestations, and cumulative-risk overflow. This is a mechanism
+test for predecessor-grounded tiling: the accepted executor report served
+directly as the next tile's frontier for a judge transition. It is not evidence
+of capability improvement, indirect independence, or semantic equivalence
+between judges.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
