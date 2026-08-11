@@ -231,6 +231,17 @@ nonzero while any remain, and never admits evidence. External `candidate
 retain` remains the sole witness/repair writer. No ProContract Core state or
 policy was added.
 
+m1 then generated an m2 policy that required contrastive mismatches to cross an
+external admission command before they could justify broader mutation. A
+preregistered Eva/Shellharden screen falsified that successor. The admission
+mechanism worked: Eva m2 expanded one witness to four durable cases and
+Shellharden expanded one to three. Yet m2 lost five Eva active tests, tied
+Shellharden, increased actions by 17%, and increased cost by 30%. The frozen
+rule therefore rejected m2. Failure analysis distinguishes behavior-surface
+expansion, which needs admitted falsifiers, from semantic-invariant propagation,
+which needs an explicit impact cone. m2 over-constrained the latter and missed a
+stale help identity that m1 repaired. Recursive depth two is not established.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -254,6 +265,7 @@ stochastic, and compute was not always matched.
 | `sclevine__yj.8016400` | E2E artifact export, Luna Max | 81.0952% | 1 attempt, 173 turns | Exact CLI export consumed by external adapter |
 | `sclevine__yj.8016400` | witness inheritance + assurance v2 | 89.0482% | 5 falsifiers, 2 accepted generations | Higher-scoring regression rejected; directed repair preserved all 825 official statuses |
 | `shashwatah__jot.a92aad8` + `tomnomnom__gron.88a6234` | m0 vs MetaContract m1 | 856/976 → 867/976 | 2 paired campaigns | +1.13 micro pp with 26.7% fewer actions and 32.8% lower cost; not promoted |
+| `oppiliappan__eva.41ae245` + `anordal__shellharden.6a6ffd4` | preregistered m1 vs m2 | 1778/2008 → 1773/2008 | 2 paired campaigns | m2 rejected: -5 passes, +17% actions, +30% cost |
 | `sitkevij__hex` | later controllers | 98.5419% | multiple variants | Plateau; added control logic did not improve the score |
 | `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 | `miserlou__loop.209927c` | policy screening, Luna Max | P0 93.38%; invariants 92.68%/80.00%; probes 75.92%; simplicity 81.55% | matched development runs | No candidate survived replicate/tail-risk gates; no validation or holdout opened |
@@ -284,6 +296,7 @@ workspace layout documented by the runbook:
 - [YJ E2E artifact export](../../run-artifacts/programbench-yj-e2e-export-luna-max-no-net-20260808-130711/RESULT.md)
 - [YJ witness inheritance and assurance tiling](../../run-artifacts/procontract-witness-yj-20260811/RESULT.md)
 - [One-step governed improver self-improvement](../../run-artifacts/procontract-rsi-metaproductivity-luna-max-20260811/RESULT.md)
+- [Preregistered m2 confirmation screen](../../run-artifacts/procontract-rsi-m2-confirmation-luna-max-20260811/RESULT.md)
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 - [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
 - [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)
