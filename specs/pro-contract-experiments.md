@@ -222,6 +222,22 @@ $22.90 and produced a nonterminating evaluator path, so no score was available.
 The old controller acquired more behavioral evidence but predates prompt-cache,
 finality, and liveness fixes; it should not replace the current core wholesale.
 
+A one-line executor treatment then restored only the historical controller's
+high-value evidence pattern: enumerate behavior surfaces, batch differential
+probes, and preserve observations across coherent edits. HTML-to-Markdown rose
+from 83.39% to 85.65% and FD from 76.44% to 78.30%, but Grex failed a
+preregistered 20-minute evaluator cutoff because the candidate never advanced
+for `--min-substring-length 0`. That tail rejected the initial wording.
+
+The smallest general correction added boundary and error semantics to the same
+rule. A fresh Grex Session proactively probed the exact zero boundary, preserved
+16 regression cases, and produced an 88.34% candidate at $2.39, versus 54.50%
+at $2.41 for the current baseline. Official evaluation finished in 185 seconds.
+The final wording binds batches to the already enforced action deadline; it
+does not claim the model supplies per-case timeouts. This remains executor-edge
+guidance rather than a normative kernel invariant, and the single fresh run is
+strong diagnostic evidence rather than a causal performance theorem.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -264,6 +280,10 @@ stochastic, and compute was not always matched.
 | `pemistahl__grex.fa3e8ed` | historical Pareto retest, GPT-5.5 high | measurement unavailable | 108 turns, 110 actions | Expensive candidate hung evaluator on invalid input |
 | `johanneskaufmann__html-to-markdown.3006818` | historical Pareto retest, GPT-5.5 high | 84.0678% | 77 turns, 81 actions | +0.68 points at 3.3x current cost |
 | `sharkdp__fd.40d8eb3` | historical Pareto retest, GPT-5.5 high | 87.3684% | 104 turns, 107 actions | +10.93 points at 6.2x current cost |
+| `johanneskaufmann__html-to-markdown.3006818` | bounded evidence frontier, GPT-5.5 high | 85.6497% | 78 turns, 81 actions | +2.26 points at 1.08x current cost |
+| `sharkdp__fd.40d8eb3` | bounded evidence frontier, GPT-5.5 high | 78.2996% | 53 turns, 58 actions | +1.86 points at 0.54x current cost |
+| `pemistahl__grex.fa3e8ed` | bounded evidence frontier, GPT-5.5 high | measurement unavailable | 91 turns, 87 actions | Rejected: zero-boundary candidate hung evaluator |
+| `pemistahl__grex.fa3e8ed` | boundary-evidence correction, GPT-5.5 high | 88.3384% | 61 turns, 63 actions | Exact hang fixed; +33.84 points at baseline cost |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -298,6 +318,8 @@ workspace layout documented by the runbook:
 - [Post-merge three-instance calibration](../../run-artifacts/programbench-postmerge-three-20260810-180829/RESULT.md)
 - [Three-instance evaluated delivery](../../run-artifacts/programbench-evaluated-three-20260810-192321/RESULT.md)
 - [Historical Pareto three-instance retest](../../run-artifacts/programbench-pareto-retest-20260810-215501/RESULT.md)
+- [Evidence-frontier three-instance treatment](../../run-artifacts/programbench-evidence-frontier-20260811-105706/RESULT.md)
+- [Grex boundary-evidence validation](../../run-artifacts/programbench-grex-boundary-20260811-192100/RESULT.md)
 
 ## Decision rule for future additions
 
