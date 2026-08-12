@@ -256,6 +256,15 @@ cutoff while still progressing, so the preregistered three-pair gate is
 inconclusive rather than passed. All candidates packaged and preflighted; all
 three Contract scopes independently discharged and became quiet.
 
+A fresh Hashcards three-arm ablation then separated the institution from its
+executor policy. Ordinary OpenCode scored 79.49%; Contract-only scored 80.77%
+at 28.6% higher cost; full ProContract scored 87.14%, improving 6.38 points over
+Contract-only while using 16.1% less cost and 37.9% fewer turns. The ordinary
+arm had one official `results_read_failed` branch, so its contrast is confounded;
+Contract-only and full had complete evaluations. This localizes the main clean
+gain to proactive evidence routing inside the durable institution, not to
+Contract state machinery alone.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -309,6 +318,9 @@ stochastic, and compute was not always matched.
 | `naggie__dstask.ff57396` | matched ordinary OpenCode, GPT-5.5 high | 26.4476% | 20 turns, 22 actions | Stopped without retrieving mounted reference |
 | `naggie__dstask.ff57396` | matched ProContract, GPT-5.5 high | 63.4585% | 41 turns, 44 actions | +37.01 points at 2.47x cost |
 | `epistates__treemd.825c6dd` | matched screening, GPT-5.5 high | measurement unavailable | 87 / 85 turns | Both arms exceeded evaluator cutoff |
+| `eudoxia0__hashcards.48aa136` | ordinary OpenCode ablation, GPT-5.5 high | 79.4897% | 76 turns, 78 actions | One evaluator branch error; $2.57 |
+| `eudoxia0__hashcards.48aa136` | Contract-only ablation, GPT-5.5 high | 80.7655% | 95 turns, 98 actions | Institution without evidence sentence; $3.30 |
+| `eudoxia0__hashcards.48aa136` | full ProContract, GPT-5.5 high | 87.1443% | 59 turns, 70 actions | +6.38 points vs Contract-only at 16.1% lower cost |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -347,6 +359,7 @@ workspace layout documented by the runbook:
 - [Grex boundary-evidence validation](../../run-artifacts/programbench-grex-boundary-20260811-192100/RESULT.md)
 - [Grex matched A/B pilot](../../run-artifacts/programbench-procontract-pilot-20260811-150337/RESULT.md)
 - [Fresh matched screening](../../run-artifacts/programbench-procontract-screening-20260811-154249/RESULT.md)
+- [Hashcards essential-mechanism ablation](../../run-artifacts/programbench-procontract-ablation-20260811-191048/RESULT.md)
 
 ## Decision rule for future additions
 
