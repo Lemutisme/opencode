@@ -265,6 +265,15 @@ Contract-only and full had complete evaluations. This localizes the main clean
 gain to proactive evidence routing inside the durable institution, not to
 Contract state machinery alone.
 
+That one-task attribution did not replicate uniformly in a frozen four-task
+confirmation. Full improved Tparse by 27.06 points and Keifu by 4.58, but
+regressed Hostctl by 12.08 and Diffr by 10.89. Mean delta remained +2.17 and
+aggregate cost fell 19.1%, yet only two of four pairs were nonnegative and both
+negative tails violated the preregistered tolerance. All eight evaluations and
+Contract lifecycles completed cleanly. The gate therefore rejects the evidence
+sentence as a generally stronger default: it routes attention, but does not
+guarantee observations become retained regressions or justify stopping.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -321,6 +330,10 @@ stochastic, and compute was not always matched.
 | `eudoxia0__hashcards.48aa136` | ordinary OpenCode ablation, GPT-5.5 high | 79.4897% | 76 turns, 78 actions | One evaluator branch error; $2.57 |
 | `eudoxia0__hashcards.48aa136` | Contract-only ablation, GPT-5.5 high | 80.7655% | 95 turns, 98 actions | Institution without evidence sentence; $3.30 |
 | `eudoxia0__hashcards.48aa136` | full ProContract, GPT-5.5 high | 87.1443% | 59 turns, 70 actions | +6.38 points vs Contract-only at 16.1% lower cost |
+| `mfridman__tparse.2416b4b` | Contract-only / full, GPT-5.5 high | 51.7647% / 78.8235% | 118 / 57 turns | Full +27.06 points |
+| `guumaster__hostctl.d6d9699` | Contract-only / full, GPT-5.5 high | 75.7374% / 63.6537% | 62 / 86 turns | Full -12.08 points |
+| `mookid__diffr.2152742` | Contract-only / full, GPT-5.5 high | 88.4488% / 77.5578% | 85 / 45 turns | Full -10.89 points |
+| `trasta298__keifu.3331426` | Contract-only / full, GPT-5.5 high | 60.3053% / 64.8855% | 54 / 69 turns | Full +4.58 points |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -360,6 +373,7 @@ workspace layout documented by the runbook:
 - [Grex matched A/B pilot](../../run-artifacts/programbench-procontract-pilot-20260811-150337/RESULT.md)
 - [Fresh matched screening](../../run-artifacts/programbench-procontract-screening-20260811-154249/RESULT.md)
 - [Hashcards essential-mechanism ablation](../../run-artifacts/programbench-procontract-ablation-20260811-191048/RESULT.md)
+- [Four-task evidence-policy confirmation](../../run-artifacts/programbench-procontract-confirmation-20260812-003824/RESULT.md)
 
 ## Decision rule for future additions
 
