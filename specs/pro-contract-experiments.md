@@ -242,6 +242,16 @@ expansion, which needs admitted falsifiers, from semantic-invariant propagation,
 which needs an explicit impact cone. m2 over-constrained the latter and missed a
 stale help identity that m1 repaired. Recursive depth two is not established.
 
+The rejected m2 result was then represented in an append-only speculative DAG
+rather than overwriting m1. A real archive contained m1, rejected m2 with its
+Eva falsifier, sibling invariant/local proposals, one repair child of m2, and a
+two-parent hybrid merge. The deterministic linear baseline selected m1; the
+node-UCB baseline selected all three unvisited branches first. Unit tests also
+cover multi-parent reconstruction, idempotent retries, conflicting evidence,
+forward-parent rejection, explicit closure, and retention of rejected repair
+parents. This is a mechanism test for search-policy separation, not evidence
+that UCB or MCTS improves capability.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -297,6 +307,7 @@ workspace layout documented by the runbook:
 - [YJ witness inheritance and assurance tiling](../../run-artifacts/procontract-witness-yj-20260811/RESULT.md)
 - [One-step governed improver self-improvement](../../run-artifacts/procontract-rsi-metaproductivity-luna-max-20260811/RESULT.md)
 - [Preregistered m2 confirmation screen](../../run-artifacts/procontract-rsi-m2-confirmation-luna-max-20260811/RESULT.md)
+- [Speculative m1/m2 search graph](../../run-artifacts/procontract-rsi-search-graph-20260811/search.jsonl)
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 - [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
 - [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)

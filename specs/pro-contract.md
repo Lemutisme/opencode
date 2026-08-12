@@ -825,6 +825,32 @@ an independently discharged Assurance Contract binds the later head after every
 protected witness passes. Thus failures are inherited as obligations until
 repair, while verified repairs are inherited as assurance after adoption.
 
+### Speculative improvement graph
+
+Recursive search is not itself a normative state machine. OpenCode may maintain
+an append-only advisory graph whose nodes are content-addressed improver
+manifests and whose edges name one or more already-known parents. Multiple
+parents represent an explicit merge; requiring parents to precede children in
+the log makes the structure a DAG without a separate cycle algorithm. Proposed,
+evaluated, rejected, closed, and externally promoted events are sufficient to
+reconstruct it.
+
+```text
+epistemic search = branching DAG
+normative succession = one assurance-carrying chain
+```
+
+Rejected nodes remain available as repair parents and retain their falsifiers.
+Only an explicit close removes a node from further search. A deterministic
+linear selector and node-level UCB selector provide initial baselines through
+`packages/opencode/script/select-improvement-search.ts`. UCB is only a budget
+allocation heuristic: unvisited nodes are explored first, capability minus
+regression supplies the current value estimate, invalid runs are penalized, and
+cost breaks ties. It is not claimed as full MCTS and cannot issue, attest, or
+promote anything. Any search policy may be replaced without weakening
+ProContract's invariant that only an assurance-closed edge can change the
+canonical frontier.
+
 A discharged policy becomes usable by a future Contract only through an
 explicit `requires` edge marked `policy: true`. This first retention boundary
 does not select the newest candidate or maintain a mutable global policy

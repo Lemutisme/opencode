@@ -632,6 +632,36 @@ rejected report cannot decode as a frontier because its decision is not
 interprets World Model predictions. Capture an accepted report in an ordinary
 read-only Transition Contract; its exact handoff is the next frontier.
 
+### 4.12 Speculative improvement graph
+
+Keep search state outside ProContract Core as append-only JSON Lines. A node is
+the exact improver manifest hash; `parents` creates a branch or merge:
+
+```jsonl
+{"type":"proposed","node":"m1-hash","parents":[],"mutation":"incumbent"}
+{"type":"evaluated","node":"m1-hash","campaign":"c1","capability":0.1,"regression":0,"cost":1.0,"valid":true}
+{"type":"proposed","node":"m2-hash","parents":["m1-hash"],"mutation":"admission-only"}
+{"type":"rejected","node":"m2-hash","falsifier":"evidence-hash"}
+{"type":"proposed","node":"m3-hash","parents":["m1-hash","m2-hash"],"mutation":"invariant-plus-admission"}
+```
+
+Exact retries are idempotent; conflicting proposals/evaluations, unknown or
+forward parents, and conflicting closures fail closed. Rejection records a
+falsifier but deliberately leaves the node available as a repair parent.
+
+Compare a linear incumbent baseline with advisory UCB scheduling:
+
+```bash
+cd packages/opencode
+bun run script/select-improvement-search.ts "$RUN_DIR/search.jsonl" linear 1
+bun run script/select-improvement-search.ts "$RUN_DIR/search.jsonl" ucb 3
+```
+
+The selector only returns nodes to evaluate or expand. It does not mutate the
+log, run an improver, interpret sealed evidence, or perform promotion. Feed a
+selected winner through the ordinary Assurance Contract and transition checker;
+never treat search score as settlement evidence.
+
 ## 5. MLE-bench: one CPU-friendly instance
 
 The recommended local smoke instance is:
