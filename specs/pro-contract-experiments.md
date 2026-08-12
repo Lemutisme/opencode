@@ -247,6 +247,15 @@ evidence, while ordinary OpenCode missed it. Both evaluators terminated. This
 validates the matched protocol and supplies a strong Pareto signal, but remains
 one stochastic pair on a development instance.
 
+A frozen three-instance fresh screening then produced two measurable pairs.
+ProContract improved RnR from 88.58% to 91.80% at 31.5% lower cost and Dstask
+from 26.45% to 63.46% at 2.47x cost. On Dstask, ordinary OpenCode stopped
+without finding the mounted reference; ProContract issued 15 reference-bearing
+probe batches. Both Treemd arms exceeded an uncalibrated 20-minute TUI evaluator
+cutoff while still progressing, so the preregistered three-pair gate is
+inconclusive rather than passed. All candidates packaged and preflighted; all
+three Contract scopes independently discharged and became quiet.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -295,6 +304,11 @@ stochastic, and compute was not always matched.
 | `pemistahl__grex.fa3e8ed` | boundary-evidence correction, GPT-5.5 high | 88.3384% | 61 turns, 63 actions | Exact hang fixed; +33.84 points at baseline cost |
 | `pemistahl__grex.fa3e8ed` | matched ordinary OpenCode, GPT-5.5 high | 80.8689% | 100 turns, 99 actions | Paired protocol pilot baseline; $4.07 |
 | `pemistahl__grex.fa3e8ed` | matched ProContract, GPT-5.5 high | 88.5671% | 58 turns, 59 actions | +7.70 points at 34.6% lower cost |
+| `ismaelgv__rnr.fc0733b` | matched ordinary OpenCode, GPT-5.5 high | 88.5798% | 99 turns, 102 actions | Fresh screening baseline; $3.26 |
+| `ismaelgv__rnr.fc0733b` | matched ProContract, GPT-5.5 high | 91.8009% | 76 turns, 82 actions | +3.22 points at 31.5% lower cost |
+| `naggie__dstask.ff57396` | matched ordinary OpenCode, GPT-5.5 high | 26.4476% | 20 turns, 22 actions | Stopped without retrieving mounted reference |
+| `naggie__dstask.ff57396` | matched ProContract, GPT-5.5 high | 63.4585% | 41 turns, 44 actions | +37.01 points at 2.47x cost |
+| `epistates__treemd.825c6dd` | matched screening, GPT-5.5 high | measurement unavailable | 87 / 85 turns | Both arms exceeded evaluator cutoff |
 
 The Pareto result is the simplified implementation at
 `af579a44e4445a008119d8a38a3a22df85217bb5`. On Typst it recovered to
@@ -332,6 +346,7 @@ workspace layout documented by the runbook:
 - [Evidence-frontier three-instance treatment](../../run-artifacts/programbench-evidence-frontier-20260811-105706/RESULT.md)
 - [Grex boundary-evidence validation](../../run-artifacts/programbench-grex-boundary-20260811-192100/RESULT.md)
 - [Grex matched A/B pilot](../../run-artifacts/programbench-procontract-pilot-20260811-150337/RESULT.md)
+- [Fresh matched screening](../../run-artifacts/programbench-procontract-screening-20260811-154249/RESULT.md)
 
 ## Decision rule for future additions
 
