@@ -252,6 +252,19 @@ forward-parent rejection, explicit closure, and retention of rejected repair
 parents. This is a mechanism test for search-policy separation, not evidence
 that UCB or MCTS improves capability.
 
+A preregistered SD-to-Figlet generalization screen then evaluated m1, rejected
+m2, and a task-blind two-parent hybrid m3. All nodes closed their witnesses and
+all six official evaluations were finite and error-free. After the shared SD
+campaign, m2 led with 760/810 active passes versus 758 for m1 and m3, so the
+frozen node-UCB baseline selected m2 while linear retained m1. On Figlet, m2
+passed 695/872 versus 696 for both m1 and m3. UCB therefore underperformed
+linear and failed to select a best node. The frozen rule rejected the heuristic.
+The point estimate also continued to rank m2 first after both campaigns because
+its small mean gain outweighed one regression. This separates repair-parent
+exploration from incumbent challenge: UCB may schedule further work on a
+rejected node, but promotion needs paired multi-campaign lower confidence bounds
+and a lexicographic no-regression rule.
+
 ## Calibration results
 
 These runs are mechanism calibrations, not causal performance claims. The
@@ -276,6 +289,7 @@ stochastic, and compute was not always matched.
 | `sclevine__yj.8016400` | witness inheritance + assurance v2 | 89.0482% | 5 falsifiers, 2 accepted generations | Higher-scoring regression rejected; directed repair preserved all 825 official statuses |
 | `shashwatah__jot.a92aad8` + `tomnomnom__gron.88a6234` | m0 vs MetaContract m1 | 856/976 → 867/976 | 2 paired campaigns | +1.13 micro pp with 26.7% fewer actions and 32.8% lower cost; not promoted |
 | `oppiliappan__eva.41ae245` + `anordal__shellharden.6a6ffd4` | preregistered m1 vs m2 | 1778/2008 → 1773/2008 | 2 paired campaigns | m2 rejected: -5 passes, +17% actions, +30% cost |
+| `chmln__sd.87d1ba5` → `cmatsuoka__figlet.202a0a8` | linear vs node-UCB | UCB selected 760/810 m2; next task 695/872 vs linear 696/872 | 3 nodes, 1 transition | node-UCB rejected; valid graph mechanism, failed selector generalization |
 | `sitkevij__hex` | later controllers | 98.5419% | multiple variants | Plateau; added control logic did not improve the score |
 | `miserlou__loop.209927c` | evidence frontier, Luna Max | 74.6479% | 1 attempt, 181 turns | Rejected; 27 gains, 149 regressions, 154 timeout failures |
 | `miserlou__loop.209927c` | policy screening, Luna Max | P0 93.38%; invariants 92.68%/80.00%; probes 75.92%; simplicity 81.55% | matched development runs | No candidate survived replicate/tail-risk gates; no validation or holdout opened |
@@ -308,6 +322,7 @@ workspace layout documented by the runbook:
 - [One-step governed improver self-improvement](../../run-artifacts/procontract-rsi-metaproductivity-luna-max-20260811/RESULT.md)
 - [Preregistered m2 confirmation screen](../../run-artifacts/procontract-rsi-m2-confirmation-luna-max-20260811/RESULT.md)
 - [Speculative m1/m2 search graph](../../run-artifacts/procontract-rsi-search-graph-20260811/search.jsonl)
+- [Preregistered node-UCB generalization screen](../../run-artifacts/procontract-rsi-search-validation-luna-max-20260812/RESULT.md)
 - [Loop evidence frontier](../../run-artifacts/programbench-loop-frontier-luna-max-20260809-113915/RESULT.md)
 - [MetaContract policy binding](../../run-artifacts/metacontract-policy-e2e-20260809-150615/RESULT.md)
 - [MetaContract default policy](../../run-artifacts/metacontract-default-policy-e2e-20260809-152643/RESULT.md)
