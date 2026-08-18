@@ -5,6 +5,9 @@ It is an experiment index, not part of the ProContract protocol. The normative
 design is in [`pro-contract.md`](pro-contract.md), and operational procedures
 are in [`pro-contract-runbook.md`](pro-contract-runbook.md).
 
+Current governed-RSI status, repository coordinates, and Linux restart steps
+are in [`rsi-status-and-linux-plan.md`](rsi-status-and-linux-plan.md).
+
 ## Default boundary
 
 The retained OpenCode path is deliberately small:
