@@ -688,11 +688,32 @@ describe("SessionRunnerLLM", () => {
         time: Date.now(),
       })
       yield* contracts.principalAttest({ contractID: dependencyID, evidenceHash: "dependency-evidence" })
+      const prerequisiteID = ProContract.ID.make("pct_runner_prerequisite")
+      const prerequisiteSpec = ProContract.defaultSpec("Establish the verified prerequisite", Date.now())
+      yield* contracts.issue({
+        id: prerequisiteID,
+        scope: "runner",
+        spec: prerequisiteSpec,
+        executor: "prerequisite",
+      })
+      yield* contracts.activate(prerequisiteID, 1, Date.now())
+      yield* contracts.reportReady({
+        contractID: prerequisiteID,
+        revision: 1,
+        summary: "verified prerequisite complete",
+        uncertainties: [],
+        subjectHash: "prerequisite-subject",
+        time: Date.now(),
+      })
+      yield* contracts.principalAttest({ contractID: prerequisiteID, evidenceHash: "prerequisite-evidence" })
       const spec = {
         ...ProContract.defaultSpec("Inspect the repository without changing it", Date.now()),
         authority: ["filesystem.read", "organization.approve"],
         brief: "The failing behavior is isolated to argument parsing.",
-        requires: [{ contractID: dependencyID, revision: 1, policy: true as const }],
+        requires: [
+          { contractID: dependencyID, revision: 1, policy: true as const },
+          { contractID: prerequisiteID, revision: 1 },
+        ],
         evidence: { type: "principal" as const, claim: "Repository inspection evidence is available" },
       }
       const issued = yield* contracts.issue({
@@ -760,13 +781,12 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(dependencySpec.policy)
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Ratified execution policy")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "the Contract terms and delegated authority remain controlling",
+        "cannot change the Contract terms, delegated authority, or settlement claim",
       )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("never what counts as adequate")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "settlement evidence prove only the settlement claim",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("Verified prerequisites:")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Verified prerequisites:")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${prerequisiteID}@1`)
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(prerequisiteSpec.goal)
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("verified prerequisite complete")
       expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain("Remaining shared budget:")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         `Shared ceiling: ${spec.budget.turns} provider turns and ${spec.budget.actions} tool actions`,
@@ -785,8 +805,10 @@ describe("SessionRunnerLLM", () => {
         role: "system",
         content: [{ type: "text", text: expect.stringContaining("Settlement window active") }],
       })
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("dependency-evidence")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("dependency-subject")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("dependency-evidence")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("dependency-subject")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("prerequisite-evidence")
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("prerequisite-subject")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("waiting for a reproducible input")
       expect(
         (yield* session.messages({ sessionID: blockedAttempt!.sessionID })).some(
@@ -856,10 +878,10 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(2)
       expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Independent output mismatch")
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("negative-witness")
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).not.toContain("negative-witness")
       expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("candidate-subject")
       expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Offline build regressed")
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("offline-witness")
+      expect(requests[1]?.system.map((part) => part.text).at(-1)).not.toContain("offline-witness")
       expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("candidate-subject-2")
 
       yield* contracts.release({ contractID: contract.id, reason: "test complete" })

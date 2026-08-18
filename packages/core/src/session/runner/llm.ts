@@ -332,8 +332,7 @@ const layer = Layer.effect(
                   ? [
                       `Ratified execution policy from ${contractPolicy.dependency.id}@${contractPolicy.dependency.revision}:`,
                       contractPolicyText,
-                      `Policy evidence: spec ${contractPolicy.dependency.specHash}, attestation ${contractPolicy.attestation.id}, evidence ${contractPolicy.attestation.evidenceHash}, subject ${contractPolicy.attestation.subjectHash}.`,
-                      "This policy guides execution only; the Contract terms and delegated authority remain controlling. It may change how you search, never what counts as adequate: it cannot weaken the optimization goal, Handoff brief criteria, or issuer stopping rule. Packaging, preflight, and settlement evidence prove only the settlement claim unless the Contract explicitly says otherwise.",
+                      "This policy may guide execution but cannot change the Contract terms, delegated authority, or settlement claim.",
                     ]
                   : []),
                 ...(contract.blocked ? ["Previous attempt blocked:", contract.blocked.reason] : []),
@@ -342,11 +341,8 @@ const layer = Layer.effect(
                       "Rejected attempts from this revision; reuse their completed checks before new exploration:",
                       ...contractChallenges.map(
                         (challenge) =>
-                          `${challenge.summary ?? "Verification failed"}\nRejected subject: ${challenge.subjectHash}\nNegative witness: ${challenge.evidenceHash}`,
+                          `${challenge.summary ?? "Verification failed"}\nRejected subject: ${challenge.subjectHash}`,
                       ),
-                      ...(contract.challenge?.attestationID
-                        ? [`Challenged attestation: ${contract.challenge.attestationID}`]
-                        : []),
                     ]
                   : []),
                 ...(contractDependencies.some((item) => !item.requirement.policy)
@@ -356,10 +352,7 @@ const layer = Layer.effect(
                         .filter((item) => !item.requirement.policy)
                         .map(
                           (item) =>
-                            `${item.dependency.id}@${item.dependency.revision}: ${item.dependency.spec.goal} ` +
-                            `(attestation ${item.attestation.id}, evidence ${item.attestation.evidenceHash}, ` +
-                            `subject ${item.attestation.subjectHash}, ` +
-                            `verifier ${item.attestation.verifierID}/${item.attestation.class})` +
+                            `${item.dependency.id}@${item.dependency.revision}: ${item.dependency.spec.goal}` +
                             (item.dependency.handoff ? `; handoff: ${item.dependency.handoff.summary}` : ""),
                         ),
                     ]
@@ -367,8 +360,8 @@ const layer = Layer.effect(
                 `Delegated authority: ${contract.spec.authority.join(", ")}.`,
                 `Shared ceiling: ${contract.spec.budget.turns} provider turns and ${contract.spec.budget.actions} tool actions; deadline ${contract.spec.budget.deadline}. The institution enforces this ceiling.`,
                 `Evidence policy: ${JSON.stringify(contract.spec.evidence)}.`,
-                "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
-                "Optimize the goal within the approved budget. The settlement claim is the proposition the institution may certify; it is a minimum admissibility boundary, not the optimization target. Petition verification when the issuer's stopping rule is met and the evidence policy can adjudicate its claim. Otherwise report blocked or petition a revision.",
+                "Use only that authority. You may report ready, report blocked, or propose a revision; you cannot discharge, release, or change this Contract.",
+                "Optimize the goal within the ceiling. The settlement claim is the minimum admissibility boundary, not the optimization target. Report ready only when the evidence policy can adjudicate that claim.",
                 "</pro_contract>",
               ].join("\n")
             : contractBinding && contract

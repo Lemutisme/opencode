@@ -143,6 +143,13 @@ Core may bind the identities of adapter-owned manifests. It must not interpret
 their task-specific mechanics unless removing that interpretation would violate
 a kernel invariant.
 
+The executor projection is capability-shaped, not an audit dump. It includes
+the actionable duty terms, ratified execution inputs, visible defeaters,
+delegated authority, limits, and settlement protocol. Exact attestation,
+evidence, verifier, and ledger identities remain mandatory in institutional
+state and decisions, but need not enter a model prompt when the executor cannot
+inspect or act on them.
+
 ## Admission tests for Core
 
 A concept belongs in ProContract Core only if removing it would permit at least
