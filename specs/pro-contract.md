@@ -2,6 +2,8 @@
 
 Operational commands for building OpenCode and running ProContract with
 MLE-bench or ProgramBench are in [`pro-contract-runbook.md`](pro-contract-runbook.md).
+The minimal admission rule for ProContract Core is in
+[`pro-contract-constitution.md`](pro-contract-constitution.md).
 Non-default controller designs and their calibration results are indexed in
 [`pro-contract-experiments.md`](pro-contract-experiments.md).
 The current branch disposition, evidence report, and native-Linux continuation
