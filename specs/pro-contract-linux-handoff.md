@@ -153,6 +153,11 @@ configuration flag.
 
 ### Phase 2: audit the truth boundary
 
+The current boundary audit is recorded in
+[`pro-contract-truth-boundary.md`](./pro-contract-truth-boundary.md). It finds
+that coordinate binding and deterministic rejection are enforced, while final
+principal evidence provenance and claim semantics remain external trust.
+
 Trace the existing path from frozen evidence terms through replay, attestation,
 kernel adjudication, challenge, and reopening. Record exactly where the current
 flow trusts principal-supplied hashes or external orchestration.
