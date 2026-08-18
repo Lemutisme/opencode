@@ -11,19 +11,18 @@ describe("ProContract constitution", () => {
       'import { ProContract } from "@opencode-ai/schema/pro-contract"',
       'import { Hash } from "../util/hash"',
     ])
-    expect(commands).toEqual([
+    for (const essential of [
       "issue",
+      "activate",
+      "report-ready",
       "petition-revision",
       "decide-revision",
       "discharge",
-      "activate",
-      "resume",
       "challenge",
-      "report-ready",
-      "report-blocked",
-      "escalate",
       "release",
     ])
+      expect(commands).toContain(essential)
+    expect(new Set(commands).size).toBe(commands.length)
 
     for (const forbidden of [
       'from "effect"',

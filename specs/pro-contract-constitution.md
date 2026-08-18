@@ -65,7 +65,7 @@ The irreducible state contains:
   execute;
 - an append-only decision frontier.
 
-The irreducible transition vocabulary is:
+The current reducer exposes these commands:
 
 ```text
 issue
@@ -80,6 +80,12 @@ escalate
 resume
 release
 ```
+
+The exact command names and count are not constitutional. Their irreducible
+authority-changing categories are admission, activation, candidate petition,
+issuer amendment, settlement, defeater, and outstanding-work routing. A future
+simplification may combine or remove routing commands if every invariant and
+audit event remains explicit.
 
 Only `discharged` and issuer-authorized `released` are quiet. `escalated` is
 routing, not settlement.
