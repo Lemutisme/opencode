@@ -797,6 +797,15 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         "minimum admissibility boundary, not the optimization target",
       )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "settlement claim is the proposition the institution may certify",
+      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "Petition verification when the issuer's stopping rule is met",
+      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "Otherwise report blocked or petition a revision",
+      )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("For behavior-matching work")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         `Evidence policy: ${JSON.stringify(spec.evidence)}`,

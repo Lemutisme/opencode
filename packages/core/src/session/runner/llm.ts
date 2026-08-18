@@ -360,8 +360,8 @@ const layer = Layer.effect(
                 `Delegated authority: ${contract.spec.authority.join(", ")}.`,
                 `Shared ceiling: ${contract.spec.budget.turns} provider turns and ${contract.spec.budget.actions} tool actions; deadline ${contract.spec.budget.deadline}. The institution enforces this ceiling.`,
                 `Evidence policy: ${JSON.stringify(contract.spec.evidence)}.`,
-                "Use only that authority. You may report ready, report blocked, or propose a revision; you cannot discharge, release, or change this Contract.",
-                "Optimize the goal within the ceiling. The settlement claim is the minimum admissibility boundary, not the optimization target. Report ready only when the evidence policy can adjudicate that claim.",
+                "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
+                "Optimize the goal within the approved budget. The settlement claim is the proposition the institution may certify; it is a minimum admissibility boundary, not the optimization target. Petition verification when the issuer's stopping rule is met and the evidence policy can adjudicate its claim. Otherwise report blocked or petition a revision.",
                 "</pro_contract>",
               ].join("\n")
             : contractBinding && contract
