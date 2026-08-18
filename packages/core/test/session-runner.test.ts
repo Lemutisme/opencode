@@ -690,6 +690,7 @@ describe("SessionRunnerLLM", () => {
       yield* contracts.principalAttest({ contractID: dependencyID, evidenceHash: "dependency-evidence" })
       const spec = {
         ...ProContract.defaultSpec("Inspect the repository without changing it", Date.now()),
+        authority: ["filesystem.read", "organization.approve"],
         brief: "The failing behavior is isolated to argument parsing.",
         requires: [{ contractID: dependencyID, revision: 1, policy: true as const }],
         evidence: { type: "principal" as const, claim: "Repository inspection evidence is available" },
@@ -769,6 +770,9 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain("Remaining shared budget:")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         `Shared ceiling: ${spec.budget.turns} provider turns and ${spec.budget.actions} tool actions`,
+      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
+        "Delegated authority: filesystem.read, organization.approve",
       )
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         "minimum admissibility boundary, not the optimization target",

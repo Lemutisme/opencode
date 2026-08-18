@@ -2829,7 +2829,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -2861,7 +2861,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -2893,7 +2893,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -2925,7 +2925,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -2957,7 +2957,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -2989,7 +2989,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3021,7 +3021,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3053,7 +3053,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3085,7 +3085,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3117,7 +3117,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3149,7 +3149,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3181,7 +3181,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3213,7 +3213,7 @@ export type ServerProContractIssueInput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
-    readonly authority?: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute"> | null
+    readonly authority?: ReadonlyArray<string> | null
     readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
@@ -3247,7 +3247,7 @@ export type ServerProContractIssueOutput = {
         readonly revision: number
         readonly policy?: true
       }>
-      readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+      readonly authority: ReadonlyArray<string>
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
@@ -3304,7 +3304,7 @@ export type ServerProContractIssueOutput = {
           readonly revision: number
           readonly policy?: true
         }>
-        readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+        readonly authority: ReadonlyArray<string>
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
@@ -3361,7 +3361,7 @@ export type ServerProContractListOutput = {
         readonly revision: number
         readonly policy?: true
       }>
-      readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+      readonly authority: ReadonlyArray<string>
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
@@ -3418,7 +3418,7 @@ export type ServerProContractListOutput = {
           readonly revision: number
           readonly policy?: true
         }>
-        readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+        readonly authority: ReadonlyArray<string>
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
@@ -3470,7 +3470,7 @@ export type ServerProContractGetOutput = {
         readonly revision: number
         readonly policy?: true
       }>
-      readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+      readonly authority: ReadonlyArray<string>
       readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
@@ -3527,7 +3527,7 @@ export type ServerProContractGetOutput = {
           readonly revision: number
           readonly policy?: true
         }>
-        readonly authority: ReadonlyArray<"filesystem.read" | "filesystem.write" | "process.execute">
+        readonly authority: ReadonlyArray<string>
         readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"

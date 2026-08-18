@@ -6173,7 +6173,7 @@ export type ProContractTrigger =
       at: number
     }
 
-export type ProContractCapability = "filesystem.read" | "filesystem.write" | "process.execute"
+export type ProContractCapability = string
 
 export type ProContractBudget = {
   /**

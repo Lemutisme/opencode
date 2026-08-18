@@ -62,6 +62,15 @@ describe("contract hygiene", () => {
     expect(() => decode({ contractID: "pct_policy", revision: 1, policy: false })).toThrow()
   })
 
+  test("contract authority identifiers stay adapter-defined", () => {
+    const decode = Schema.decodeUnknownSync(Schema.Array(ProContract.Capability))
+    expect(decode(["filesystem.read", "organization.approve"])).toEqual([
+      "filesystem.read",
+      "organization.approve",
+    ])
+    expect(() => decode([""])).toThrow()
+  })
+
   test("reusable public identifiers are stable and unique", () => {
     const identifiers = [
       Agent.Color,

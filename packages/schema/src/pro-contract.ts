@@ -31,8 +31,10 @@ export const Trigger = Schema.Union([
 ]).annotate({ identifier: "ProContract.Trigger" })
 export type Trigger = typeof Trigger.Type
 
-export const Capability = Schema.Literals(["filesystem.read", "filesystem.write", "process.execute"]).annotate({
+export const Capability = Schema.NonEmptyString.annotate({
   identifier: "ProContract.Capability",
+  description:
+    "Adapter-defined delegated authority identifier. The normative kernel binds it; each execution adapter interprets only identifiers it recognizes.",
 })
 export type Capability = typeof Capability.Type
 
