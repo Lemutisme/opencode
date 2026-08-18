@@ -773,9 +773,7 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         "minimum admissibility boundary, not the optimization target",
       )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "boundary and error semantics",
-      )
+      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("For behavior-matching work")
       expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
         `Evidence policy: ${JSON.stringify(spec.evidence)}`,
       )

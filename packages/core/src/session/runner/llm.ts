@@ -368,7 +368,6 @@ const layer = Layer.effect(
                 `Shared ceiling: ${contract.spec.budget.turns} provider turns and ${contract.spec.budget.actions} tool actions; deadline ${contract.spec.budget.deadline}. The institution enforces this ceiling.`,
                 `Evidence policy: ${JSON.stringify(contract.spec.evidence)}.`,
                 "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
-                "For behavior-matching work, enumerate documented surfaces, boundary and error semantics, and material interactions. Use batched differential probes within the action deadline, then preserve observations as regression checks after coherent edits; delivery replay alone is not a behavioral stopping condition.",
                 "Optimize the goal within the approved budget. The settlement claim is the proposition the institution may certify; it is a minimum admissibility boundary, not the optimization target. Petition verification when the issuer's stopping rule is met and the evidence policy can adjudicate its claim. Otherwise report blocked or petition a revision.",
                 "</pro_contract>",
               ].join("\n")
