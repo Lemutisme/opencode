@@ -150,14 +150,16 @@ responsibility instead of erasing history.
 | Principal `evidenceHash` | Authenticated HTTP caller or local CLI | Nonempty, exact attestation coordinates, issuer role, distinct from replay hash | Report availability, bytes matching the hash, report schema, pass rule, verifier origin, signature, independence beyond hash inequality, or whether it settles `evidence.claim` |
 | Challenge `evidenceHash`, disclosure, summary | Authenticated HTTP caller or local CLI | Current revision/subject, issuer role, disclosure/summary consistency | Report availability, evaluator authenticity, or truth of the negative result |
 | `evaluatorHash` and `EvaluationReport` | External evaluation adapter | Evaluation ID/dependency/executor coordinates and delivery revision/subject | That the hash names the running evaluator, the report came from it, or its `passed` value follows a frozen rule |
-| HTTP principal identity | Server-wide Basic auth | One configured username/password when enabled | Per-verifier roles, route-scoped credentials, report signatures, or separation among authenticated callers |
+| HTTP principal identity | Principal mutation middleware plus server-wide Basic auth | Mutation is denied when auth is absent; one configured username/password is checked when enabled | Per-verifier roles, distinct principal credentials, report signatures, or separation among authenticated callers |
 | Local CLI principal identity | Process and filesystem boundary | Local service constructs fixed `local-owner` role | OS-level separation from an executor that can reach the same control process or state |
 | Database ledger | Local institution process | Transactional state/event/head consistency while writing | External checkpoint, signature, remote witness, or tamper detection after a trusted database rewrite |
 
-An explicitly unsecured server grants its callers principal authority. Embedded
-routes are likewise a same-process convenience boundary, not an adversarial
-principal boundary. These modes are valid for local mechanism tests but cannot
-support a claim that an untrusted executor is unable to reach principal routes.
+An explicitly unsecured server permits read-only Contract observation but
+denies principal mutations. Embedded routes are likewise unable to mutate
+Contracts without configured authentication. A single authenticated process is
+still a convenience boundary, not an adversarial principal boundary: these
+modes cannot support a non-bypass claim when an untrusted executor can recover
+the server credential or reach the plane database directly.
 
 ## External evaluation adapter
 

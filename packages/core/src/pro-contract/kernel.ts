@@ -107,6 +107,8 @@ export type Result = {
 
 export const empty: State = { contracts: {}, attestations: {} }
 
+const institutionCommands = new Set<Command["type"]>(["activate", "report-ready", "report-blocked", "escalate"])
+
 export function hashSpec(spec: ProContract.Spec) {
   return Hash.sha256(JSON.stringify(ProContract.Spec.make(spec)))
 }
@@ -168,6 +170,8 @@ export function transition(state: State, command: Command): Result {
 
   const contract = state.contracts[command.contractID]
   if (!contract) return reject("contract not found")
+  if (institutionCommands.has(command.type) && command.actor !== "institution")
+    return reject("institution command requires institution actor")
 
   if (command.type === "challenge") {
     if (command.actor !== contract.issuer) return reject("only the issuer may challenge verification")

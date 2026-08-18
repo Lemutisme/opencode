@@ -309,6 +309,65 @@ describe("ProContract kernel", () => {
     expect(result.event).toEqual({ command, decision: result.decision })
   })
 
+  test("rejects forged institution commands at the reducer boundary", () => {
+    const issued = ProContract.transition(ProContract.empty, issue)
+    const forgedActivate = {
+      type: "activate",
+      actor: draft.executor,
+      contractID,
+      revision: 1,
+      time: 0,
+    } as unknown as ProContract.Command
+    const rejected = ProContract.transition(issued.state, forgedActivate)
+
+    expect(rejected.decision).toEqual({ type: "rejected", reason: "institution command requires institution actor" })
+    expect(rejected.state).toBe(issued.state)
+    expect(rejected.event).toEqual({ command: forgedActivate, decision: rejected.decision })
+
+    const activated = ProContract.transition(issued.state, {
+      ...forgedActivate,
+      actor: "institution",
+    } as ProContract.Command)
+    const commands = [
+      {
+        type: "report-ready",
+        actor: draft.executor,
+        contractID,
+        revision: 1,
+        summary: "forged candidate",
+        uncertainties: [],
+        subjectHash,
+        time: 0,
+      },
+      {
+        type: "report-blocked",
+        actor: draft.executor,
+        contractID,
+        revision: 1,
+        reason: "forged block",
+        time: 0,
+      },
+      {
+        type: "escalate",
+        actor: draft.executor,
+        contractID,
+        revision: 1,
+        reason: "forged escalation",
+        time: 0,
+      },
+    ] as unknown as ReadonlyArray<ProContract.Command>
+
+    for (const command of commands) {
+      const result = ProContract.transition(activated.state, command)
+      expect(result.decision).toEqual({
+        type: "rejected",
+        reason: "institution command requires institution actor",
+      })
+      expect(result.state).toBe(activated.state)
+      expect(result.event).toEqual({ command, decision: result.decision })
+    }
+  })
+
   test("accepts revision only through issuer decision", () => {
     const issued = ProContract.transition(ProContract.empty, issue)
     const nextSpec = { ...spec, goal: "Ship the revised verified change" }

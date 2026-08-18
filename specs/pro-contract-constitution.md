@@ -191,6 +191,11 @@ The current local deployment is also cooperative. Strong non-bypass is not
 established until the executor cannot access principal credentials, mutation
 routes, the plane database, or verifier evidence storage.
 
+Principal HTTP mutations fail closed when server authentication is absent, and
+the reducer validates institution-only actors at runtime. This closes accidental
+unsecured mutation and forged in-memory commands; it does not replace process,
+credential, database, and network isolation between a host plane and worker.
+
 ## Change gate
 
 Every ProContract Core change must state:

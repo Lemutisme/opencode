@@ -1,7 +1,7 @@
 import { ServerAuth } from "../auth"
 import { UnauthorizedError } from "@opencode-ai/protocol/errors"
-import { Authorization } from "@opencode-ai/protocol/middleware/authorization"
-export { Authorization } from "@opencode-ai/protocol/middleware/authorization"
+import { Authorization, PrincipalAuthorization } from "@opencode-ai/protocol/middleware/authorization"
+export { Authorization, PrincipalAuthorization } from "@opencode-ai/protocol/middleware/authorization"
 import { hasPtyConnectTicketURL } from "@opencode-ai/protocol/groups/pty"
 import { Effect, Encoding, Layer, Redacted } from "effect"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -35,6 +35,13 @@ function credentialFromRequest(request: HttpServerRequest.HttpServerRequest) {
   return Effect.succeed(emptyCredential())
 }
 
+const unauthorized = Effect.fnUntraced(function* () {
+  yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
+  )
+  return yield* new UnauthorizedError({ message: "Authentication required" })
+})
+
 export const authorizationLayer = Layer.effect(
   Authorization,
   Effect.gen(function* () {
@@ -48,10 +55,22 @@ export const authorizationLayer = Layer.effect(
         if (hasPtyConnectTicketURL(new URL(request.url, "http://localhost"))) return yield* effect
         const credential = yield* credentialFromRequest(request)
         if (ServerAuth.authorized(credential, config)) return yield* effect
-        yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-          Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
-        )
-        return yield* new UnauthorizedError({ message: "Authentication required" })
+        return yield* unauthorized()
+      }),
+    )
+  }),
+)
+
+export const principalAuthorizationLayer = Layer.effect(
+  PrincipalAuthorization,
+  Effect.gen(function* () {
+    const config = yield* ServerAuth.Config
+    return PrincipalAuthorization.of((effect) =>
+      Effect.gen(function* () {
+        if (!ServerAuth.required(config)) return yield* unauthorized()
+        const credential = yield* credentialFromRequest(yield* HttpServerRequest.HttpServerRequest)
+        if (ServerAuth.authorized(credential, config)) return yield* effect
+        return yield* unauthorized()
       }),
     )
   }),

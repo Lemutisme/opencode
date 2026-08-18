@@ -181,6 +181,12 @@ expressed with the existing replay/evidence structures. If public Protocol or
 Server `HttpApi` changes, regenerate clients with `bun run generate` from
 `packages/client`; never edit generated sources directly.
 
+On the essential-development branch, principal HTTP mutations now require
+configured server authentication even when read-only server routes are left
+local and unsecured. This is one authority-boundary layer, not proof of worker
+isolation; executor processes must still receive no server credential, plane
+database, verifier storage, or route to the principal listener.
+
 ### Phase 3: close one native-Linux lifecycle
 
 The completed mechanism record and credential-free finite reports are in

@@ -56,7 +56,7 @@ describe("ProContract HttpApi", () => {
     }
   })
 
-  test("uses the server authentication boundary for principal mutations", async () => {
+  test("fails principal mutations closed when server authentication is disabled", async () => {
     Flag.OPENCODE_SERVER_PASSWORD = undefined
     delete process.env.OPENCODE_SERVER_PASSWORD
     const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
@@ -71,7 +71,7 @@ describe("ProContract HttpApi", () => {
           location: { directory: process.cwd() },
         }),
       })
-      expect(missingModel.status).toBe(400)
+      expect(missingModel.status).toBe(401)
 
       const response = await fetch(new URL("/api/contract", listener.url), {
         method: "POST",
@@ -84,28 +84,42 @@ describe("ProContract HttpApi", () => {
           model: { providerID: "openai", id: "gpt-5.3-codex" },
         }),
       })
-      expect(response.status).toBe(200)
-      const retried = await fetch(new URL("/api/contract", listener.url), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          id: "pct_unsecured",
-          scope: "http",
-          goal: "Admitted by the unsecured local server",
-          location: { directory: process.cwd() },
-          model: { providerID: "openai", id: "gpt-5.3-codex" },
-        }),
-      })
-      expect(retried.status).toBe(200)
+      expect(response.status).toBe(401)
 
-      const forgedPetition = await fetch(new URL("/api/contract/pct_unsecured/revision", listener.url), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ reason: "forged", spec: {} }),
-      })
-      expect(forgedPetition.headers.get("content-type")).not.toContain("application/json")
-      const contract = await fetch(new URL("/api/contract/pct_unsecured", listener.url))
-      expect((await contract.json()).data.pendingRevision).toBeUndefined()
+      const mutations = [
+        ["/api/contract/pct_missing/attestation", { evidenceHash: "forged" }],
+        [
+          "/api/contract/pct_missing/challenge",
+          {
+            revision: 1,
+            subjectHash: "forged-subject",
+            evidenceHash: "forged-evidence",
+            disclosure: "executor",
+            summary: "forged challenge",
+          },
+        ],
+        ["/api/contract/pct_missing/revision/decision", { accept: true }],
+        ["/api/contract/pct_missing/release", { reason: "forged release" }],
+      ] as const
+      for (const [path, body] of mutations) {
+        const mutation = await fetch(new URL(path, listener.url), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+        expect(mutation.status).toBe(401)
+      }
+      expect(
+        (
+          await fetch(new URL("/api/contract/pct_missing/resume", listener.url), {
+            method: "POST",
+          })
+        ).status,
+      ).toBe(401)
+
+      const contracts = await fetch(new URL("/api/contract?scope=http", listener.url))
+      expect(contracts.status).toBe(200)
+      expect(await contracts.json()).toEqual({ data: [] })
     } finally {
       await listener.stop(true)
     }

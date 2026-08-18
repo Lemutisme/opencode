@@ -20,7 +20,7 @@ import { Layer, Option } from "effect"
 import { Api } from "./api"
 import { ServerAuth } from "./auth"
 import { handlers } from "./handlers"
-import { authorizationLayer } from "./middleware/authorization"
+import { authorizationLayer, principalAuthorizationLayer } from "./middleware/authorization"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { PtyEnvironment } from "./pty-environment"
 import { layer as locationLayer } from "./location"
@@ -62,6 +62,7 @@ function makeRoutes<AuthError, AuthServices>(auth: Layer.Layer<ServerAuth.Config
     Layer.provide(sessionLocationLayer),
     Layer.provide(locationLayer),
     Layer.provide(authorizationLayer),
+    Layer.provide(principalAuthorizationLayer),
     Layer.provide(schemaErrorLayer),
     Layer.provide(auth),
     Layer.provide(serviceLayer),

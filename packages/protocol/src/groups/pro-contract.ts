@@ -7,6 +7,7 @@ import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { ConflictError } from "../errors"
+import { PrincipalAuthorization } from "../middleware/authorization"
 
 export class ProContractNotFoundError extends Schema.TaggedErrorClass<ProContractNotFoundError>()(
   "ProContractNotFoundError",
@@ -54,7 +55,9 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
       }),
       success: Schema.Struct({ data: ProContract.Info, execution: OpenCodeExecution, receipt: Receipt }),
       error: ConflictError,
-    }).annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.issue", summary: "Issue contract" })),
+    })
+      .middleware(PrincipalAuthorization)
+      .annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.issue", summary: "Issue contract" })),
   )
   .add(
     HttpApiEndpoint.get("proContract.list", "/api/contract", {
@@ -97,7 +100,9 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
       payload: Schema.Struct({ evidenceHash: Schema.NonEmptyString }),
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
-    }).annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.attest", summary: "Attest contract evidence" })),
+    })
+      .middleware(PrincipalAuthorization)
+      .annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.attest", summary: "Attest contract evidence" })),
   )
   .add(
     HttpApiEndpoint.post("proContract.challenge", "/api/contract/:contractID/challenge", {
@@ -111,9 +116,11 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
       }),
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
-    }).annotateMerge(
-      OpenApi.annotations({ identifier: "v2.proContract.challenge", summary: "Challenge contract verification" }),
-    ),
+    })
+      .middleware(PrincipalAuthorization)
+      .annotateMerge(
+        OpenApi.annotations({ identifier: "v2.proContract.challenge", summary: "Challenge contract verification" }),
+      ),
   )
   .add(
     HttpApiEndpoint.post("proContract.decideRevision", "/api/contract/:contractID/revision/decision", {
@@ -121,9 +128,11 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
       payload: Schema.Struct({ accept: Schema.Boolean }),
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
-    }).annotateMerge(
-      OpenApi.annotations({ identifier: "v2.proContract.decideRevision", summary: "Decide contract revision" }),
-    ),
+    })
+      .middleware(PrincipalAuthorization)
+      .annotateMerge(
+        OpenApi.annotations({ identifier: "v2.proContract.decideRevision", summary: "Decide contract revision" }),
+      ),
   )
   .add(
     HttpApiEndpoint.post("proContract.release", "/api/contract/:contractID/release", {
@@ -131,15 +140,19 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
       payload: Schema.Struct({ reason: Schema.NonEmptyString }),
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
-    }).annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.release", summary: "Release contract" })),
+    })
+      .middleware(PrincipalAuthorization)
+      .annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.release", summary: "Release contract" })),
   )
   .add(
     HttpApiEndpoint.post("proContract.resume", "/api/contract/:contractID/resume", {
       params: { contractID: ProContract.ID },
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
-    }).annotateMerge(
-      OpenApi.annotations({ identifier: "v2.proContract.resume", summary: "Resume escalated contract" }),
-    ),
+    })
+      .middleware(PrincipalAuthorization)
+      .annotateMerge(
+        OpenApi.annotations({ identifier: "v2.proContract.resume", summary: "Resume escalated contract" }),
+      ),
   )
   .annotateMerge(OpenApi.annotations({ title: "ProContract", description: "Persistent obligation routes." }))
