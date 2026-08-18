@@ -100,6 +100,11 @@ negative evidence. Failure to materialize the Snapshot or start a check is an
 institutional availability failure and escalates instead of fabricating an
 executor failure.
 
+The identifier hashes compact `JSON.stringify(report)` bytes. `writeJson`
+stores an equivalent pretty JSON value, so the raw stored-file hash need not
+equal `evidenceHash`; consumers must decode and canonically re-encode the value
+before checking that identifier.
+
 The kernel accepts a replay-bearing handoff only when the result names the
 frozen replay policy and the captured subject. A replay-configured Contract
 cannot be discharged unless the recorded replay passed and still matches both.

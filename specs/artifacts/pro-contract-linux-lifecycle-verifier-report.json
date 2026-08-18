@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "contractID": "pct_linux_lifecycle_20260818_run2",
+  "revision": 1,
+  "specHash": "5e8a1f3b0cc37dcb6be8a575a6e582b0acebb29fe1dd0a46f0c62282953e94fc",
+  "subjectHash": "f7ddd02611840c873fa168a4bba5e0a559277670",
+  "claim": "The exact handoff contains lifecycle.txt with bytes ready followed by a newline.",
+  "verifierManifestHash": "3ae6b539dae70574b3976b9a67b4e8fbb4961458e7c9327e2c7b2f4ed1971429",
+  "replay": {
+    "policyHash": "95d20f58dc04e3d0c223a7fc0963e0858d791058c0a6d977dfa0f229d47ecdf0",
+    "evidenceHash": "3d43138e0b2fb50ed068be29bc05b9b3cac691c006b4c7b5a420c1eaa128a121"
+  },
+  "observations": [
+    {
+      "path": "lifecycle.txt",
+      "exit": 0,
+      "sha256": "ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b",
+      "bytesBase64": "cmVhZHkK"
+    }
+  ],
+  "decision": {
+    "passed": true,
+    "rule": "exit is 0, observed SHA-256 equals the frozen protected hash, and observed bytes decode to ready followed by a newline"
+  }
+}

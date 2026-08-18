@@ -183,6 +183,9 @@ Server `HttpApi` changes, regenerate clients with `bun run generate` from
 
 ### Phase 3: close one native-Linux lifecycle
 
+The completed mechanism record and credential-free finite reports are in
+[`pro-contract-linux-lifecycle.md`](./pro-contract-linux-lifecycle.md).
+
 Run one small, fresh, network-none Contract through:
 
 ```text
