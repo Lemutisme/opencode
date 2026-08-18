@@ -76,7 +76,7 @@ Linux environment.
 ## 3. Build OpenCode
 
 The repository default branch is `dev`; consolidated ProContract development
-currently lives on `capability-rsi`. Record the exact commit for every run.
+currently lives on `procontract-strength`. Record the exact commit for every run.
 
 ```bash
 cd "$OPENCODE_REPO"
