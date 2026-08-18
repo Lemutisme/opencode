@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { AuthenticationReason, LLMError, RateLimitReason } from "@opencode-ai/llm"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ProContract } from "@opencode-ai/core/pro-contract"
@@ -1280,25 +1281,43 @@ const terminalSession = Layer.mock(SessionStore.Service, {
       }),
     ]),
 })
-const terminalLocations = Layer.effect(
-  LocationServiceMap.Service,
-  LayerMap.make(
-    () =>
-      Layer.succeed(
-        SessionRunner.Service,
-        SessionRunner.Service.of({ run: () => Effect.void }),
-      ) as unknown as Layer.Layer<LocationServices, LocationError>,
-  ),
-)
-const terminalExecutionIt = testEffect(
-  AppNodeBuilder.build(
-    LayerNode.group([Database.node, ProContract.node, ProContractOpenCode.node, SessionExecutionLocal.node]),
-    [
-      [SessionStore.node, terminalSession],
-      [LocationServiceMap.node, terminalLocations],
-    ],
-  ),
-)
+const terminalFailure = new LLMError({
+  module: "test",
+  method: "stream",
+  reason: new AuthenticationReason({ message: "Expired key", kind: "expired" }),
+})
+const retryableFailure = new LLMError({
+  module: "test",
+  method: "stream",
+  reason: new RateLimitReason({ message: "Try later", retryAfterMs: 1_000 }),
+})
+const terminalExecutionIt = makeTerminalExecutionIt(() => Effect.void)
+const terminalFailureExecutionIt = makeTerminalExecutionIt(() => Effect.fail(terminalFailure))
+const retryableFailureExecutionIt = makeTerminalExecutionIt(() => Effect.fail(retryableFailure))
+
+function makeTerminalExecutionIt(run: SessionRunner.Interface["run"]) {
+  return testEffect(
+    AppNodeBuilder.build(
+      LayerNode.group([Database.node, ProContract.node, ProContractOpenCode.node, SessionExecutionLocal.node]),
+      [
+        [SessionStore.node, terminalSession],
+        [
+          LocationServiceMap.node,
+          Layer.effect(
+            LocationServiceMap.Service,
+            LayerMap.make(
+              () =>
+                Layer.succeed(SessionRunner.Service, SessionRunner.Service.of({ run })) as unknown as Layer.Layer<
+                  LocationServices,
+                  LocationError
+                >,
+            ),
+          ),
+        ],
+      ],
+    ),
+  )
+}
 
 describe("OpenCode Contract binding", () => {
   terminalExecutionIt.effect("escalates a durable provider error without retrying", () =>
@@ -1324,6 +1343,64 @@ describe("OpenCode Contract binding", () => {
         escalation: { reason: "OpenCode provider returned a terminal error", time: 0 },
       })
       expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, turnsUsed: 0, actionsUsed: 0 })
+    }),
+  )
+
+  terminalFailureExecutionIt.effect("escalates a persisted terminal provider failure without rescheduling", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const execution = yield* SessionExecution.Service
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+
+      expect(yield* execution.resume(attempt!.sessionID).pipe(Effect.flip)).toBe(terminalFailure)
+      expect(yield* contracts.get(contractID)).toMatchObject({
+        status: "escalated",
+        escalation: { reason: "OpenCode provider returned a terminal error", time: 0 },
+      })
+      expect(yield* bindings.get(contractID)).toMatchObject({
+        attempts: 1,
+        turnsUsed: 0,
+        actionsUsed: 0,
+        promptID: attempt!.promptID,
+      })
+    }),
+  )
+
+  retryableFailureExecutionIt.effect("reschedules a retryable provider failure without replacing the attempt", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const execution = yield* SessionExecution.Service
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+
+      expect(yield* execution.resume(attempt!.sessionID).pipe(Effect.flip)).toBe(retryableFailure)
+      expect(yield* contracts.get(contractID)).toMatchObject({ status: "active" })
+      expect(yield* bindings.get(contractID)).toMatchObject({
+        attempts: 1,
+        dispatched: false,
+        turnsUsed: 0,
+        actionsUsed: 0,
+      })
+      expect((yield* bindings.get(contractID))?.promptID).not.toBe(attempt!.promptID)
     }),
   )
 

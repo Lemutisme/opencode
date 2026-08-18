@@ -1,3 +1,4 @@
+import { LLMError } from "@opencode-ai/llm"
 import { Cause, Clock, Effect, Exit, Layer, Option } from "effect"
 import { LocationServiceMap } from "../../location-service-map"
 import { makeGlobalNode } from "../../effect/app-node"
@@ -40,12 +41,13 @@ const layer = Layer.effect(
           Effect.exit,
         )
         const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+        const terminalProviderError = error instanceof LLMError && !error.retryable
         const replaceSession =
           Exit.isSuccess(exit) || error instanceof MessageDecodeError || error instanceof ContextSnapshotDecodeError
         const lastAssistant = attempt && Exit.isSuccess(exit)
           ? (yield* store.context(sessionID)).findLast((message) => message.type === "assistant")
           : undefined
-        if (attempt && lastAssistant?.finish === "error")
+        if (attempt && (terminalProviderError || lastAssistant?.finish === "error"))
           yield* contracts.escalate({
             contractID: attempt.contractID,
             revision: attempt.revision,
