@@ -918,17 +918,19 @@ Every new semantic attempt begins by reconciling the existing workspace. It
 must advance the duty, hand off a verifiable candidate, or report blocked work
 within the remaining authority and budget. Rotation therefore changes the
 executor, not ownership of work already materialized in the Location.
-The immutable turn/action ceiling and deadline remain in the initial system
-prefix. Remaining budget is enforced by the institution and is not injected as
-a changing countdown. A static request-local warning appears only within the
-last twenty turns or actions, preserving normal rolling prefix reuse while
-leaving enough authority to settle. The executor uses the budget to reduce
+The immutable turn/action ceiling and deadline remain institution-side and are
+enforced before each effect. They are not repeated in the model system prefix
+or injected as a changing countdown. A static request-local warning appears
+only near exhaustion, preserving ordinary execution context while leaving
+enough authority to settle. The executor uses the budget to reduce
 acceptance-critical uncertainty; handoff is a verification petition, not a
 completion signal.
 Durable message or context-snapshot decode failures also replace the Session;
 raw transport and transient infrastructure failures retry the current semantic
-attempt. A provider-declared error is already a durable terminal result; it
-escalates once instead of redispatching the same invalid request.
+attempt within the same shared ceilings. A typed nonretryable provider failure
+is terminal and escalates once. An unclassified durable provider error
+conserves the duty and redispatches the same semantic attempt; it cannot reset
+turns, actions, deadline, or attempt identity.
 
 Every current and retired Contract Session has an indexed durable reservation.
 Lease loss rotates and fences the execution Session without consuming a

@@ -42,12 +42,15 @@ const layer = Layer.effect(
         )
         const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
         const terminalProviderError = error instanceof LLMError && !error.retryable
-        const replaceSession =
-          Exit.isSuccess(exit) || error instanceof MessageDecodeError || error instanceof ContextSnapshotDecodeError
         const lastAssistant = attempt && Exit.isSuccess(exit)
           ? (yield* store.context(sessionID)).findLast((message) => message.type === "assistant")
           : undefined
-        if (attempt && (terminalProviderError || lastAssistant?.finish === "error"))
+        const unclassifiedProviderError = lastAssistant?.finish === "error"
+        const replaceSession =
+          (Exit.isSuccess(exit) && !unclassifiedProviderError) ||
+          error instanceof MessageDecodeError ||
+          error instanceof ContextSnapshotDecodeError
+        if (attempt && terminalProviderError)
           yield* contracts.escalate({
             contractID: attempt.contractID,
             revision: attempt.revision,

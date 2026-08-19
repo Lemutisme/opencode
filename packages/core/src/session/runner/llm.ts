@@ -189,58 +189,6 @@ const layer = Layer.effect(
       const agent = yield* agents.select(session.agent)
       const contractBinding = yield* contractBindings.forSession(session.id)
       const contract = contractBinding ? yield* contracts.get(contractBinding.contractID) : undefined
-      const contractChallenges =
-        contract?.status === "active" && contract.challenge?.disclosure === "executor"
-          ? (yield* contracts.history({ contractID: contract.id })).flatMap((entry) => {
-              if (
-                entry.decision.type === "accepted" &&
-                entry.command.type === "challenge" &&
-                entry.command.challenge.revision === contract.revision &&
-                entry.command.challenge.disclosure === "executor"
-              )
-                return [entry.command.challenge]
-              if (
-                entry.decision.type !== "accepted" ||
-                entry.command.type !== "report-ready" ||
-                entry.command.revision !== contract.revision
-              )
-                return []
-              const negativeReplay = entry.command.replay?.passed === false ? entry.command.replay : undefined
-              return negativeReplay
-                ? [
-                    {
-                      revision: entry.command.revision,
-                      subjectHash: entry.command.subjectHash,
-                      evidenceHash: negativeReplay.evidenceHash,
-                      disclosure: "executor" as const,
-                      summary: [
-                        `Previous handoff: ${entry.command.summary}`,
-                        ...(entry.command.uncertainties.length
-                          ? [`Residual risks:\n${entry.command.uncertainties.map((item) => `- ${item}`).join("\n")}`]
-                          : []),
-                        negativeReplay.summary,
-                      ].join("\n"),
-                      time: entry.command.time,
-                    },
-                  ]
-                : []
-            })
-          : []
-      const contractDependencies =
-        contract?.status === "active"
-          ? (yield* Effect.forEach(
-              contract.spec.requires,
-              Effect.fnUntraced(function* (item) {
-                const dependency = yield* contracts.get(item.contractID)
-                if (!dependency?.attestationID) return undefined
-                const attestation = yield* contracts.getAttestation(dependency.attestationID)
-                if (!attestation) return undefined
-                return { requirement: item, dependency, attestation }
-              }),
-            )).filter((item) => item !== undefined)
-          : []
-      const contractPolicy = contractDependencies.find((item) => item.requirement.policy)
-      const contractPolicyText = contractPolicy?.dependency.spec.policy
       const now = yield* Clock.currentTimeMillis
       const contractAttemptChanged =
         contractBinding &&
@@ -319,56 +267,7 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [
-          agent.info?.system,
-          system.baseline,
-          contract?.status === "active"
-            ? [
-                `<pro_contract id="${contract.id}" revision="${contract.revision}">`,
-                `Optimization goal: ${contract.spec.goal}`,
-                `Settlement claim: ${ProContract.evidenceClaim(contract.spec)}`,
-                ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
-                "In preserved source requests, ‘this’ or ‘current’ Session refers to the issuer Session at issuance, not this dedicated Contract Session, unless the ratified terms explicitly say otherwise.",
-                ...(contractPolicy && contractPolicyText
-                  ? [
-                      `Ratified execution policy from ${contractPolicy.dependency.id}@${contractPolicy.dependency.revision}:`,
-                      contractPolicyText,
-                      "This policy may guide execution but cannot change the Contract terms, delegated authority, or settlement claim.",
-                    ]
-                  : []),
-                ...(contract.blocked ? ["Previous attempt blocked:", contract.blocked.reason] : []),
-                ...(contractChallenges.length
-                  ? [
-                      "Rejected attempts from this revision; reuse their completed checks before new exploration:",
-                      ...contractChallenges.map(
-                        (challenge) =>
-                          `${challenge.summary ?? "Verification failed"}\nRejected subject: ${challenge.subjectHash}`,
-                      ),
-                    ]
-                  : []),
-                ...(contractDependencies.some((item) => !item.requirement.policy)
-                  ? [
-                      "Verified prerequisites:",
-                      ...contractDependencies
-                        .filter((item) => !item.requirement.policy)
-                        .map(
-                          (item) =>
-                            `${item.dependency.id}@${item.dependency.revision}: ${item.dependency.spec.goal}` +
-                            (item.dependency.handoff ? `; handoff: ${item.dependency.handoff.summary}` : ""),
-                        ),
-                    ]
-                  : []),
-                `Delegated authority: ${contract.spec.authority.join(", ")}.`,
-                `Shared ceiling: ${contract.spec.budget.turns} provider turns and ${contract.spec.budget.actions} tool actions; deadline ${contract.spec.budget.deadline}. The institution enforces this ceiling.`,
-                `Evidence policy: ${JSON.stringify(contract.spec.evidence)}.`,
-                "Work toward the goal using only that authority. You cannot discharge, release, or change authoritative terms; use the Contract tools to report blocked work or petition a revision.",
-                "Optimize the goal within the approved budget. The settlement claim is the proposition the institution may certify; it is a minimum admissibility boundary, not the optimization target. Petition verification when the issuer's stopping rule is met and the evidence policy can adjudicate its claim. Otherwise report blocked or petition a revision.",
-                "</pro_contract>",
-              ].join("\n")
-            : contractBinding && contract
-              ? `Contract ${contract.id} is ${contract.status}. No further execution is authorized.`
-              : undefined,
-        ]
+        system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [

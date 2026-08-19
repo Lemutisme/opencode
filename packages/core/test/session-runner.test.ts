@@ -661,7 +661,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("injects active contracts and removes effectful tools", () =>
+  it.effect("enforces active contracts without repeating the institution dossier", () =>
     Effect.gen(function* () {
       yield* setup
       const contracts = yield* ProContract.Service
@@ -767,58 +767,22 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.tools).toEqual([])
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "Inspect the repository without changing it",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "Settlement claim: Repository inspection evidence is available",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "The failing behavior is isolated to argument parsing.",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("refers to the issuer Session at issuance")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${dependencyID}@1`)
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(dependencySpec.policy)
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Ratified execution policy")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "cannot change the Contract terms, delegated authority, or settlement claim",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("Verified prerequisites:")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(`${prerequisiteID}@1`)
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(prerequisiteSpec.goal)
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("verified prerequisite complete")
-      expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain("Remaining shared budget:")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        `Shared ceiling: ${spec.budget.turns} provider turns and ${spec.budget.actions} tool actions`,
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "Delegated authority: filesystem.read, organization.approve",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "minimum admissibility boundary, not the optimization target",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "settlement claim is the proposition the institution may certify",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "Petition verification when the issuer's stopping rule is met",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        "Otherwise report blocked or petition a revision",
-      )
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("For behavior-matching work")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain(
-        `Evidence policy: ${JSON.stringify(spec.evidence)}`,
-      )
+      const projected = requests[0]?.system.map((part) => part.text).join("\n") ?? ""
+      expect(projected).not.toContain("<pro_contract")
+      expect(projected).not.toContain("Inspect the repository without changing it")
+      expect(projected).not.toContain("Repository inspection evidence is available")
+      expect(projected).not.toContain("The failing behavior is isolated to argument parsing.")
+      expect(projected).not.toContain(dependencySpec.policy)
+      expect(projected).not.toContain(`${dependencyID}@1`)
+      expect(projected).not.toContain(`${prerequisiteID}@1`)
+      expect(projected).not.toContain("Delegated authority")
+      expect(projected).not.toContain("Shared ceiling")
+      expect(projected).not.toContain("Evidence policy")
+      expect(projected).not.toContain("waiting for a reproducible input")
       expect(requests[0]?.messages.at(-1)).toMatchObject({
         role: "system",
         content: [{ type: "text", text: expect.stringContaining("Settlement window active") }],
       })
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("dependency-evidence")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("dependency-subject")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("prerequisite-evidence")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).not.toContain("prerequisite-subject")
-      expect(requests[0]?.system.map((part) => part.text).at(-1)).toContain("waiting for a reproducible input")
       expect(
         (yield* session.messages({ sessionID: blockedAttempt!.sessionID })).some(
           (message) => message.type === "system" && message.text.includes("Remaining shared budget:"),
@@ -886,12 +850,12 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(challengedAttempt!.sessionID)
 
       expect(requests).toHaveLength(2)
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Independent output mismatch")
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).not.toContain("negative-witness")
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("candidate-subject")
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("Offline build regressed")
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).not.toContain("offline-witness")
-      expect(requests[1]?.system.map((part) => part.text).at(-1)).toContain("candidate-subject-2")
+      const challengedProjection = requests[1]?.system.map((part) => part.text).join("\n") ?? ""
+      expect(challengedProjection).not.toContain("Independent output mismatch")
+      expect(challengedProjection).not.toContain("negative-witness")
+      expect(challengedProjection).not.toContain("candidate-subject")
+      expect(challengedProjection).not.toContain("Offline build regressed")
+      expect(challengedProjection).not.toContain("offline-witness")
 
       yield* contracts.release({ contractID: contract.id, reason: "test complete" })
       yield* session.prompt({

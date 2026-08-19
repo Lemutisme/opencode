@@ -1379,7 +1379,7 @@ function makeTerminalExecutionIt(run: SessionRunner.Interface["run"]) {
 }
 
 describe("OpenCode Contract binding", () => {
-  terminalExecutionIt.effect("escalates a durable provider error without retrying", () =>
+  terminalExecutionIt.effect("reschedules an unclassified durable provider error in the same semantic attempt", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
@@ -1397,11 +1397,16 @@ describe("OpenCode Contract binding", () => {
 
       yield* execution.resume(attempt!.sessionID)
 
-      expect(yield* contracts.get(contractID)).toMatchObject({
-        status: "escalated",
-        escalation: { reason: "OpenCode provider returned a terminal error", time: 0 },
+      const contract = yield* contracts.get(contractID)
+      expect(contract).toMatchObject({ status: "active" })
+      expect(contract?.escalation).toBeUndefined()
+      expect(yield* bindings.get(contractID)).toMatchObject({
+        attempts: 1,
+        dispatched: false,
+        turnsUsed: 0,
+        actionsUsed: 0,
       })
-      expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, turnsUsed: 0, actionsUsed: 0 })
+      expect((yield* bindings.get(contractID))?.promptID).not.toBe(attempt!.promptID)
     }),
   )
 
@@ -1488,7 +1493,12 @@ describe("OpenCode Contract binding", () => {
         model: executionModel,
         nextActionAt: 0,
       })
-      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* contracts.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec: { ...spec, brief: "Implement the exact approved task." },
+        executor: "opencode",
+      })
 
       yield* scheduler.runOnce()
 
@@ -1505,7 +1515,7 @@ describe("OpenCode Contract binding", () => {
           .pipe(Effect.orDie),
       ).toMatchObject({
         prompt: {
-          text: "Reconcile the active Contract against the existing workspace. Advance it, hand off a verifiable candidate, or report blocked work within the remaining authority and budget.",
+          text: "Implement the exact approved task.",
         },
       })
       expect(wakeCalls).toEqual([binding.sessionID])
@@ -1549,6 +1559,15 @@ describe("OpenCode Contract binding", () => {
       })
       expect(second?.promptID).not.toBe(first?.promptID)
       expect(wakeCalls).toEqual([first!.sessionID, first!.sessionID])
+      const { db } = yield* Database.Service
+      expect(
+        (yield* db
+          .select({ prompt: SessionInputTable.prompt })
+          .from(SessionInputTable)
+          .where(eq(SessionInputTable.session_id, first!.sessionID))
+          .all()
+          .pipe(Effect.orDie)).map((item) => item.prompt.text),
+      ).toContain("Continue the approved task after a transient execution interruption.")
     }),
   )
 
@@ -1596,6 +1615,17 @@ describe("OpenCode Contract binding", () => {
       expect(yield* sessions.get(first!.sessionID)).toMatchObject({ id: first?.sessionID })
       expect(yield* sessions.get(second!.sessionID)).toMatchObject({ id: second?.sessionID })
       expect(wakeCalls).toEqual([first!.sessionID, second!.sessionID])
+      const { db } = yield* Database.Service
+      const challengePrompt = yield* db
+        .select({ prompt: SessionInputTable.prompt })
+        .from(SessionInputTable)
+        .where(eq(SessionInputTable.session_id, second!.sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(challengePrompt?.prompt.text).toContain(spec.goal)
+      expect(challengePrompt?.prompt.text).toContain("Independent output mismatch")
+      expect(challengePrompt?.prompt.text).not.toContain("negative-witness")
+      expect(challengePrompt?.prompt.text).not.toContain(subjectHash)
       expect(yield* bindings.forSession(first!.sessionID)).toMatchObject({
         sessionID: first?.sessionID,
         dispatched: false,

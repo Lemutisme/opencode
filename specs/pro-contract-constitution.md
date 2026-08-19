@@ -143,12 +143,15 @@ Core may bind the identities of adapter-owned manifests. It must not interpret
 their task-specific mechanics unless removing that interpretation would violate
 a kernel invariant.
 
-The executor projection is capability-shaped, not an audit dump. It includes
-the actionable duty terms, ratified execution inputs, visible defeaters,
-delegated authority, limits, and settlement protocol. Exact attestation,
-evidence, verifier, and ledger identities remain mandatory in institutional
-state and decisions, but need not enter a model prompt when the executor cannot
-inspect or act on them.
+The executor projection is capability-shaped, not an audit dump. One durable
+admission supplies the approved brief plus any ratified execution input,
+visible defeater, or verified prerequisite needed for that attempt. Ordinary
+provider turns do not repeat Contract terms, authority, limits, evidence, or
+institutional narration. Authority and limits are enforced below the model;
+the settlement tools and a near-boundary reminder expose the only additional
+executor decisions. Exact attestation, evidence, verifier, and ledger
+identities remain mandatory in institutional state and decisions but never
+enter a model prompt when the executor cannot inspect or act on them.
 
 ## Admission tests for Core
 

@@ -442,8 +442,9 @@ does not receive principal mutation routes.
 ### 4.8 V2 no-Contract control
 
 Use the same SessionV2 runner for causal evaluation. The control Session has no
-Contract binding and therefore receives no privileged `<pro_contract>` System
-Context or Contract reporting authority. An evaluation-only agent/config may
+Contract binding and therefore receives no Contract reporting authority; its
+ordinary provider system context otherwise matches the treatment. An
+evaluation-only agent/config may
 hide `contract_propose`; do not add a production feature flag solely for a
 benchmark. Comparing a legacy Session against a V2 Contract Session confounds
 Contract semantics with runner differences.
@@ -479,6 +480,10 @@ inspection inside `read` returns a tool error after one minute. Permission waits
 are outside the read timeout. Streaming provider events reset the provider
 bound, and process tools retain their own explicit timeout so long builds and
 training are not constrained by the short read policy.
+Typed nonretryable failures such as rejected authentication escalate the
+Contract. Unclassified durable provider errors reuse the same semantic attempt
+and remain bounded by the existing total turn/action/deadline coordinates;
+they do not fabricate completion or consume a fresh semantic attempt.
 An independent fifteen-minute absolute provider-turn bound also applies even
 when reasoning or tool-input deltas continue. For a Contract it is shortened to
 the remaining absolute Contract deadline. This prevents token-trickle streams

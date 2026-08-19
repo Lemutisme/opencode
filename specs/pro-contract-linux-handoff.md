@@ -140,13 +140,15 @@ is needed; never transfer API keys or provider configuration with them.
 
 Make one minimal runtime change:
 
-1. remove the hard-coded behavioral evidence sentence from
-   `packages/core/src/session/runner/llm.ts`;
-2. update the focused SessionRunner assertion;
-3. prove an active Contract still injects immutable terms and a ratified Policy
-   Contract still injects policy text;
-4. run the focused Core tests and package typecheck;
-5. commit separately as `refactor(core): externalize execution policy`.
+1. admit the approved brief and ratified execution inputs once through the
+   durable scheduler prompt;
+2. delete the repeated Contract dossier from ordinary provider turns;
+3. conserve unclassified provider errors as transport retries while typed
+   nonretryable failures still escalate;
+4. prove permissions, budgets, challenge repair, settlement, and finality stay
+   enforced below the model;
+5. run the focused Core tests and package typecheck;
+6. commit separately as `refactor(core): minimize contract execution context`.
 
 This phase must not add a replacement prompt, policy schema, selector, or
 configuration flag.
