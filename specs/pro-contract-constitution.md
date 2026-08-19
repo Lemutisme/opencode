@@ -124,7 +124,7 @@ institution store and authority boundary
 
 execution adapter
   Session/model/process, effect capabilities, leases/fences,
-  concrete budget counters, recovery, interruption
+  concrete budget counters, idle and absolute turn bounds, recovery, interruption
 
 compiler
   natural-language goal/brief, decomposition, trigger interpretation,

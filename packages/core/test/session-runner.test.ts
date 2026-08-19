@@ -3184,6 +3184,38 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("interrupts an active provider stream after fifteen total minutes", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Bound active provider turn" }), resume: false })
+      requests.length = 0
+      responseStream = Stream.fromIterable([
+        LLMEvent.reasoningStart({ id: "reasoning-bounded" }),
+        LLMEvent.reasoningDelta({ id: "reasoning-bounded", text: "still active" }),
+      ]).pipe(Stream.mapEffect((event) => Effect.sleep("9 minutes").pipe(Effect.as(event))))
+
+      const runner = yield* SessionRunner.Service
+      const completion = yield* Deferred.make<Exit.Exit<unknown, unknown>>()
+      const run = yield* runner
+        .run({ sessionID, force: true })
+        .pipe(Effect.exit, Effect.flatMap((exit) => Deferred.succeed(completion, exit)), Effect.forkChild)
+      while (requests.length === 0) yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("9 minutes")
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("6 minutes")
+      yield* Effect.yieldNow
+      const done = yield* Deferred.isDone(completion)
+      const completed = done ? yield* Deferred.await(completion) : undefined
+      yield* Fiber.interrupt(run)
+
+      expect(
+        completed !== undefined && Exit.isFailure(completed) && Cause.hasInterruptsOnly(completed.cause),
+      ).toBeTrue()
+    }),
+  )
+
   it.effect("durably fails blocked local tools when interrupted while awaiting settlement", () =>
     Effect.gen(function* () {
       yield* setup

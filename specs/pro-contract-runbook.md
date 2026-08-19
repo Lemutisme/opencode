@@ -479,6 +479,11 @@ inspection inside `read` returns a tool error after one minute. Permission waits
 are outside the read timeout. Streaming provider events reset the provider
 bound, and process tools retain their own explicit timeout so long builds and
 training are not constrained by the short read policy.
+An independent fifteen-minute absolute provider-turn bound also applies even
+when reasoning or tool-input deltas continue. For a Contract it is shortened to
+the remaining absolute Contract deadline. This prevents token-trickle streams
+from consuming the full duty horizon while preserving the ten-minute idle
+failure detector.
 Contract-bound `read`, `edit`, `write`, `apply_patch`, `glob`, and `grep` calls
 also settle with an explicit error after one minute. Ordinary Session
 permission waits and process tools keep their existing behavior.
@@ -844,6 +849,15 @@ probe evidence may settle only the latter.
 If no preregistered probe suite exists, omit that criterion and issue a
 delivery-only Contract. Build, packaging, and preflight evidence cannot support
 a behavioral-adequacy or performance claim.
+
+If the external score is part of the user-visible goal, pre-issue a dependent
+Evaluation Contract before Delivery settles so the shared scope cannot become
+quiet between handoff and official adjudication. Its deadline is an evaluator-
+manifest coordinate and should reflect the frozen test count, largest branch,
+per-test bound, and worker count—not the executor's provider deadline or one
+global campaign timeout. Evaluator timeout escalates Evaluation; it never
+challenges Delivery without a finite negative report and never turns missing
+measurement into accepted quality.
 
 Claim frozen source and a reproducible build rather than a prebuilt executable
 unless the evidence policy checks that binary in the exact Snapshot. Snapshot

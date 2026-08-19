@@ -93,6 +93,7 @@ import { llmClient } from "../../effect/app-node-platform"
  */
 
 const SETTLEMENT_WINDOW = 20
+const MAX_PROVIDER_TURN_MS = 15 * 60 * 1_000
 
 const layer = Layer.effect(
   Service,
@@ -448,10 +449,22 @@ const layer = Layer.effect(
         ),
         Effect.ensuring(withPublication(publisher.flush())),
       )
+      const providerTurnStartedAt = yield* Clock.currentTimeMillis
+      const providerTurnTimeout = Math.max(
+        1,
+        Math.min(
+          MAX_PROVIDER_TURN_MS,
+          contract?.status === "active" ? contract.spec.budget.deadline - providerTurnStartedAt : MAX_PROVIDER_TURN_MS,
+        ),
+      )
+      // Idle timeout does not bound a provider that trickles deltas. One turn must not monopolize a finite Contract.
+      const boundedProviderStream = providerStream.pipe(
+        Effect.timeoutOrElse({ duration: providerTurnTimeout, orElse: () => Effect.interrupt }),
+      )
 
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const stream = yield* restore(providerStream).pipe(Effect.exit)
+          const stream = yield* restore(boundedProviderStream).pipe(Effect.exit)
           const failure =
             stream._tag === "Failure" ? Option.getOrUndefined(Cause.findErrorOption(stream.cause)) : undefined
           if (
