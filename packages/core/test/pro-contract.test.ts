@@ -1515,7 +1515,7 @@ describe("OpenCode Contract binding", () => {
           .pipe(Effect.orDie),
       ).toMatchObject({
         prompt: {
-          text: "Implement the exact approved task.",
+          text: "Implement the exact approved task.\n\nWhen the task is ready for independent verification, call contract_report_ready. If work is blocked, call contract_report_blocked. If the approved terms must change, call contract_propose_revision.",
         },
       })
       expect(wakeCalls).toEqual([binding.sessionID])
@@ -1624,6 +1624,7 @@ describe("OpenCode Contract binding", () => {
         .pipe(Effect.orDie)
       expect(challengePrompt?.prompt.text).toContain(spec.goal)
       expect(challengePrompt?.prompt.text).toContain("Independent output mismatch")
+      expect(challengePrompt?.prompt.text).toContain("call contract_report_ready")
       expect(challengePrompt?.prompt.text).not.toContain("negative-witness")
       expect(challengePrompt?.prompt.text).not.toContain(subjectHash)
       expect(yield* bindings.forSession(first!.sessionID)).toMatchObject({

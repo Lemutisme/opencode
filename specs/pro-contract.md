@@ -918,6 +918,8 @@ Every new semantic attempt begins by reconciling the existing workspace. It
 must advance the duty, hand off a verifiable candidate, or report blocked work
 within the remaining authority and budget. Rotation therefore changes the
 executor, not ownership of work already materialized in the Location.
+Its durable admission names the ready, blocked, and revision tools once. Those
+action affordances are not repeated on ordinary provider turns.
 The immutable turn/action ceiling and deadline remain institution-side and are
 enforced before each effect. They are not repeated in the model system prefix
 or injected as a changing countdown. A static request-local warning appears

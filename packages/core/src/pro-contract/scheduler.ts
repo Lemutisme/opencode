@@ -103,6 +103,7 @@ const layer = Layer.effect(
                         ...(contract.challenge?.disclosure === "executor" && contract.challenge.summary
                           ? [`Verifier challenge:\n${contract.challenge.summary}`]
                           : []),
+                        "When the task is ready for independent verification, call contract_report_ready. If work is blocked, call contract_report_blocked. If the approved terms must change, call contract_propose_revision.",
                       ].join("\n\n"),
                 },
                 delivery: "queue" as const,
