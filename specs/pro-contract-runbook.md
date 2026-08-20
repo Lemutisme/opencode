@@ -443,7 +443,8 @@ does not receive principal mutation routes.
 
 Use the same SessionV2 runner for causal evaluation. The control Session has no
 Contract binding and therefore receives no Contract reporting authority; its
-ordinary provider system context otherwise matches the treatment. An
+ordinary provider system context otherwise matches the treatment except for the
+single static active-Contract verification/stopping policy under test. An
 evaluation-only agent/config may
 hide `contract_propose`; do not add a production feature flag solely for a
 benchmark. Comparing a legacy Session against a V2 Contract Session confounds

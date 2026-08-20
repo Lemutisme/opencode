@@ -630,6 +630,9 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain("<pro_contract")
+      expect(requests[0]?.system.map((part) => part.text).join("\n")).not.toContain(
+        "Run one broad representative suite per candidate",
+      )
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
       ])
@@ -661,7 +664,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("enforces active contracts without repeating the institution dossier", () =>
+  it.effect("enforces active contracts with one static policy and no institution dossier", () =>
     Effect.gen(function* () {
       yield* setup
       const contracts = yield* ProContract.Service
@@ -769,6 +772,9 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.tools).toEqual([])
       const projected = requests[0]?.system.map((part) => part.text).join("\n") ?? ""
       expect(projected).not.toContain("<pro_contract")
+      expect(projected).toContain(
+        "The independent verifier owns exhaustive evaluation. Run one broad representative suite per candidate, then only targeted checks after changes; report residual mismatches as uncertainties instead of repeating broad searches.",
+      )
       expect(projected).not.toContain("Inspect the repository without changing it")
       expect(projected).not.toContain("Repository inspection evidence is available")
       expect(projected).not.toContain("The failing behavior is isolated to argument parsing.")
@@ -851,6 +857,7 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(2)
       const challengedProjection = requests[1]?.system.map((part) => part.text).join("\n") ?? ""
+      expect(challengedProjection).toContain("Run one broad representative suite per candidate")
       expect(challengedProjection).not.toContain("Independent output mismatch")
       expect(challengedProjection).not.toContain("negative-witness")
       expect(challengedProjection).not.toContain("candidate-subject")

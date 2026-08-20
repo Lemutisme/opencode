@@ -267,7 +267,13 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline]
+        system: [
+          agent.info?.system,
+          system.baseline,
+          contract?.status === "active"
+            ? "The independent verifier owns exhaustive evaluation. Run one broad representative suite per candidate, then only targeted checks after changes; report residual mismatches as uncertainties instead of repeating broad searches."
+            : undefined,
+        ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [

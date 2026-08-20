@@ -920,6 +920,14 @@ within the remaining authority and budget. Rotation therefore changes the
 executor, not ownership of work already materialized in the Location.
 Its durable admission names the ready, blocked, and revision tools once. Those
 action affordances are not repeated on ordinary provider turns.
+While the Contract is active, every provider request retains one static default
+execution policy: the independent verifier owns exhaustive evaluation; the
+executor runs one broad representative suite per candidate, uses targeted
+checks after changes, and reports residual mismatches instead of repeating
+broad search. This is model-facing search and stopping guidance, not delegated
+authority, evidence, or institutional settlement. A ratified `spec.policy` may
+add task-specific execution strategy through the durable admission without
+weakening the default or any immutable Contract term.
 The immutable turn/action ceiling and deadline remain institution-side and are
 enforced before each effect. They are not repeated in the model system prefix
 or injected as a changing countdown. A static request-local warning appears
