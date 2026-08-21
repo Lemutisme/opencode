@@ -3,9 +3,9 @@
 This audit records what the current ProContract institution checks itself, what
 it accepts from a trusted caller, and what remains the responsibility of an
 external verifier. It describes the hardened runtime after the repeated
-Contract dossier was removed; the compact objective/test/handoff execution
-profile grants no authority and changes no evidence decision. This audit does
-not claim that a hash proves the truth of the bytes it names.
+Contract dossier was removed; the later restored static broad-then-targeted
+execution rule grants no authority and changes no evidence decision. This audit
+does not claim that a hash proves the truth of the bytes it names.
 
 ## Result
 

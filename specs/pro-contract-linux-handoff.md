@@ -143,8 +143,8 @@ Make one minimal runtime change:
 1. admit the approved brief and ratified execution inputs once through the
    durable scheduler prompt;
 2. delete the repeated Contract dossier from ordinary provider turns, retaining
-   only the compact objective, broad-representative-then-targeted checks, and
-   explicit handoff supported by the later `semantic-attempts` reconstruction;
+   only the static broad-representative-then-targeted verification/stopping
+   policy supported by the later `semantic-attempts` reconstruction;
 3. conserve unclassified provider errors as transport retries while typed
    nonretryable failures still escalate;
 4. prove permissions, budgets, challenge repair, settlement, and finality stay
@@ -153,8 +153,8 @@ Make one minimal runtime change:
 6. commit separately as `refactor(core): minimize contract execution context`.
 
 This phase adds no policy schema, selector, or configuration flag. The restored
-compact profile is execution guidance only; authority, limits, evidence, and
-all Contract enforcement remain outside the repeated model context.
+static sentence is execution guidance only; all Contract terms and enforcement
+remain outside the repeated model context.
 
 ### Phase 2: audit the truth boundary
 

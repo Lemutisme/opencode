@@ -153,17 +153,17 @@ change public rejection behavior.
 The executor projection is capability-shaped, not an audit dump. One durable
 admission supplies the approved brief plus any ratified execution input,
 visible defeater, or verified prerequisite needed for that attempt. Ordinary
-provider turns do not repeat the full Contract, authority, limits, evidence, or
-institutional narration. While a Contract is active, they retain one compact
-historical execution profile: the exact objective, available-tools boundary,
-one broad representative suite per candidate, targeted checks after changes,
-residual mismatches, and an explicit verifier handoff. This profile guides
-focus, verification allocation, and stopping but grants no authority and
-settles no claim. Authority and limits are enforced below the model; the
-settlement tools and a near-boundary reminder expose the remaining additional
-executor decisions. Exact attestation, evidence, verifier, and ledger identities
-remain mandatory in institutional state and decisions but never enter a model
-prompt when the executor cannot inspect or act on them.
+provider turns do not repeat Contract terms, authority, limits, evidence, or
+institutional narration. While a Contract is active, they retain one static
+execution policy: run one broad representative suite per candidate, use only
+targeted checks after changes, and hand residual mismatches to the independent
+verifier instead of repeating broad search. This policy guides verification
+allocation and stopping but grants no authority and settles no claim. Authority
+and limits are enforced below the model; one admission-only action sentence,
+the settlement tools, and a near-boundary reminder expose the remaining
+additional executor decisions. Exact attestation, evidence, verifier, and ledger
+identities remain mandatory in institutional state and decisions but never
+enter a model prompt when the executor cannot inspect or act on them.
 
 ## Admission tests for Core
 
