@@ -48,4 +48,14 @@ describe("ProContract constitution", () => {
     ])
       expect(source).not.toContain(forbidden)
   })
+
+  test("keeps the executor handoff affordance operational rather than institutional", async () => {
+    const source = await Bun.file(new URL("../src/tool/contract-control.ts", import.meta.url)).text()
+
+    expect(source).toContain(
+      "Hand off the active contract for independent verification. State completed checks and every known unresolved assumption; use contract_report_blocked instead when an uncertainty prevents meaningful verification.",
+    )
+    expect(source).not.toContain("The goal governs effort; the claim governs finality")
+    expect(source).not.toContain("frozen evidence policy can adjudicate its settlement claim")
+  })
 })

@@ -664,7 +664,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("enforces active contracts with one static policy and no institution dossier", () =>
+  it.effect("anchors one compact historical control loop without an institution dossier", () =>
     Effect.gen(function* () {
       yield* setup
       const contracts = yield* ProContract.Service
@@ -772,10 +772,13 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.tools).toEqual([])
       const projected = requests[0]?.system.map((part) => part.text).join("\n") ?? ""
       expect(projected).not.toContain("<pro_contract")
+      expect(projected).toContain("Objective: Inspect the repository without changing it")
       expect(projected).toContain(
         "The independent verifier owns exhaustive evaluation. Run one broad representative suite per candidate, then only targeted checks after changes; report residual mismatches as uncertainties instead of repeating broad searches.",
       )
-      expect(projected).not.toContain("Inspect the repository without changing it")
+      expect(projected).toContain(
+        "After completing the prescribed checks, call contract_report_ready with all known unresolved assumptions.",
+      )
       expect(projected).not.toContain("Repository inspection evidence is available")
       expect(projected).not.toContain("The failing behavior is isolated to argument parsing.")
       expect(projected).not.toContain(dependencySpec.policy)
@@ -857,6 +860,7 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(2)
       const challengedProjection = requests[1]?.system.map((part) => part.text).join("\n") ?? ""
+      expect(challengedProjection).toContain("Objective: Inspect the repository without changing it")
       expect(challengedProjection).toContain("Run one broad representative suite per candidate")
       expect(challengedProjection).not.toContain("Independent output mismatch")
       expect(challengedProjection).not.toContain("negative-witness")

@@ -271,7 +271,11 @@ const layer = Layer.effect(
           agent.info?.system,
           system.baseline,
           contract?.status === "active"
-            ? "The independent verifier owns exhaustive evaluation. Run one broad representative suite per candidate, then only targeted checks after changes; report residual mismatches as uncertainties instead of repeating broad searches."
+            ? [
+                `Objective: ${contract.spec.goal}`,
+                "Use the available tools to advance this objective. The independent verifier owns exhaustive evaluation. Run one broad representative suite per candidate, then only targeted checks after changes; report residual mismatches as uncertainties instead of repeating broad searches.",
+                "After completing the prescribed checks, call contract_report_ready with all known unresolved assumptions.",
+              ].join("\n")
             : undefined,
         ]
           .filter((part): part is string => part !== undefined && part.length > 0)

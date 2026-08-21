@@ -130,7 +130,7 @@ const layer = Layer.effectDiscard(
         }),
         contract_report_ready: Tool.make({
           description:
-            "Petition independent verification when the issuer's stopping rule is met and the frozen evidence policy can adjudicate its settlement claim. The goal governs effort; the claim governs finality. State completed checks and unresolved assumptions that could materially affect the claim. Use contract_report_blocked or contract_propose_revision when evidence cannot settle it.",
+            "Hand off the active contract for independent verification. State completed checks and every known unresolved assumption; use contract_report_blocked instead when an uncertainty prevents meaningful verification.",
           input: Schema.Struct({
             summary: Schema.NonEmptyString,
             uncertainties: Schema.Array(Schema.NonEmptyString),
