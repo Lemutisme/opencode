@@ -314,6 +314,12 @@ verifier         evidence policy for that claim
 resolution       expiry, revision, release, transfer, and escalation rights
 ```
 
+The normative reducer treats the optional policy marker and concrete replay
+shape as opaque specification bytes. A transactional compatibility profile
+validates those adapter semantics before transition and records an identical
+rejected issue when they are malformed. The reducer itself owns only exact
+dependency identity, immutable edges, and evidenced support before activation.
+
 `requires` edges are fixed when a Contract is issued. They may name only an
 already issued Contract from the same issuer at its exact revision, so the
 dependency graph is acyclic by construction. Adaptation appends a new Contract

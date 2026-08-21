@@ -208,7 +208,7 @@ describe("ProContract kernel", () => {
     ).toEqual({ type: "rejected", reason: "required contract was released" })
   })
 
-  test("binds one evidenced Contract as an immutable execution policy", () => {
+  test("treats execution policy markers as opaque dependency metadata", () => {
     const policyID = ProContract.ID.make("pct_policy")
     const policyAttestationID = ProContract.AttestationID.make("pca_policy")
     const policySpec = {
@@ -253,13 +253,13 @@ describe("ProContract kernel", () => {
         { ...state, contracts: { [policyID]: { ...policy, spec, specHash: draft.specHash } } },
         { type: "issue", actor: taskDraft.issuer, draft: taskDraft },
       ).decision,
-    ).toEqual({ type: "rejected", reason: "required contract defines no execution policy" })
+    ).toEqual({ type: "accepted" })
     expect(
       ProContract.transition(
         { ...state, contracts: { [policyID]: { ...policy, status: "dormant", attestationID: undefined } } },
         { type: "issue", actor: taskDraft.issuer, draft: taskDraft },
       ).decision,
-    ).toEqual({ type: "rejected", reason: "execution policy is not evidenced" })
+    ).toEqual({ type: "accepted" })
     const ambiguous = { ...taskSpec, requires: [policyRequirement, policyRequirement] }
     expect(
       ProContract.transition(state, {
@@ -267,7 +267,7 @@ describe("ProContract kernel", () => {
         actor: taskDraft.issuer,
         draft: { ...taskDraft, spec: ambiguous, specHash: ProContract.hashSpec(ambiguous) },
       }).decision,
-    ).toEqual({ type: "rejected", reason: "contract may require only one execution policy" })
+    ).toEqual({ type: "accepted" })
   })
 
   test("rejects executor testimony and preserves authoritative state", () => {
@@ -951,6 +951,93 @@ describe("ProContract ledger", () => {
         evidence: { claim: spec.goal },
       })
       expect(issued.contract?.specHash).toBe(ProContract.hashSpec(ProContract.normalizeSpec(legacy)))
+    }),
+  )
+
+  it.effect("rejects invalid execution profiles at the audited service boundary", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const withoutPolicyID = ProContract.ID.make("pct_profile_without_policy")
+      const pendingPolicyID = ProContract.ID.make("pct_profile_pending_policy")
+      const childIDs = [
+        ProContract.ID.make("pct_profile_missing_text"),
+        ProContract.ID.make("pct_profile_unevidenced"),
+        ProContract.ID.make("pct_profile_ambiguous"),
+        ProContract.ID.make("pct_profile_empty_replay"),
+        ProContract.ID.make("pct_profile_empty_argv"),
+      ]
+      yield* contracts.issue({ id: withoutPolicyID, scope: "profile", spec, executor: "profile-source" })
+      yield* contracts.activate(withoutPolicyID, 1, 0)
+      yield* contracts.reportReady({
+        contractID: withoutPolicyID,
+        revision: 1,
+        summary: "source complete",
+        uncertainties: [],
+        subjectHash,
+        time: 0,
+      })
+      yield* contracts.principalAttest({ contractID: withoutPolicyID, evidenceHash: "source-evidence" })
+      const policySpec = { ...spec, policy: "Preserve established behavior" }
+      yield* contracts.issue({ id: pendingPolicyID, scope: "profile", spec: policySpec, executor: "profile-source" })
+
+      const rejected = yield* Effect.all([
+        contracts.issue({
+          id: childIDs[0],
+          scope: "profile",
+          spec: { ...spec, requires: [{ contractID: withoutPolicyID, revision: 1, policy: true }] },
+          executor: "profile-child",
+        }),
+        contracts.issue({
+          id: childIDs[1],
+          scope: "profile",
+          spec: { ...spec, requires: [{ contractID: pendingPolicyID, revision: 1, policy: true }] },
+          executor: "profile-child",
+        }),
+        contracts.issue({
+          id: childIDs[2],
+          scope: "profile",
+          spec: {
+            ...spec,
+            requires: [
+              { contractID: pendingPolicyID, revision: 1, policy: true },
+              { contractID: pendingPolicyID, revision: 1, policy: true },
+            ],
+          },
+          executor: "profile-child",
+        }),
+        contracts.issue({
+          id: childIDs[3],
+          scope: "profile",
+          spec: { ...spec, evidence: { ...spec.evidence, replay: { checks: [], protected: [], artifacts: [] } } },
+          executor: "profile-child",
+        }),
+        contracts.issue({
+          id: childIDs[4],
+          scope: "profile",
+          spec: {
+            ...spec,
+            evidence: {
+              ...spec.evidence,
+              replay: { checks: [{ argv: [], timeout: 1_000, exit: 0 }], protected: [], artifacts: [] },
+            },
+          },
+          executor: "profile-child",
+        }),
+      ])
+
+      expect(rejected.map((item) => item.decision)).toEqual([
+        { type: "rejected", reason: "required contract defines no execution policy" },
+        { type: "rejected", reason: "execution policy is not evidenced" },
+        { type: "rejected", reason: "contract may require only one execution policy" },
+        { type: "rejected", reason: "replay policy is empty" },
+        { type: "rejected", reason: "replay check command is empty" },
+      ])
+      expect(yield* Effect.forEach(childIDs, (id) => contracts.get(id))).toEqual(childIDs.map(() => undefined))
+      expect(
+        (yield* Effect.forEach(childIDs, (contractID) => contracts.history({ contractID }))).map((history) =>
+          history.map((entry) => entry.decision.type),
+        ),
+      ).toEqual(childIDs.map(() => ["rejected"]))
     }),
   )
 

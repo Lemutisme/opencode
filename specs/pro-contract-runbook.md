@@ -162,8 +162,10 @@ Rejecting a proposal creates neither a Contract nor an execution binding.
 
 A proposal may bind one previously discharged Contract as its execution policy
 by setting `policy: true` on that requirement. OpenCode injects the policy
-Contract's exact `spec.policy` and evidence identities into the dedicated
-Session. A Policy Contract keeps its current ratification work in `goal` and
+Contract's exact `spec.policy` once into the dedicated Session. The
+transactional execution profile rejects missing, unevidenced, or ambiguous
+policy sources before creating the dependent Contract. A Policy Contract keeps
+its current ratification work in `goal` and
 the future execution rule in `policy`; the two must not be conflated. The policy
 is part of the approved `specHash`, applies only to the new Contract, and cannot
 override its authority or settlement terms. Challenging the Policy Contract

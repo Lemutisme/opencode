@@ -131,12 +131,6 @@ export function transition(state: State, command: Command): Result {
     if (command.actor !== command.draft.issuer) return reject("only the issuer may issue the contract")
     if (command.draft.issuer === command.draft.executor) return reject("issuer and executor must be distinct")
     if (command.draft.specHash !== hashSpec(command.draft.spec)) return reject("specification hash does not match")
-    const replay = command.draft.spec.evidence.replay
-    if (replay && replay.checks.length === 0 && replay.protected.length === 0 && replay.artifacts.length === 0)
-      return reject("replay policy is empty")
-    if (replay?.checks.some((check) => check.argv.length === 0)) return reject("replay check command is empty")
-    if (command.draft.spec.requires.filter((requirement) => requirement.policy).length > 1)
-      return reject("contract may require only one execution policy")
     const existing = state.contracts[command.draft.id]
     if (existing) {
       if (
@@ -155,9 +149,6 @@ export function transition(state: State, command: Command): Result {
       if (dependency.issuer !== command.draft.issuer) return reject("required contract issuer does not match")
       if (dependency.revision !== requirement.revision) return reject("required contract revision does not match")
       if (dependency.status === "released") return reject("required contract was released")
-      if (requirement.policy && !dependency.spec.policy) return reject("required contract defines no execution policy")
-      if (requirement.policy && (dependency.status !== "discharged" || !dependency.attestationID))
-        return reject("execution policy is not evidenced")
     }
     return accept({
       ...state,

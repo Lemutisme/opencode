@@ -143,6 +143,13 @@ Core may bind the identities of adapter-owned manifests. It must not interpret
 their task-specific mechanics unless removing that interpretation would violate
 a kernel invariant.
 
+Issue-time execution-profile validation belongs to the transactional service
+boundary. The pure reducer treats replay structure and execution-policy markers
+as opaque terms already covered by `specHash`; it still owns exact dependency
+identity, immutable edges, activation support, accepted/rejected decisions, and
+the audit event. Moving profile interpretation must not bypass the ledger or
+change public rejection behavior.
+
 The executor projection is capability-shaped, not an audit dump. One durable
 admission supplies the approved brief plus any ratified execution input,
 visible defeater, or verified prerequisite needed for that attempt. Ordinary
@@ -192,8 +199,10 @@ The present public Schema/Service still exposes adapter-specific concepts:
 - special execution-policy dependency semantics;
 - evaluated-delivery constructors on the core service.
 
-These remain supported until compatibility migrations exist. Their presence is
-not evidence that they are constitutional kernel concepts.
+These remain supported until compatibility migrations exist. Replay-shape and
+execution-policy admission now run at the transactional service profile rather
+than in the pure reducer. Their presence in public terms is not evidence that
+they are constitutional kernel concepts.
 
 The current local deployment is also cooperative. Strong non-bypass is not
 established until the executor cannot access principal credentials, mutation

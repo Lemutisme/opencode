@@ -2,9 +2,10 @@
 
 This audit records what the current ProContract institution checks itself, what
 it accepts from a trusted caller, and what remains the responsibility of an
-external verifier. It describes the runtime retained on
-`procontract-strength` after the default execution policy was removed. It does
-not claim that a hash proves the truth of the bytes it names.
+external verifier. It describes the hardened runtime after the repeated
+Contract dossier was removed; the later restored static broad-then-targeted
+execution rule grants no authority and changes no evidence decision. This audit
+does not claim that a hash proves the truth of the bytes it names.
 
 ## Result
 
@@ -68,6 +69,12 @@ brief, exact prerequisite revisions, capabilities, budget, evidence policy,
 and resolution policy. The kernel recomputes its canonical `specHash` at issue
 and revision admission. A revision cannot change dependency edges, and only
 the issuer can accept it.
+
+Concrete replay shape and execution-policy-source validation run in the same
+transactional service admission path but outside the pure reducer. Invalid
+profiles still create an audited rejected issue and no Contract row. The
+reducer treats those fields as opaque terms while retaining exact dependency
+identity and activation support checks.
 
 The optional replay policy freezes:
 

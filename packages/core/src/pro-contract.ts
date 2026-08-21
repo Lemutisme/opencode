@@ -175,6 +175,22 @@ export function info(contract: ProContractKernel.Contract): Schema.Info {
   })
 }
 
+// Adapter-profile failures stay transactional and audited without becoming authority-changing kernel semantics.
+function issueProfileRejection(state: ProContractKernel.State, draft: ProContractKernel.Draft) {
+  const replay = draft.spec.evidence.replay
+  if (replay && replay.checks.length === 0 && replay.protected.length === 0 && replay.artifacts.length === 0)
+    return "replay policy is empty"
+  if (replay?.checks.some((check) => check.argv.length === 0)) return "replay check command is empty"
+  const policies = draft.spec.requires.filter((requirement) => requirement.policy)
+  if (policies.length > 1) return "contract may require only one execution policy"
+  const requirement = policies[0]
+  if (!requirement) return
+  const dependency = state.contracts[requirement.contractID]
+  if (!dependency) return
+  if (!dependency.spec.policy) return "required contract defines no execution policy"
+  if (dependency.status !== "discharged" || !dependency.attestationID) return "execution policy is not evidenced"
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -200,13 +216,15 @@ const layer = Layer.effect(
                     .get()
                     .pipe(Effect.orDie)
                 : undefined
-              const result = ProContractKernel.transition(
-                {
-                  contracts: Object.fromEntries(stored.map((row) => [row.data.id, row.data])),
-                  attestations: attestation ? { [attestation.data.id]: attestation.data } : {},
-                },
-                command,
-              )
+              const state = {
+                contracts: Object.fromEntries(stored.map((row) => [row.data.id, row.data])),
+                attestations: attestation ? { [attestation.data.id]: attestation.data } : {},
+              }
+              const reason = command.type === "issue" ? issueProfileRejection(state, command.draft) : undefined
+              const decision = reason ? { type: "rejected" as const, reason } : undefined
+              const result = decision
+                ? { state, decision, event: { command, decision } }
+                : ProContractKernel.transition(state, command)
               const current = result.state.contracts[contractID]
               if (result.decision.type === "accepted" && current)
                 yield* Effect.forEach(
