@@ -81,6 +81,52 @@ describe("Snapshot", () => {
     ),
   )
 
+  testEffect(Layer.empty).live("force includes ignored delivery artifacts", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const project = path.join(tmp.path, "project")
+          const location = path.join(project, "scope")
+          const artifact = Buffer.alloc(2 * 1024 * 1024 + 1, 7)
+          yield* Effect.promise(async () => {
+            await fs.mkdir(location, { recursive: true })
+            await fs.writeFile(path.join(location, ".gitignore"), "executable\n")
+            await $`git init`.cwd(project).quiet()
+            await $`git config core.fsmonitor false`.cwd(project).quiet()
+            await $`git config commit.gpgsign false`.cwd(project).quiet()
+            await $`git config user.email test@opencode.test`.cwd(project).quiet()
+            await $`git config user.name Test`.cwd(project).quiet()
+            await $`git add .`.cwd(project).quiet()
+            await $`git commit -m initial`.cwd(project).quiet()
+            await fs.writeFile(path.join(location, "executable"), artifact)
+          })
+
+          yield* Effect.gen(function* () {
+            const snapshot = yield* Snapshot.Service
+            const normal = yield* snapshot.capture()
+            expect(normal).toBeDefined()
+            if (!normal) return
+            const normalDirectory = AbsolutePath.make(path.join(tmp.path, "normal"))
+            yield* snapshot.materialize({ snapshot: normal, directory: normalDirectory })
+            expect(yield* Effect.promise(() => Bun.file(path.join(normalDirectory, "scope", "executable")).exists())).toBe(
+              false,
+            )
+
+            const included = yield* snapshot.capture({ include: [RelativePath.make("executable")] })
+            expect(included).toBeDefined()
+            if (!included) return
+            const includedDirectory = AbsolutePath.make(path.join(tmp.path, "included"))
+            yield* snapshot.materialize({ snapshot: included, directory: includedDirectory })
+            expect(yield* Effect.promise(() => fs.readFile(path.join(includedDirectory, "scope", "executable")))).toEqual(
+              artifact,
+            )
+          }).pipe(Effect.provide(snapshotLayer(tmp.path, location)))
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

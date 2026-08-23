@@ -143,7 +143,8 @@ const layer = Layer.effectDiscard(
               const contract = yield* contracts.get(binding.contractID)
               if (!contract) return yield* new ToolFailure({ message: "Contract not found" })
               const now = yield* Clock.currentTimeMillis
-              const subjectHash = yield* snapshots.capture()
+              const policy = contract.spec.evidence.replay
+              const subjectHash = yield* snapshots.capture({ include: policy?.artifacts })
               if (!subjectHash) {
                 const message = "Contract handoff snapshot is unavailable"
                 const receipt = yield* contracts.escalate({
@@ -156,11 +157,11 @@ const layer = Layer.effectDiscard(
                   return yield* new ToolFailure({ message: receipt.decision.reason })
                 return yield* new ToolFailure({ message })
               }
-              const replay = contract.spec.evidence.replay
+              const replay = policy
                 ? yield* replayVerifier
                     .verify({
                       contractID: contract.id,
-                      policy: contract.spec.evidence.replay,
+                      policy,
                       subjectHash,
                     })
                     .pipe(

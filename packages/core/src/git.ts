@@ -142,6 +142,7 @@ export interface Interface {
       scopes: readonly RelativePath[]
       ignores?: Repository
       maximumUntrackedFileBytes?: number
+      forceInclude?: readonly RelativePath[]
     }) => Effect.Effect<TreeID, OperationError>
     readonly write: (repository: Repository) => Effect.Effect<TreeID, OperationError>
     readonly files: (input: {
@@ -537,11 +538,29 @@ const layer = Layer.effect(
         scopes: readonly RelativePath[]
         ignores?: Repository
         maximumUntrackedFileBytes?: number
+        forceInclude?: readonly RelativePath[]
       }) =>
         locked(
           input.repository,
           Effect.gen(function* () {
             yield* Effect.forEach(input.scopes, (scope) => refresh({ ...input, scope }), { discard: true })
+            const force = (
+              yield* Effect.forEach(
+                input.forceInclude ?? [],
+                (item) =>
+                  fs
+                    .existsSafe(path.join(input.repository.worktree, item))
+                    .pipe(Effect.map((exists) => (exists ? item : undefined))),
+                { concurrency: 8 },
+              )
+            ).filter((item): item is RelativePath => item !== undefined)
+            if (force.length)
+              yield* repositoryOperation(
+                "refresh",
+                input.repository,
+                ["add", "--all", "--force", "--sparse", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                { stdin: force.join("\0") + "\0" },
+              )
             return yield* writeTree(input.repository)
           }),
         ),

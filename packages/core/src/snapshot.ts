@@ -28,6 +28,11 @@ export interface CompareInput {
   readonly to: ID
 }
 
+export interface CaptureInput {
+  /** Location-relative paths that must be captured even when ignored or larger than the normal snapshot limit. */
+  readonly include?: readonly RelativePath[]
+}
+
 export interface DiffInput extends CompareInput {
   readonly context?: number
   readonly paths?: readonly RelativePath[]
@@ -48,7 +53,7 @@ export interface Interface {
    * tree. Returns `undefined` when snapshots are disabled, unsupported, or the
    * best-effort capture fails.
    */
-  readonly capture: () => Effect.Effect<ID | undefined>
+  readonly capture: (input?: CaptureInput) => Effect.Effect<ID | undefined>
 
   /**
    * List project-relative paths changed between two captured trees without
@@ -135,16 +140,25 @@ const layer = Layer.effect(
       return Config.latest(yield* config.entries(), "snapshots") !== false
     })
 
-    const capture = Effect.fn("Snapshot.capture")(function* () {
+    const capture = Effect.fn("Snapshot.capture")(function* (input?: CaptureInput) {
       if (!(yield* enabled())) return undefined
       return yield* Effect.gen(function* () {
         const repo = yield* repository()
+        const forceInclude = yield* Effect.forEach(input?.include ?? [], (item) =>
+          Effect.gen(function* () {
+            const target = path.resolve(location.directory, item)
+            if (!FSUtil.contains(location.directory, target))
+              return yield* new Error({ operation: "capture", message: `Included path escapes the Location: ${item}` })
+            return RelativePath.make(path.relative(worktree, target).replaceAll("\\", "/") || ".")
+          }),
+        )
         return ID.make(
           yield* git.tree.capture({
             repository: repo,
             scopes: [yield* scope()],
             ignores: source,
             maximumUntrackedFileBytes: 2 * 1024 * 1024,
+            forceInclude,
           }),
         )
       }).pipe(
