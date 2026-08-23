@@ -11,6 +11,7 @@ import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { ProContract } from "../pro-contract"
 import { ProContractOpenCodeSessionTable, ProContractOpenCodeTable, ProContractTable } from "./sql"
+import { Hash } from "../util/hash"
 
 export type Binding = {
   readonly contractID: Schema.ID
@@ -66,6 +67,82 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/ProContractOpenCode") {}
 
 const LEASE_MS = 30_000
+const AUTHORITIES = new Set(["filesystem.read", "filesystem.write", "process.execute"])
+
+export type CompilerViolation = {
+  readonly rule: "authority" | "artifact"
+  readonly values: ReadonlyArray<string>
+  readonly message: string
+}
+
+export function diagnoseSpec(input: { readonly spec: Schema.Spec; readonly request?: string }) {
+  const unknown = input.spec.authority.filter((authority) => !AUTHORITIES.has(authority))
+  const unnamed = input.request
+    ? (input.spec.evidence.replay?.artifacts ?? []).filter(
+        (artifact) => !input.request!.includes(artifact) && !input.request!.includes(`./${artifact}`),
+      )
+    : []
+  return [
+    ...(unknown.length
+      ? [
+          {
+            rule: "authority" as const,
+            values: unknown,
+            message: `OpenCode cannot execute delegated authority: ${unknown.join(", ")}`,
+          },
+        ]
+      : []),
+    ...(unnamed.length
+      ? [
+          {
+            rule: "artifact" as const,
+            values: unnamed,
+            message: `Replay artifacts must be exact paths named by the user: ${unnamed.join(", ")}`,
+          },
+        ]
+      : []),
+  ] satisfies CompilerViolation[]
+}
+
+export function compileSpec(input: {
+  readonly spec: Schema.Spec
+  readonly request?: string
+  readonly configuredPolicy?: Schema.Requirement
+}) {
+  const draft = ProContract.normalizeSpec(input.spec)
+  const inherited =
+    input.configuredPolicy && !draft.requires.some((requirement) => requirement.policy)
+      ? {
+          ...draft,
+          requires: [
+            ...draft.requires.filter((requirement) => requirement.contractID !== input.configuredPolicy?.contractID),
+            input.configuredPolicy,
+          ],
+        }
+      : draft
+  const original = input.request ? `Original request:\n${input.request}` : undefined
+  const spec = Schema.Spec.make({
+    ...inherited,
+    brief:
+      original && !inherited.brief.includes(original)
+        ? [inherited.brief, original].filter(Boolean).join("\n\n")
+        : inherited.brief,
+  })
+  const violations = diagnoseSpec({ spec, request: input.request })
+  if (violations.length)
+    return { type: "rejected" as const, reason: violations.map((item) => item.message).join("; "), violations }
+  const specHash = ProContract.hashSpec(spec)
+  const manifest = {
+    version: 1 as const,
+    adapter: "opencode" as const,
+    specHash,
+    requestHash: input.request ? Hash.sha256(input.request) : undefined,
+    authority: spec.authority,
+    replayArtifacts: spec.evidence.replay?.artifacts ?? [],
+    policyRequirement: spec.requires.find((requirement) => requirement.policy),
+  }
+  return { type: "accepted" as const, spec, specHash, manifest, manifestHash: Hash.sha256(JSON.stringify(manifest)) }
+}
 
 export function attemptKey(contract: ProContract.Contract) {
   const context =

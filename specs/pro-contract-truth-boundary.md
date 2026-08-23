@@ -151,7 +151,7 @@ responsibility instead of erasing history.
 
 | Input or boundary | Current owner | Institution checks | Institution does not check |
 | --- | --- | --- | --- |
-| Goal, claim, replay policy, protected hashes | Principal at proposal/issue | Canonical `specHash`, shape, finite replay structure, immutable revision rules | Whether the claim is useful, the policy is sufficient, protected bytes are a sound oracle, or the stopping rule is valid |
+| Goal, claim, replay policy, protected hashes | Principal plus OpenCode compiler at proposal/issue | Canonical `specHash`, executable OpenCode authority, user-named replay artifacts, shape, finite replay structure, immutable revision rules | Whether the claim is useful, the policy is sufficient, protected bytes are a sound oracle, or the stopping rule is valid |
 | `subjectHash` at executor handoff | Location Snapshot service | Replay and attestation must name it exactly | That the configured Location contains every real-world object relevant to the claim |
 | Replay process and report | In-process replay service plus host | Frozen policy/subject, path containment, exits, file observations, content hash | Network isolation, clean environment, credential isolation, image/toolchain identity, verifier executable identity, signatures, or task-level adequacy |
 | Principal `evidenceHash` | Authenticated HTTP caller or local CLI | Nonempty, exact attestation coordinates, issuer role, distinct from replay hash | Report availability, bytes matching the hash, report schema, pass rule, verifier origin, signature, independence beyond hash inequality, or whether it settles `evidence.claim` |

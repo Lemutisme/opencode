@@ -160,6 +160,13 @@ Continue normally     create no Contract
 
 Rejecting a proposal creates neither a Contract nor an execution binding.
 
+OpenCode compiles every tool/API proposal through the same pure adapter profile
+before issue. The compiler rejects unrecognized OpenCode authority and replay
+artifacts absent from the original request, then exposes a content-addressed
+manifest in principal review metadata. Repeating the same compiled input is
+idempotent. Other execution adapters may recognize different authority; do not
+move this vocabulary into generic ProContract Schema.
+
 A proposal may bind one previously discharged Contract as its execution policy
 by setting `policy: true` on that requirement. OpenCode injects the policy
 Contract's exact `spec.policy` once into the dedicated Session. The

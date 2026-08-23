@@ -433,6 +433,13 @@ They do not guess implementation-specific source paths; the build check covers
 its inputs. Proposal admission rejects model-authored artifact paths absent from
 the original request. Budgets, deadlines, and attempt limits are ratified exactly
 as proposed and remain total across all attempts.
+Before principal permission or direct HTTP issuance, the OpenCode compiler
+normalizes the proposal, inherits at most one configured ratified policy,
+preserves the original request idempotently, rejects authority identifiers its
+adapter cannot execute, and rejects replay artifacts not named by the user. It
+emits a deterministic manifest binding the compiled `specHash`, request hash,
+authority, replay artifacts, and policy requirement. These are OpenCode profile
+rules, not generic Schema or kernel semantics.
 The existing permission UI shows the optimization goal, settlement claim,
 delegated authority, budget, dependencies, evidence policy, and specification hash. Headless `--auto`
 rejects principal governance requests; it cannot ratify a Contract or bypass

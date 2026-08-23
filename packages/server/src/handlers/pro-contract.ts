@@ -44,10 +44,13 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             evidence: ctx.payload.evidence ?? defaults.evidence,
             resolution: ctx.payload.resolution ?? defaults.resolution,
           }
+          const compiled = ProContractOpenCode.compileSpec({ spec })
+          if (compiled.type === "rejected")
+            return yield* new ConflictError({ message: compiled.reason, resource: ctx.payload.id })
           const issued = yield* bindings.issue({
             id,
             scope: ctx.payload.scope,
-            spec,
+            spec: compiled.spec,
             location: ctx.payload.location,
             model: ctx.payload.model,
             now,

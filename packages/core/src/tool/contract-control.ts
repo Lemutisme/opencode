@@ -48,38 +48,16 @@ const layer = Layer.effectDiscard(
                 return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
               const now = yield* Clock.currentTimeMillis
               const request = (yield* sessions.context(context.sessionID)).find((item) => item.type === "user")?.text
-              const unnamedArtifacts = request
-                ? (input.spec.evidence.replay?.artifacts ?? []).filter(
-                    (artifact) => !request.includes(artifact) && !request.includes(`./${artifact}`),
-                  )
-                : []
-              if (unnamedArtifacts.length)
-                return yield* new ToolFailure({
-                  message: `Replay artifacts must be exact paths named by the user: ${unnamedArtifacts.join(", ")}`,
-                })
-              const draft = ProContract.normalizeSpec(input.spec)
-              const configuredPolicy = Config.latest(yield* config.entries(), "contract_policy")
-              const inherited =
-                configuredPolicy && !draft.requires.some((requirement) => requirement.policy)
-                  ? {
-                      ...draft,
-                      requires: [
-                        ...draft.requires.filter(
-                          (requirement) => requirement.contractID !== configuredPolicy.contractID,
-                        ),
-                        configuredPolicy,
-                      ],
-                    }
-                  : draft
-              const spec = request
-                ? {
-                    ...inherited,
-                    brief: [inherited.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
-                  }
-                : inherited
+              const compiled = ProContractOpenCode.compileSpec({
+                spec: input.spec,
+                request,
+                configuredPolicy: Config.latest(yield* config.entries(), "contract_policy"),
+              })
+              if (compiled.type === "rejected") return yield* new ToolFailure({ message: compiled.reason })
+              const spec = compiled.spec
               const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
               const contractID = ProContract.ID.make(`pct_${key}`)
-              const specHash = ProContract.hashSpec(spec)
+              const specHash = compiled.specHash
               yield* permissions.assert({
                 id: PermissionV2.ID.create(`per_${key}`),
                 action: "contract_issue",
@@ -97,6 +75,7 @@ const layer = Layer.effectDiscard(
                     `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}${item.policy ? " (policy)" : ""}`).join(", ") || "none"}`,
                     `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                     `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
+                    `Compiler manifest: ${compiled.manifestHash}`,
                     `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
                   ]
                     .filter((item) => item !== undefined)

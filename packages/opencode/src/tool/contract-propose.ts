@@ -43,31 +43,20 @@ export const ContractProposeTool = Tool.define<
             return yield* Effect.die("This Session already delegated its obligation to a Contract")
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
-          const draft = ProContract.normalizeSpec(input.spec)
-          const configuredPolicy = (yield* config.get()).contract_policy
-          const inherited =
-            configuredPolicy && !draft.requires.some((requirement) => requirement.policy)
-              ? {
-                  ...draft,
-                  requires: [
-                    ...draft.requires.filter((requirement) => requirement.contractID !== configuredPolicy.contractID),
-                    configuredPolicy,
-                  ],
-                }
-              : draft
           const request = ctx.messages
             .findLast((item) => item.info.role === "user")
             ?.parts.flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
             .join("\n")
-          const spec = request
-            ? {
-                ...inherited,
-                brief: [inherited.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
-              }
-            : inherited
+          const compiled = ProContractOpenCode.compileSpec({
+            spec: input.spec,
+            request,
+            configuredPolicy: (yield* config.get()).contract_policy,
+          })
+          if (compiled.type === "rejected") return yield* Effect.die(compiled.reason)
+          const spec = compiled.spec
           const key = Hash.sha256(`${ctx.sessionID}:${ctx.messageID}:${ctx.callID ?? ""}`)
           const contractID = ProContract.ID.make(`pct_${key}`)
-          const specHash = ProContract.hashSpec(spec)
+          const specHash = compiled.specHash
           yield* ctx.ask({
             permission: "contract_issue",
             patterns: [specHash],
@@ -85,6 +74,7 @@ export const ContractProposeTool = Tool.define<
                 `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}${item.policy ? " (policy)" : ""}`).join(", ") || "none"}`,
                 `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                 `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
+                `Compiler manifest: ${compiled.manifestHash}`,
                 `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
               ]
                 .filter((item) => item !== undefined)

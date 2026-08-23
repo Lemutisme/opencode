@@ -22,6 +22,38 @@ function authorization() {
 }
 
 describe("ProContract HttpApi", () => {
+  test("rejects an authority the OpenCode adapter cannot execute", async () => {
+    Flag.OPENCODE_SERVER_PASSWORD = "contract-secret"
+    process.env.OPENCODE_SERVER_PASSWORD = "contract-secret"
+    const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+    try {
+      const rejected = await fetch(new URL("/api/contract", listener.url), {
+        method: "POST",
+        headers: { authorization: authorization(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "pct_http_unknown_authority",
+          scope: "http",
+          goal: "Reject an unusable execution profile",
+          authority: ["workspace.read", "workspace.execute"],
+          location: { directory: process.cwd() },
+          model: { providerID: "openai", id: "gpt-5.4" },
+        }),
+      })
+
+      expect(rejected.status).toBe(409)
+      expect(await rejected.json()).toMatchObject({ message: expect.stringContaining("workspace.read") })
+      expect(
+        (
+          await fetch(new URL("/api/contract/pct_http_unknown_authority", listener.url), {
+            headers: { authorization: authorization() },
+          })
+        ).status,
+      ).toBe(404)
+    } finally {
+      await listener.stop(true)
+    }
+  })
+
   test("rejects a missing dependency without leaving an execution binding", async () => {
     Flag.OPENCODE_SERVER_PASSWORD = "contract-secret"
     process.env.OPENCODE_SERVER_PASSWORD = "contract-secret"

@@ -128,7 +128,8 @@ execution adapter
 
 compiler
   natural-language goal/brief, decomposition, trigger interpretation,
-  exploration allocation, implementation and stopping policy
+  adapter authority validation, artifact provenance, exploration allocation,
+  implementation and stopping policy, content-addressed compilation receipt
 
 verifier adapter
   replay commands, files, proofs, rubrics, test images,
