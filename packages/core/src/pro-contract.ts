@@ -28,6 +28,7 @@ import { ProContractKernel } from "./pro-contract/kernel"
 import {
   ProContractAttestationTable,
   ProContractEventTable,
+  ProContractFormationTable,
   ProContractLedgerTable,
   ProContractTable,
 } from "./pro-contract/sql"
@@ -38,6 +39,28 @@ const ZERO_HASH = "0".repeat(64)
 export type Receipt = ProContractKernel.Result & { readonly frontier: number; readonly hash: string }
 export type IssueReceipt = Receipt & { readonly contract?: ProContractKernel.Contract }
 export type HistoryEntry = typeof ProContractEventTable.$inferSelect
+export type IssueInput = {
+  readonly id: Schema.ID
+  readonly scope: string
+  readonly spec: Schema.Spec
+  readonly executor: string
+}
+export type FormationReceipt = {
+  readonly formationHash: string
+  readonly contextHash: string
+  readonly rootContractID: Schema.ID
+  readonly components: ReadonlyArray<{ readonly contractID: Schema.ID; readonly specHash: string }>
+  readonly frontier: number
+  readonly ledgerHash: string
+}
+export type FormationResult = {
+  readonly formationHash: string
+  readonly decision: ProContractKernel.Decision
+  readonly formation?: FormationReceipt
+  readonly contracts: ReadonlyArray<ProContractKernel.Contract>
+  readonly frontier: number
+  readonly hash: string
+}
 export type EvaluationReport = {
   readonly deliveryContractID: Schema.ID
   readonly deliveryRevision: number
@@ -55,6 +78,10 @@ export interface Interface {
     readonly spec: Schema.Spec
     readonly executor: string
   }) => Effect.Effect<IssueReceipt>
+  readonly form: (input: {
+    readonly contextHash: string
+    readonly issues: readonly [IssueInput, ...IssueInput[]]
+  }) => Effect.Effect<FormationResult>
   readonly issueEvaluation: (input: {
     readonly deliveryContractID: Schema.ID
     readonly evaluatorHash: string
@@ -140,6 +167,35 @@ export function evaluationID(deliveryContractID: Schema.ID, revision: number, ev
   return Schema.ID.make(`pct_eval_${Hash.sha256(JSON.stringify([deliveryContractID, revision, evaluatorHash]))}`)
 }
 
+export function evaluationSpec(input: {
+  readonly deliveryContractID: Schema.ID
+  readonly deliveryRevision: number
+  readonly deliveryGoal: string
+  readonly evaluatorHash: string
+  readonly deadline: number
+}) {
+  return Schema.Spec.make({
+    trigger: { type: "immediate" },
+    goal: `Independently evaluate the exact handoff for: ${input.deliveryGoal}`,
+    brief: `Evaluate ${input.deliveryContractID}@${input.deliveryRevision} with evaluator ${input.evaluatorHash}. Delivery evidence alone does not settle this obligation.`,
+    requires: [{ contractID: input.deliveryContractID, revision: input.deliveryRevision }],
+    authority: [],
+    budget: { turns: 1, actions: 1, deadline: input.deadline },
+    evidence: {
+      type: "principal",
+      claim: `Evaluator ${input.evaluatorHash} accepted the exact handoff from ${input.deliveryContractID}@${input.deliveryRevision}.`,
+    },
+    resolution: { maxAttempts: 1, retryDelay: 0 },
+  })
+}
+
+export function hashFormation(input: {
+  readonly contextHash: string
+  readonly components: FormationReceipt["components"]
+}) {
+  return Hash.sha256(JSON.stringify({ version: 1, contextHash: input.contextHash, components: input.components }))
+}
+
 export function normalizeSpec(spec: Schema.Spec) {
   if (spec.evidence.claim) return spec
   return Schema.Spec.make({ ...spec, evidence: { ...spec.evidence, claim: spec.goal } })
@@ -197,59 +253,137 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
 
-    const execute = Effect.fn("ProContract.execute")((command: ProContractKernel.Command) =>
-      db
+    const transact = Effect.fn("ProContract.transact")(function* (input: {
+      readonly commands: readonly [ProContractKernel.Command, ...ProContractKernel.Command[]]
+      readonly formation?: {
+        readonly formationHash: string
+        readonly contextHash: string
+        readonly rootContractID: Schema.ID
+        readonly components: FormationReceipt["components"]
+      }
+    }) {
+      return yield* db
         .transaction(
           (tx) =>
             Effect.gen(function* () {
-              const contractID = command.type === "issue" ? command.draft.id : command.contractID
               const stored = yield* tx
                 .select({ data: ProContractTable.data })
                 .from(ProContractTable)
                 .all()
                 .pipe(Effect.orDie)
-              const attestationID = command.type === "discharge" ? command.attestation.id : undefined
-              const attestation = attestationID
-                ? yield* tx
+              const attestations = yield* Effect.forEach(
+                input.commands.flatMap((command) => (command.type === "discharge" ? [command.attestation.id] : [])),
+                (id) =>
+                  tx
                     .select({ data: ProContractAttestationTable.data })
                     .from(ProContractAttestationTable)
-                    .where(eq(ProContractAttestationTable.id, attestationID))
+                    .where(eq(ProContractAttestationTable.id, id))
+                    .get()
+                    .pipe(Effect.orDie),
+              )
+              const state = {
+                contracts: Object.fromEntries(stored.map((row) => [row.data.id, row.data])),
+                attestations: Object.fromEntries(
+                  attestations.flatMap((row) => (row ? [[row.data.id, row.data] as const] : [])),
+                ),
+              }
+              const exact = input.formation
+                ? yield* tx
+                    .select({ data: ProContractFormationTable.data })
+                    .from(ProContractFormationTable)
+                    .where(eq(ProContractFormationTable.hash, input.formation.formationHash))
                     .get()
                     .pipe(Effect.orDie)
                 : undefined
-              const state = {
-                contracts: Object.fromEntries(stored.map((row) => [row.data.id, row.data])),
-                attestations: attestation ? { [attestation.data.id]: attestation.data } : {},
-              }
-              const reason = command.type === "issue" ? issueProfileRejection(state, command.draft) : undefined
-              const decision = reason ? { type: "rejected" as const, reason } : undefined
-              const result = decision
-                ? { state, decision, event: { command, decision } }
-                : ProContractKernel.transition(state, command)
-              const current = result.state.contracts[contractID]
-              if (result.decision.type === "accepted" && current)
+              if (exact && JSON.stringify(exact.data.components) === JSON.stringify(input.formation?.components))
+                return {
+                  state,
+                  results: [] as ProContractKernel.Result[],
+                  formation: exact.data,
+                  frontier: exact.data.frontier,
+                  hash: exact.data.ledgerHash,
+                }
+              const root = input.formation
+                ? yield* tx
+                    .select({ data: ProContractFormationTable.data })
+                    .from(ProContractFormationTable)
+                    .where(eq(ProContractFormationTable.root_contract_id, input.formation.rootContractID))
+                    .get()
+                    .pipe(Effect.orDie)
+                : undefined
+              const applied = input.commands.reduce(
+                (current, command) => {
+                  const reason =
+                    command.type === "issue" ? issueProfileRejection(current.state, command.draft) : undefined
+                  const decision = reason ? { type: "rejected" as const, reason } : undefined
+                  const result = decision
+                    ? { state: current.state, decision, event: { command, decision } }
+                    : ProContractKernel.transition(current.state, command)
+                  return { state: result.state, results: [...current.results, result] }
+                },
+                { state, results: [] as ProContractKernel.Result[] },
+              )
+              const rejected = applied.results.find((result) => result.decision.type === "rejected")
+              const outside = input.formation?.components.find((component) => state.contracts[component.contractID])
+              const failure = exact
+                ? "formation hash does not match its components"
+                : root
+                  ? `contract belongs to formation ${root.data.formationHash}`
+                  : outside
+                    ? `component exists outside formation: ${outside.contractID}`
+                    : rejected?.decision.type === "rejected"
+                      ? rejected.decision.reason
+                      : undefined
+              const results =
+                input.formation && failure
+                  ? input.commands.map((command) => {
+                      const decision = {
+                        type: "rejected" as const,
+                        reason: `formation ${input.formation?.formationHash} rejected: ${failure}`,
+                      }
+                      return { state, decision, event: { command, decision } }
+                    })
+                  : applied.results
+              const next = input.formation && failure ? state : applied.state
+              if (!failure || !input.formation) {
+                const changed = input.commands.some(
+                  (command, index) => command.type === "challenge" && results[index]?.decision.type === "accepted",
+                )
+                  ? Object.values(next.contracts)
+                  : input.commands.flatMap((command, index) => {
+                      if (results[index]?.decision.type !== "accepted") return []
+                      const id = command.type === "issue" ? command.draft.id : command.contractID
+                      const contract = next.contracts[id]
+                      return contract ? [contract] : []
+                    })
                 yield* Effect.forEach(
-                  command.type === "challenge" ? Object.values(result.state.contracts) : [current],
-                  (current) =>
+                  changed,
+                  (contract) =>
                     tx
                       .insert(ProContractTable)
-                      .values({ id: current.id, scope: current.scope, status: current.status, data: current })
+                      .values({ id: contract.id, scope: contract.scope, status: contract.status, data: contract })
                       .onConflictDoUpdate({
                         target: ProContractTable.id,
-                        set: { scope: current.scope, status: current.status, data: current },
+                        set: { scope: contract.scope, status: contract.status, data: contract },
                       })
                       .run()
                       .pipe(Effect.orDie),
                   { discard: true },
                 )
-              if (result.decision.type === "accepted" && command.type === "discharge") {
-                const recorded = result.state.attestations[command.attestation.id]
-                if (!recorded) return yield* Effect.die("Accepted attestation was not recorded")
-                yield* tx
-                  .insert(ProContractAttestationTable)
-                  .values({ id: recorded.id, contract_id: recorded.contractID, data: recorded })
-                  .run()
-                  .pipe(Effect.orDie)
+                yield* Effect.forEach(
+                  input.commands.flatMap((command, index) => {
+                    if (command.type !== "discharge" || results[index]?.decision.type !== "accepted") return []
+                    const recorded = next.attestations[command.attestation.id]
+                    return recorded ? [recorded] : []
+                  }),
+                  (attestation) =>
+                    tx
+                      .insert(ProContractAttestationTable)
+                      .values({ id: attestation.id, contract_id: attestation.contractID, data: attestation })
+                      .run()
+                      .pipe(Effect.orDie),
+                  { discard: true },
+                )
               }
               const head = yield* tx
                 .select()
@@ -257,33 +391,91 @@ const layer = Layer.effect(
                 .where(eq(ProContractLedgerTable.id, 1))
                 .get()
                 .pipe(Effect.orDie)
-              const frontier = (head?.head_seq ?? -1) + 1
-              const previous = head?.head_hash ?? ZERO_HASH
-              const hash = Hash.sha256(JSON.stringify([previous, frontier, command, result.decision]))
+              const events = results.reduce<
+                Array<{
+                  seq: number
+                  contractID: Schema.ID
+                  command: ProContractKernel.Command
+                  decision: ProContractKernel.Decision
+                  previous: string
+                  hash: string
+                }>
+              >((events, result, index) => {
+                const seq = (head?.head_seq ?? -1) + index + 1
+                const previous = events.at(-1)?.hash ?? head?.head_hash ?? ZERO_HASH
+                const hash = Hash.sha256(JSON.stringify([previous, seq, result.event.command, result.decision]))
+                const command = result.event.command
+                return [
+                  ...events,
+                  {
+                    seq,
+                    contractID: command.type === "issue" ? command.draft.id : command.contractID,
+                    command,
+                    decision: result.decision,
+                    previous,
+                    hash,
+                  },
+                ]
+              }, [])
+              yield* Effect.forEach(
+                events,
+                (event) =>
+                  tx
+                    .insert(ProContractEventTable)
+                    .values({
+                      seq: event.seq,
+                      contract_id: event.contractID,
+                      command: event.command,
+                      decision: event.decision,
+                      previous_hash: event.previous,
+                      hash: event.hash,
+                    })
+                    .run()
+                    .pipe(Effect.orDie),
+                { discard: true },
+              )
+              const last = events.at(-1)
+              if (!last) return yield* Effect.die("Contract transaction produced no ledger event")
               yield* tx
-                .insert(ProContractEventTable)
-                .values({
-                  seq: frontier,
-                  contract_id: contractID,
-                  command,
-                  decision: result.decision,
-                  previous_hash: previous,
-                  hash,
+                .insert(ProContractLedgerTable)
+                .values({ id: 1, head_seq: last.seq, head_hash: last.hash })
+                .onConflictDoUpdate({
+                  target: ProContractLedgerTable.id,
+                  set: { head_seq: last.seq, head_hash: last.hash },
                 })
                 .run()
                 .pipe(Effect.orDie)
-              yield* tx
-                .insert(ProContractLedgerTable)
-                .values({ id: 1, head_seq: frontier, head_hash: hash })
-                .onConflictDoUpdate({ target: ProContractLedgerTable.id, set: { head_seq: frontier, head_hash: hash } })
-                .run()
-                .pipe(Effect.orDie)
-              return { ...result, frontier, hash }
+              const formation =
+                input.formation && !failure
+                  ? {
+                      ...input.formation,
+                      frontier: last.seq,
+                      ledgerHash: last.hash,
+                    }
+                  : undefined
+              if (formation)
+                yield* tx
+                  .insert(ProContractFormationTable)
+                  .values({
+                    hash: formation.formationHash,
+                    root_contract_id: formation.rootContractID,
+                    data: formation,
+                  })
+                  .run()
+                  .pipe(Effect.orDie)
+              return { state: next, results, formation, frontier: last.seq, hash: last.hash }
             }),
           { behavior: "immediate" },
         )
-        .pipe(Effect.orDie),
-    )
+        .pipe(Effect.orDie)
+    })
+
+    const execute = Effect.fn("ProContract.execute")(function* (command: ProContractKernel.Command) {
+      const transaction = yield* transact({ commands: [command] })
+      const result = transaction.results[0]
+      if (!result) return yield* Effect.die("Contract transaction produced no decision")
+      return { ...result, frontier: transaction.frontier, hash: transaction.hash }
+    })
 
     const discharge = Effect.fnUntraced(function* (contract: ProContractKernel.Contract, evidenceHash: string) {
       return yield* execute({
@@ -340,8 +532,61 @@ const layer = Layer.effect(
       return { ...receipt, contract }
     })
 
+    const form = Effect.fn("ProContract.form")(function* (input: {
+      readonly contextHash: string
+      readonly issues: readonly [IssueInput, ...IssueInput[]]
+    }) {
+      const issues = input.issues.map((item) => ({ ...item, spec: normalizeSpec(item.spec) }))
+      const commands = issues.map(
+        (item) =>
+          ({
+            type: "issue",
+            actor: "local-owner",
+            draft: {
+              ...item,
+              issuer: "local-owner",
+              specHash: ProContractKernel.hashSpec(item.spec),
+            },
+          }) as const,
+      )
+      const command = commands[0]
+      if (!command) return yield* Effect.die("Formation requires at least one Contract")
+      const components = commands.map((item) => ({
+        contractID: item.draft.id,
+        specHash: item.draft.specHash,
+      }))
+      const formationHash = hashFormation({ contextHash: input.contextHash, components })
+      const transaction = yield* transact({
+        commands: [command, ...commands.slice(1)],
+        formation: {
+          formationHash,
+          contextHash: input.contextHash,
+          rootContractID: command.draft.id,
+          components,
+        },
+      })
+      const decision = transaction.formation
+        ? { type: "accepted" as const }
+        : (transaction.results[0]?.decision ?? { type: "rejected" as const, reason: "formation was not decided" })
+      return {
+        formationHash,
+        decision,
+        formation: transaction.formation,
+        contracts:
+          decision.type === "accepted"
+            ? components.flatMap((item) => {
+                const contract = transaction.state.contracts[item.contractID]
+                return contract ? [contract] : []
+              })
+            : [],
+        frontier: transaction.frontier,
+        hash: transaction.hash,
+      }
+    })
+
     return Service.of({
       issue,
+      form,
       issueEvaluation: Effect.fn("ProContract.issueEvaluation")(function* (input) {
         const delivery = yield* get(input.deliveryContractID)
         if (!delivery) return yield* Effect.die(`Contract not found: ${input.deliveryContractID}`)
@@ -351,18 +596,12 @@ const layer = Layer.effect(
           id,
           scope: delivery.scope,
           executor: `external-evaluator:${input.evaluatorHash}`,
-          spec: Schema.Spec.make({
-            trigger: { type: "immediate" },
-            goal: `Independently evaluate the exact handoff for: ${delivery.spec.goal}`,
-            brief: `Evaluate ${delivery.id}@${delivery.revision} with evaluator ${input.evaluatorHash}. Delivery evidence alone does not settle this obligation.`,
-            requires: [{ contractID: delivery.id, revision: delivery.revision }],
-            authority: [],
-            budget: { turns: 1, actions: 1, deadline: input.deadline },
-            evidence: {
-              type: "principal",
-              claim: `Evaluator ${input.evaluatorHash} accepted the exact handoff from ${delivery.id}@${delivery.revision}.`,
-            },
-            resolution: { maxAttempts: 1, retryDelay: 0 },
+          spec: evaluationSpec({
+            deliveryContractID: delivery.id,
+            deliveryRevision: delivery.revision,
+            deliveryGoal: delivery.spec.goal,
+            evaluatorHash: input.evaluatorHash,
+            deadline: input.deadline,
           }),
         })
       }),

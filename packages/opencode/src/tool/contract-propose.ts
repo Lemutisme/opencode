@@ -19,6 +19,7 @@ type Metadata = {
   contractID: ProContract.ID
   sessionID: string
   evaluationContractID?: ProContract.ID
+  formationHash: string
 }
 
 export const ContractProposeTool = Tool.define<
@@ -62,13 +63,28 @@ export const ContractProposeTool = Tool.define<
           const key = Hash.sha256(`${ctx.sessionID}:${ctx.messageID}:${ctx.callID ?? ""}`)
           const contractID = ProContract.ID.make(`pct_${key}`)
           const specHash = compiled.specHash
+          const location = { directory: AbsolutePath.make(session.directory), workspaceID: session.workspaceID }
+          const model = ModelV2.Ref.make({
+            id: session.model.id,
+            providerID: session.model.providerID,
+            variant: session.model.variant ? ModelV2.VariantID.make(session.model.variant) : undefined,
+          })
+          const formationHash = ProContractOpenCode.formationHash({
+            id: contractID,
+            scope: session.projectID,
+            spec,
+            location,
+            model,
+            evaluation: input.evaluation,
+          })
           yield* ctx.ask({
             permission: "contract_issue",
-            patterns: [specHash, ...(input.evaluation ? [compiled.manifestHash] : [])],
+            patterns: [formationHash],
             always: [],
             metadata: {
               contractID,
               specHash,
+              formationHash,
               goal: spec.goal,
               details: [
                 spec.brief ? `Brief: ${spec.brief}` : undefined,
@@ -82,6 +98,7 @@ export const ContractProposeTool = Tool.define<
                 input.evaluation
                   ? `Evaluation: ${input.evaluation.evaluatorHash}, deadline ${input.evaluation.deadline}`
                   : "Evaluation: none; delivery settlement is final for this scope",
+                `Formation: ${formationHash}`,
                 `Compiler manifest: ${compiled.manifestHash}`,
                 `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
               ]
@@ -93,17 +110,12 @@ export const ContractProposeTool = Tool.define<
             id: contractID,
             scope: session.projectID,
             spec,
-            location: { directory: AbsolutePath.make(session.directory), workspaceID: session.workspaceID },
-            model: ModelV2.Ref.make({
-              id: session.model.id,
-              providerID: session.model.providerID,
-              variant: session.model.variant ? ModelV2.VariantID.make(session.model.variant) : undefined,
-            }),
+            location,
+            model,
             evaluation: input.evaluation,
             now,
           })
           if (issued.decision.type === "rejected") return yield* Effect.die(issued.decision.reason)
-          if (issued.evaluation?.decision.type === "rejected") return yield* Effect.die(issued.evaluation.decision.reason)
           if (!issued.execution) return yield* Effect.die("Contract execution was not created")
           yield* sessions.setMetadata({
             sessionID: session.id,
@@ -111,11 +123,12 @@ export const ContractProposeTool = Tool.define<
           })
           return {
             title: "Contract issued",
-            output: `Contract ${contractID} was approved and scheduled in Session ${issued.execution.sessionID}.${issued.evaluation?.contract ? ` Evaluation ${issued.evaluation.contract.id} remains outstanding until independent evidence settles the quality claim.` : ""} Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
+            output: `Contract ${contractID} was approved and scheduled in Session ${issued.execution.sessionID}.${issued.evaluation ? ` Evaluation ${issued.evaluation.id} remains outstanding until independent evidence settles the quality claim.` : ""} Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
             metadata: {
               contractID,
               sessionID: issued.execution.sessionID,
-              evaluationContractID: issued.evaluation?.contract?.id,
+              evaluationContractID: issued.evaluation?.id,
+              formationHash: issued.formationHash,
             },
           }
         }),

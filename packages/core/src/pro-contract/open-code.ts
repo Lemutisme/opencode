@@ -30,18 +30,24 @@ export type Binding = {
   readonly attemptKey?: string
 }
 
+export type FormationInput = {
+  readonly id: Schema.ID
+  readonly scope: string
+  readonly spec: Schema.Spec
+  readonly location: Location.Ref
+  readonly model: Model.Ref
+  readonly evaluation?: Schema.EvaluationPlan
+  readonly now: number
+}
+
 export interface Interface {
   readonly owner: string
-  readonly issue: (input: {
-    readonly id: Schema.ID
-    readonly scope: string
-    readonly spec: Schema.Spec
-    readonly location: Location.Ref
-    readonly model: Model.Ref
-    readonly evaluation?: Schema.EvaluationPlan
-    readonly now: number
-  }) => Effect.Effect<
-    ProContract.IssueReceipt & { readonly execution?: Binding; readonly evaluation?: ProContract.IssueReceipt }
+  readonly issue: (input: FormationInput) => Effect.Effect<
+    ProContract.FormationResult & {
+      readonly contract?: ProContract.Contract
+      readonly evaluation?: ProContract.Contract
+      readonly execution?: Binding
+    }
   >
   readonly create: (input: {
     readonly contractID: Schema.ID
@@ -157,9 +163,65 @@ export function compileSpec(input: {
     authority: spec.authority,
     replayArtifacts: spec.evidence.replay?.artifacts ?? [],
     policyRequirement: spec.requires.find((requirement) => requirement.policy),
-    evaluation: input.evaluation,
+    settlement: input.evaluation
+      ? { type: "dependent" as const, evaluation: input.evaluation }
+      : { type: "terminal" as const },
   }
   return { type: "accepted" as const, spec, specHash, manifest, manifestHash: Hash.sha256(JSON.stringify(manifest)) }
+}
+
+export function formationHash(input: Omit<FormationInput, "now">) {
+  return formationPlan(input).formationHash
+}
+
+function formationPlan(input: Omit<FormationInput, "now">) {
+  const spec = ProContract.normalizeSpec(input.spec)
+  const evaluationID = input.evaluation
+    ? ProContract.evaluationID(input.id, 1, input.evaluation.evaluatorHash)
+    : undefined
+  const issues = [
+    { id: input.id, scope: input.scope, spec, executor: "opencode" },
+    ...(input.evaluation && evaluationID
+      ? [
+          {
+            id: evaluationID,
+            scope: input.scope,
+            spec: ProContract.evaluationSpec({
+              deliveryContractID: input.id,
+              deliveryRevision: 1,
+              deliveryGoal: spec.goal,
+              evaluatorHash: input.evaluation.evaluatorHash,
+              deadline: input.evaluation.deadline,
+            }),
+            executor: `external-evaluator:${input.evaluation.evaluatorHash}`,
+          },
+        ]
+      : []),
+  ] satisfies [ProContract.IssueInput, ...ProContract.IssueInput[]]
+  const contextHash = formationContextHash(input)
+  return {
+    spec,
+    evaluationID,
+    issues,
+    contextHash,
+    formationHash: ProContract.hashFormation({
+      contextHash,
+      components: issues.map((item) => ({
+        contractID: item.id,
+        specHash: ProContract.hashSpec(item.spec),
+      })),
+    }),
+  }
+}
+
+export function formationContextHash(input: { readonly location: Location.Ref; readonly model: Model.Ref }) {
+  return Hash.sha256(
+    JSON.stringify({
+      version: 1,
+      location: Location.Ref.make(input.location),
+      model: Model.Ref.make(input.model),
+    }),
+  )
 }
 
 export function attemptKey(contract: ProContract.Contract) {
@@ -326,29 +388,25 @@ const layer = Layer.effect(
     return Service.of({
       owner,
       issue: Effect.fn("ProContractOpenCode.issue")(function* (input) {
-        const receipt = yield* contracts.issue({
-          id: input.id,
-          scope: input.scope,
-          spec: input.spec,
-          executor: "opencode",
+        const plan = formationPlan(input)
+        const formed = yield* contracts.form({
+          contextHash: plan.contextHash,
+          issues: plan.issues,
         })
-        if (receipt.decision.type === "rejected" || !receipt.contract) return receipt
-        const evaluation = input.evaluation
-          ? yield* contracts.issueEvaluation({
-              deliveryContractID: receipt.contract.id,
-              evaluatorHash: input.evaluation.evaluatorHash,
-              deadline: input.evaluation.deadline,
-            })
+        if (formed.decision.type === "rejected") return formed
+        const contract = formed.contracts.find((item) => item.id === input.id)
+        if (!contract) return yield* Effect.die("Formation did not return the Delivery Contract")
+        const evaluation = plan.evaluationID
+          ? formed.contracts.find((item) => item.id === plan.evaluationID)
           : undefined
-        if (evaluation?.decision.type === "rejected") return { ...receipt, evaluation }
         const execution = yield* create({
-          contractID: receipt.contract.id,
-          revision: receipt.contract.revision,
+          contractID: contract.id,
+          revision: contract.revision,
           location: input.location,
           model: input.model,
-          nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
+          nextActionAt: plan.spec.trigger.type === "time" ? plan.spec.trigger.at : input.now,
         })
-        return { ...receipt, execution, evaluation }
+        return { ...formed, contract, evaluation, execution }
       }),
       create,
       claim: Effect.fn("ProContractOpenCode.claim")(function* (contractID, now) {

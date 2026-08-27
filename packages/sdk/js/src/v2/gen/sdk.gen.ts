@@ -132,6 +132,7 @@ import type {
   PermissionV2Source,
   ProContractBudget,
   ProContractCapability,
+  ProContractEvaluationPlan,
   ProContractEvidence,
   ProContractRequirement,
   ProContractResolution,
@@ -7049,6 +7050,7 @@ export class ProContract extends HeyApiClient {
       budget?: ProContractBudget
       evidence?: ProContractEvidence
       resolution?: ProContractResolution
+      evaluation?: ProContractEvaluationPlan
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -7070,6 +7072,7 @@ export class ProContract extends HeyApiClient {
             { in: "body", key: "budget" },
             { in: "body", key: "evidence" },
             { in: "body", key: "resolution" },
+            { in: "body", key: "evaluation" },
           ],
         },
       ],

@@ -58,6 +58,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
         data: ProContract.Info,
         execution: OpenCodeExecution,
         evaluation: ProContract.Info.pipe(Schema.optional),
+        formationHash: Schema.NonEmptyString,
         receipt: Receipt,
       }),
       error: ConflictError,

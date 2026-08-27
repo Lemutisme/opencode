@@ -40,6 +40,7 @@ const layer = Layer.effectDiscard(
             contractID: ProContract.ID,
             sessionID: SessionSchema.ID,
             evaluationContractID: ProContract.ID.pipe(Schema.optional),
+            formationHash: Schema.NonEmptyString,
           }),
           toModelOutput: ({ output }) => [
             {
@@ -66,13 +67,22 @@ const layer = Layer.effectDiscard(
               const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
               const contractID = ProContract.ID.make(`pct_${key}`)
               const specHash = compiled.specHash
+              const formationHash = ProContractOpenCode.formationHash({
+                id: contractID,
+                scope: session.projectID,
+                spec,
+                location: session.location,
+                model: session.model,
+                evaluation: input.evaluation,
+              })
               yield* permissions.assert({
                 id: PermissionV2.ID.create(`per_${key}`),
                 action: "contract_issue",
-                resources: [specHash, ...(input.evaluation ? [compiled.manifestHash] : [])],
+                resources: [formationHash],
                 metadata: {
                   contractID,
                   specHash,
+                  formationHash,
                   goal: spec.goal,
                   details: [
                     spec.brief ? `Brief: ${spec.brief}` : undefined,
@@ -86,6 +96,7 @@ const layer = Layer.effectDiscard(
                     input.evaluation
                       ? `Evaluation: ${input.evaluation.evaluatorHash}, deadline ${input.evaluation.deadline}`
                       : "Evaluation: none; delivery settlement is final for this scope",
+                    `Formation: ${formationHash}`,
                     `Compiler manifest: ${compiled.manifestHash}`,
                     `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
                   ]
@@ -107,13 +118,12 @@ const layer = Layer.effectDiscard(
               })
               if (issued.decision.type === "rejected")
                 return yield* new ToolFailure({ message: issued.decision.reason })
-              if (issued.evaluation?.decision.type === "rejected")
-                return yield* new ToolFailure({ message: issued.evaluation.decision.reason })
               if (!issued.execution) return yield* new ToolFailure({ message: "Contract execution was not created" })
               return {
                 contractID,
                 sessionID: issued.execution.sessionID,
-                evaluationContractID: issued.evaluation?.contract?.id,
+                evaluationContractID: issued.evaluation?.id,
+                formationHash: issued.formationHash,
               }
             }).pipe(
               Effect.mapError((error) =>

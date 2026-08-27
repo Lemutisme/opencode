@@ -6220,6 +6220,11 @@ export type ProContractResolution = {
   retryDelay: number
 }
 
+export type ProContractEvaluationPlan = {
+  evaluatorHash: string
+  deadline: number
+}
+
 export type ProContractSpec = {
   trigger: ProContractTrigger
   goal: string
@@ -13794,6 +13799,7 @@ export type V2ProContractIssueData = {
     budget?: ProContractBudget
     evidence?: ProContractEvidence
     resolution?: ProContractResolution
+    evaluation?: ProContractEvaluationPlan
   }
   path?: never
   query?: never
@@ -13824,6 +13830,8 @@ export type V2ProContractIssueResponses = {
   200: {
     data: ProContractInfo
     execution: ProContractOpenCodeExecution
+    evaluation?: ProContractInfo
+    formationHash: string
     receipt: ProContractReceipt
   }
 }

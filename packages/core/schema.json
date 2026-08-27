@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "58d24b69-5d15-4935-9fb8-a362484dbd6f",
+  "id": "e6e56449-85e6-42c3-837d-0d541ec5642f",
   "prevIds": [
-    "07dc4d15-07d4-4344-9d83-139e95c0e5cf"
+    "58d24b69-5d15-4935-9fb8-a362484dbd6f"
   ],
   "ddl": [
     {
@@ -48,6 +48,10 @@
     },
     {
       "name": "pro_contract_event",
+      "entityType": "tables"
+    },
+    {
+      "name": "pro_contract_formation",
       "entityType": "tables"
     },
     {
@@ -735,6 +739,46 @@
       "name": "time_created",
       "entityType": "columns",
       "table": "pro_contract_event"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "hash",
+      "entityType": "columns",
+      "table": "pro_contract_formation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "root_contract_id",
+      "entityType": "columns",
+      "table": "pro_contract_formation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "pro_contract_formation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "pro_contract_formation"
     },
     {
       "type": "integer",
@@ -2093,6 +2137,15 @@
     },
     {
       "columns": [
+        "hash"
+      ],
+      "nameExplicit": false,
+      "name": "pro_contract_formation_pk",
+      "table": "pro_contract_formation",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
         "id"
       ],
       "nameExplicit": false,
@@ -2292,6 +2345,20 @@
       "name": "pro_contract_event_contract_seq_idx",
       "entityType": "indexes",
       "table": "pro_contract_event"
+    },
+    {
+      "columns": [
+        {
+          "value": "root_contract_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "pro_contract_formation_root_idx",
+      "entityType": "indexes",
+      "table": "pro_contract_formation"
     },
     {
       "columns": [

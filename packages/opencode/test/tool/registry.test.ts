@@ -26,6 +26,7 @@ import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { Session } from "@/session/session"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 const configLayer = TestConfig.layer({
   directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
@@ -194,16 +195,21 @@ describe("tool.registry", () => {
       expect(contract.spec.requires).toEqual([policyRequirement])
       expect(contract.spec.budget).toEqual(proposal.budget)
       expect(contract.spec.resolution).toEqual(proposal.resolution)
-      const compiled = ProContractOpenCode.compileSpec({
-        spec: proposal,
-        request: "Use the prepared data at /home/data",
-        configuredPolicy: policyRequirement,
+      if (!session.model) return yield* Effect.die("Contract proposal Session has no model")
+      const formationHash = ProContractOpenCode.formationHash({
+        id: result.metadata.contractID,
+        scope: session.projectID,
+        spec: contract.spec,
+        location: { directory: AbsolutePath.make(session.directory), workspaceID: session.workspaceID },
+        model: ModelV2.Ref.make({
+          id: session.model.id,
+          providerID: session.model.providerID,
+          variant: session.model.variant ? ModelV2.VariantID.make(session.model.variant) : undefined,
+        }),
         evaluation,
       })
-      if (compiled.type === "rejected") return yield* Effect.die(compiled.reason)
-      expect(asked).toEqual([
-        { permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec), compiled.manifestHash] },
-      ])
+      expect(asked).toEqual([{ permission: "contract_issue", patterns: [formationHash] }])
+      expect(result.metadata.formationHash).toBe(formationHash)
       expect(result.metadata.evaluationContractID).toBe(
         ProContract.evaluationID(result.metadata.contractID, 1, evaluation.evaluatorHash),
       )

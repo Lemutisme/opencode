@@ -117,6 +117,14 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`pro_contract_formation\` (
+          \`hash\` text PRIMARY KEY,
+          \`root_contract_id\` text NOT NULL,
+          \`data\` text NOT NULL,
+          \`time_created\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`pro_contract_ledger\` (
           \`id\` integer PRIMARY KEY,
           \`head_seq\` integer NOT NULL,
@@ -297,6 +305,9 @@ export default {
       )
       yield* tx.run(
         `CREATE INDEX \`pro_contract_event_contract_seq_idx\` ON \`pro_contract_event\` (\`contract_id\`,\`seq\`);`,
+      )
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`pro_contract_formation_root_idx\` ON \`pro_contract_formation\` (\`root_contract_id\`);`,
       )
       yield* tx.run(
         `CREATE INDEX \`pro_contract_opencode_session_contract_idx\` ON \`pro_contract_opencode_session\` (\`contract_id\`);`,

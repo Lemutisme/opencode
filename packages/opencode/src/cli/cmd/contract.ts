@@ -83,7 +83,7 @@ const IssueCommand = effectCmd({
       execution.model.variant !== executionModel.variant
     )
       return yield* fail("Contract execution binding does not match")
-    console.log(JSON.stringify({ contract: ProContract.info(contract), execution }, null, 2))
+    console.log(JSON.stringify({ contract: ProContract.info(contract), execution, formationHash: receipt.formationHash }, null, 2))
     return undefined
   }),
 })

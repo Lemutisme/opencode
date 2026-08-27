@@ -595,10 +595,12 @@ When package/preflight cannot establish the user goal, the preferred HTTP or
 }
 ```
 
-The Evaluation deadline must outlive the Delivery deadline. OpenCode persists
-the dependent Evaluation before it creates the Delivery execution binding, and
-the issue response returns both Contracts. A reservation conflict therefore
-returns no execution instead of silently degrading to delivery-only finality.
+The Evaluation deadline must outlive the Delivery deadline. OpenCode admits the
+Delivery and dependent Evaluation in one transaction before it creates the
+Delivery execution binding. The issue response returns both Contracts plus the
+content-addressed `formationHash`. Exact retries return the same formation
+receipt; omitting Evaluation or changing its deadline, evaluator, Location, or
+model conflicts with the root Delivery and returns no new execution.
 
 The manual compatibility path can still persist evaluation immediately after a
 previously issued Delivery:

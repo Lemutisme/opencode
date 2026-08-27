@@ -384,20 +384,34 @@ principal intent
 
 When delivery evidence does not establish the optimization goal, compile two
 ordinary obligations. OpenCode may bind an `EvaluationPlan` to the compiled
-issue operation. The adapter persists its dependent Evaluation Contract after
-the Delivery admission but before it creates an executable Session binding. A
-conflict or crash therefore leaves outstanding duty without exposing execution;
-it cannot leave a delivery-only path to false quiet. The deterministic
-Evaluation identity binds the delivery revision and evaluator hash, and its
-deadline must outlive the Delivery deadline. Delivery may discharge on exact
-artifact evidence, but the shared scope remains non-quiet until an external
-report accepts the same subject hash. A failed report challenges Delivery while
-Evaluation remains outstanding. This edge composition adds no lifecycle state:
+issue operation. The compiler hashes the complete formation—including its
+ordered Contract identities and OpenCode execution context—and principal
+permission names that hash. The store admits Delivery and Evaluation in one
+immediate transaction, appends one consecutive ledger event per ordinary
+`issue`, and records a formation receipt keyed by the root Contract. Only then
+may the adapter create an executable Session binding. Exact formation retries
+return the original receipt; a retry that omits or changes Evaluation, Location,
+or model is rejected instead of being absorbed as an exact Delivery retry.
+
+The deterministic Evaluation identity binds the delivery revision and evaluator
+hash, and its deadline must outlive the Delivery deadline. Delivery may
+discharge on exact artifact evidence, but the shared scope remains non-quiet
+until an external report accepts the same subject hash. A failed report
+challenges Delivery while Evaluation remains outstanding. This edge composition
+adds no lifecycle state:
 
 ```text
 Delivery: artifact exists and reproduces
 Evaluation: exact artifact satisfies the behavioral claim
 ```
+
+Formation identity begins when the institution commits its receipt. A caller
+that loses an approved plan before that commit can present a new plan; no local
+institution can conserve intent it never durably admitted. After admission,
+Evaluation can be removed only through ordinary issuer-authorized, audited
+transitions. An omitted Evaluation remains a visible principal/compiler choice,
+not a claim that the institution can infer semantic adequacy from natural
+language.
 
 Compilation is an intentional compression boundary. The Contract cannot retain
 all issuance-time context, so the issuer chooses an optimization goal, a

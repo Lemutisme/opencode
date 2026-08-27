@@ -1809,23 +1809,53 @@ describe("OpenCode Contract binding", () => {
       const evaluationID = ProContract.evaluationID(contractID, 1, evaluation.evaluatorHash)
 
       expect(issued.execution).toMatchObject({ contractID, dispatched: false })
-      expect(issued.evaluation?.contract).toMatchObject({ id: evaluationID, status: "dormant" })
+      expect(issued.evaluation).toMatchObject({ id: evaluationID, status: "dormant" })
+      expect(issued.formation).toMatchObject({
+        formationHash: issued.formationHash,
+        rootContractID: contractID,
+        components: [{ contractID }, { contractID: evaluationID }],
+        frontier: 1,
+      })
       expect(yield* contracts.quiet(draft.scope)).toMatchObject({
         quiet: false,
         outstanding: expect.arrayContaining([contractID, evaluationID]),
       })
+      const deliveryHistory = yield* contracts.history({ contractID })
+      const evaluationHistory = yield* contracts.history({ contractID: evaluationID })
+      expect(deliveryHistory).toHaveLength(1)
+      expect(evaluationHistory).toHaveLength(1)
+      expect(evaluationHistory[0]?.previous_hash).toBe(deliveryHistory[0]?.hash)
+      expect(issued.formation).toMatchObject({
+        frontier: evaluationHistory[0]?.seq,
+        ledgerHash: evaluationHistory[0]?.hash,
+      })
+
+      const retried = yield* bindings.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        evaluation,
+        now: 0,
+      })
+      expect(retried.formation).toEqual(issued.formation)
+      expect(retried.execution).toEqual(issued.execution)
+      expect(yield* contracts.history({ contractID })).toEqual(deliveryHistory)
+      expect(yield* contracts.history({ contractID: evaluationID })).toEqual(evaluationHistory)
     }),
   )
 
-  schedulerIt.effect("does not expose execution when evaluation reservation conflicts", () =>
+  schedulerIt.effect("rejects an entire formation when one component conflicts", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
-      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
-      yield* contracts.issueEvaluation({
-        deliveryContractID: contractID,
-        evaluatorHash: "evaluator-v1",
-        deadline: spec.budget.deadline + 100,
+      const evaluationID = ProContract.evaluationID(contractID, 1, "evaluator-v1")
+      yield* contracts.issue({
+        id: evaluationID,
+        scope: draft.scope,
+        spec: ProContract.defaultSpec("Conflicting pre-existing Contract", 0),
+        executor: "other",
       })
       const issued = yield* bindings.issue({
         id: contractID,
@@ -1833,14 +1863,110 @@ describe("OpenCode Contract binding", () => {
         spec,
         location: { directory: AbsolutePath.make("/project") },
         model: executionModel,
-        evaluation: { evaluatorHash: "evaluator-v1", deadline: spec.budget.deadline + 101 },
+        evaluation: { evaluatorHash: "evaluator-v1", deadline: spec.budget.deadline + 100 },
         now: 0,
       })
 
-      expect(issued.evaluation?.decision).toEqual({ type: "rejected", reason: "contract already exists" })
+      expect(issued.decision).toEqual({
+        type: "rejected",
+        reason: expect.stringContaining("rejected:"),
+      })
       expect(issued.execution).toBeUndefined()
       expect(yield* bindings.get(contractID)).toBeUndefined()
-      expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: false })
+      expect(yield* contracts.get(contractID)).toBeUndefined()
+      expect(yield* contracts.get(evaluationID)).toMatchObject({ executor: "other" })
+      const deliveryHistory = yield* contracts.history({ contractID })
+      const evaluationHistory = yield* contracts.history({ contractID: evaluationID })
+      expect(deliveryHistory).toMatchObject([{ decision: { type: "rejected" } }])
+      expect(evaluationHistory).toMatchObject([{ decision: { type: "accepted" } }, { decision: { type: "rejected" } }])
+      expect(evaluationHistory[1]?.previous_hash).toBe(deliveryHistory[0]?.hash)
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: false, frontier: 2 })
+    }),
+  )
+
+  schedulerIt.effect("conserves formation identity across crash-shaped retries", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const location = { directory: AbsolutePath.make("/project") }
+      const evaluation = ProContract.EvaluationPlan.make({
+        evaluatorHash: "evaluator-v1",
+        deadline: spec.budget.deadline + 100,
+      })
+      const evaluationID = ProContract.evaluationID(contractID, 1, evaluation.evaluatorHash)
+      const formationHash = ProContractOpenCode.formationHash({
+        id: contractID,
+        scope: draft.scope,
+        spec,
+        location,
+        model: executionModel,
+        evaluation,
+      })
+      const formed = yield* contracts.form({
+        contextHash: ProContractOpenCode.formationContextHash({ location, model: executionModel }),
+        issues: [
+          { id: contractID, scope: draft.scope, spec, executor: "opencode" },
+          {
+            id: evaluationID,
+            scope: draft.scope,
+            spec: ProContract.evaluationSpec({
+              deliveryContractID: contractID,
+              deliveryRevision: 1,
+              deliveryGoal: spec.goal,
+              evaluatorHash: evaluation.evaluatorHash,
+              deadline: evaluation.deadline,
+            }),
+            executor: `external-evaluator:${evaluation.evaluatorHash}`,
+          },
+        ],
+      })
+      expect(formed.decision).toEqual({ type: "accepted" })
+      expect(yield* bindings.get(contractID)).toBeUndefined()
+
+      const omitted = yield* bindings.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec,
+        location,
+        model: executionModel,
+        now: 0,
+      })
+      expect(omitted.decision).toMatchObject({ type: "rejected", reason: expect.stringContaining(formationHash) })
+      expect(omitted.execution).toBeUndefined()
+      expect(yield* bindings.get(contractID)).toBeUndefined()
+
+      const changed = yield* bindings.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec,
+        location,
+        model: executionModel,
+        evaluation: { ...evaluation, deadline: evaluation.deadline + 1 },
+        now: 0,
+      })
+      expect(changed.decision).toMatchObject({ type: "rejected", reason: expect.stringContaining(formationHash) })
+      expect(changed.execution).toBeUndefined()
+      expect(yield* bindings.get(contractID)).toBeUndefined()
+
+      const exact = yield* bindings.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec,
+        location,
+        model: executionModel,
+        evaluation,
+        now: 0,
+      })
+      expect(exact.decision).toEqual({ type: "accepted" })
+      expect(exact.formation).toEqual(formed.formation)
+      expect(exact.execution).toMatchObject({ contractID, dispatched: false })
+      expect(yield* contracts.history({ contractID })).toHaveLength(3)
+      expect(yield* contracts.history({ contractID: evaluationID })).toHaveLength(2)
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({
+        quiet: false,
+        frontier: 4,
+        outstanding: expect.arrayContaining([contractID, evaluationID]),
+      })
     }),
   )
 

@@ -111,6 +111,13 @@ routing, not settlement.
 9. **Frontier-relative quiet** — quiet names a scope, state identity, and ledger
    frontier, never an eternal fact.
 
+The institution store additionally owns **formation conservation**. A
+content-addressed formation containing several ordinary `issue` commands is
+admitted completely or not at all. Once admitted, its root Contract cannot be
+reused by a retry with a different duty graph or execution context. This does
+not add a reducer command: it determines which ordinary commands become one
+auditable institutional transaction.
+
 ## Layer ownership
 
 ```text
@@ -120,7 +127,8 @@ normative kernel
 
 institution store and authority boundary
   authenticated commands, atomic projection + append-only ledger,
-  principal/worker identities, checkpoint/signature
+  content-addressed formation receipts, principal/worker identities,
+  checkpoint/signature
 
 execution adapter
   Session/model/process, effect capabilities, leases/fences,
@@ -130,7 +138,7 @@ compiler
   natural-language goal/brief, decomposition, trigger interpretation,
   adapter authority validation, artifact provenance, exploration allocation,
   implementation and stopping policy, dependent EvaluationPlan composition,
-  content-addressed compilation receipt
+  content-addressed compilation and formation receipts
 
 verifier adapter
   replay commands, files, proofs, rubrics, test images,

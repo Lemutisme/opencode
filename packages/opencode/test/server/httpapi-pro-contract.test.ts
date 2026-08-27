@@ -114,6 +114,7 @@ describe("ProContract HttpApi", () => {
       expect(body).toMatchObject({
         data: { id: "pct_http_evaluated" },
         execution: { contractID: "pct_http_evaluated", dispatched: false },
+        formationHash: expect.any(String),
         evaluation: {
           id: expect.stringMatching(/^pct_eval_/),
           status: "dormant",
@@ -128,6 +129,37 @@ describe("ProContract HttpApi", () => {
         quiet: false,
         outstanding: expect.arrayContaining(["pct_http_evaluated", body.evaluation.id]),
       })
+
+      const omitted = await fetch(new URL("/api/contract", listener.url), {
+        method: "POST",
+        headers: { authorization: authorization(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "pct_http_evaluated",
+          scope: "http-evaluated",
+          goal: "Deliver an implementation whose behavior is independently evaluated",
+          location: { directory: process.cwd() },
+          model: { providerID: "openai", id: "gpt-5.4" },
+        }),
+      })
+      expect(omitted.status).toBe(409)
+
+      const exact = await fetch(new URL("/api/contract", listener.url), {
+        method: "POST",
+        headers: { authorization: authorization(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "pct_http_evaluated",
+          scope: "http-evaluated",
+          goal: "Deliver an implementation whose behavior is independently evaluated",
+          location: { directory: process.cwd() },
+          model: { providerID: "openai", id: "gpt-5.4" },
+          evaluation: {
+            evaluatorHash: "behavior-evaluator-v1",
+            deadline: body.evaluation.spec.budget.deadline,
+          },
+        }),
+      })
+      expect(exact.status).toBe(200)
+      expect(await exact.json()).toMatchObject({ formationHash: body.formationHash, receipt: body.receipt })
     } finally {
       await listener.stop(true)
     }

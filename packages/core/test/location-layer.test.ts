@@ -264,13 +264,6 @@ describe("LocationServiceMap", () => {
               evaluatorHash: "evaluator-v1",
               deadline: proposal.budget.deadline + 1,
             })
-            const compiled = ProContractOpenCode.compileSpec({
-              spec: proposal,
-              request,
-              configuredPolicy: policyRequirement,
-              evaluation,
-            })
-            if (compiled.type === "rejected") return yield* Effect.die(compiled.reason)
             expect((yield* registry.materialize()).definitions.map((item) => item.name)).toContain("contract_propose")
             const execution = yield* settleTool(registry, {
               sessionID,
@@ -287,18 +280,16 @@ describe("LocationServiceMap", () => {
             expect(pending).toHaveLength(1)
             const approval = pending[0]
             if (!approval) yield* Effect.die("Contract proposal did not request permission")
-            expect(approval).toMatchObject({
-              action: "contract_issue",
-              resources: [ProContract.hashSpec(expected), compiled.manifestHash],
-            })
             const contractID = ProContract.ID.make(String(approval.metadata?.contractID))
+            const formationHash = String(approval.metadata?.formationHash)
+            expect(approval).toMatchObject({ action: "contract_issue", resources: [formationHash] })
             expect(yield* contracts.get(contractID)).toBeUndefined()
 
             yield* permissions.reply({ requestID: approval.id, reply: "once" })
             const settled = yield* Fiber.join(execution)
 
             const evaluationContractID = ProContract.evaluationID(contractID, 1, evaluation.evaluatorHash)
-            expect(settled.output?.structured).toMatchObject({ contractID, evaluationContractID })
+            expect(settled.output?.structured).toMatchObject({ contractID, evaluationContractID, formationHash })
             expect(yield* contracts.get(contractID)).toMatchObject({ id: contractID, spec: expected })
             expect(yield* contracts.get(evaluationContractID)).toMatchObject({
               id: evaluationContractID,

@@ -60,8 +60,6 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             return yield* new ConflictError({ message: issued.decision.reason, resource: ctx.payload.id })
           const contract = issued.contract
           if (!contract) return yield* Effect.die("Accepted contract was not loaded")
-          if (issued.evaluation?.decision.type === "rejected")
-            return yield* new ConflictError({ message: issued.evaluation.decision.reason, resource: id })
           const execution = issued.execution
           if (!execution) return yield* Effect.die("Accepted contract execution was not created")
           if (
@@ -75,11 +73,12 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
           return {
             data: ProContract.info(contract),
             execution,
-            evaluation: issued.evaluation?.contract ? ProContract.info(issued.evaluation.contract) : undefined,
+            evaluation: issued.evaluation ? ProContract.info(issued.evaluation) : undefined,
             receipt: {
-              frontier: issued.evaluation?.frontier ?? issued.frontier,
-              hash: issued.evaluation?.hash ?? issued.hash,
+              frontier: issued.frontier,
+              hash: issued.hash,
             },
+            formationHash: issued.formationHash,
           }
         }),
       )

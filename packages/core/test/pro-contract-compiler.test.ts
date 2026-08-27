@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
-import { RelativePath } from "@opencode-ai/core/schema"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
+import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 
 const request = "Create compile.sh and executable, then validate the implementation."
 const base = ProContract.defaultSpec("Ship the implementation", 0)
@@ -99,7 +101,7 @@ describe("OpenCode Contract compiler", () => {
         version: 1,
         adapter: "opencode",
         authority: base.authority,
-        evaluation,
+        settlement: { type: "dependent", evaluation },
       },
       specHash: expect.any(String),
       manifestHash: expect.any(String),
@@ -124,6 +126,45 @@ describe("OpenCode Contract compiler", () => {
       type: "rejected",
       violations: [{ rule: "evaluation" }],
     })
+  })
+
+  test("binds duty graph, Location, and model into formation identity", () => {
+    const id = ProContract.ID.make("pct_compiler_formation")
+    const location = { directory: AbsolutePath.make("/workspace") }
+    const model = ModelV2.Ref.make({ providerID: ProviderV2.ID.make("openai"), id: ModelV2.ID.make("model-a") })
+    const evaluation = ProContract.EvaluationPlan.make({
+      evaluatorHash: "evaluator-v1",
+      deadline: base.budget.deadline + 100,
+    })
+    const formation = ProContractOpenCode.formationHash({ id, scope: "scope", spec: base, location, model, evaluation })
+
+    expect(ProContractOpenCode.formationHash({ id, scope: "scope", spec: base, location, model, evaluation })).toBe(
+      formation,
+    )
+    expect(ProContractOpenCode.formationHash({ id, scope: "scope", spec: base, location, model })).not.toBe(formation)
+    expect(
+      ProContractOpenCode.formationHash({
+        id,
+        scope: "scope",
+        spec: base,
+        location: { directory: AbsolutePath.make("/other") },
+        model,
+        evaluation,
+      }),
+    ).not.toBe(formation)
+    expect(
+      ProContractOpenCode.formationHash({
+        id,
+        scope: "scope",
+        spec: base,
+        location,
+        model: ModelV2.Ref.make({
+          providerID: ProviderV2.ID.make("openai"),
+          id: ModelV2.ID.make("model-b"),
+        }),
+        evaluation,
+      }),
+    ).not.toBe(formation)
   })
 
   test("returns every compiler violation without mutating the draft", () => {

@@ -3481,6 +3481,7 @@ export type ServerProContractIssueOutput = {
     }
     readonly attestationID?: string
   } | null
+  readonly formationHash: string
   readonly receipt: { readonly frontier: number; readonly hash: string }
 }
 

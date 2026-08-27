@@ -149,17 +149,17 @@ responsibility instead of erasing history.
 
 ## Trusted inputs and open semantics
 
-| Input or boundary | Current owner | Institution checks | Institution does not check |
-| --- | --- | --- | --- |
-| Goal, claim, replay policy, protected hashes | Principal plus OpenCode compiler at proposal/issue | Canonical `specHash`, executable OpenCode authority, user-named replay artifacts, shape, finite replay structure, immutable revision rules | Whether the claim is useful, the policy is sufficient, protected bytes are a sound oracle, or the stopping rule is valid |
-| `subjectHash` at executor handoff | Location Snapshot service | Replay and attestation must name it exactly | That the configured Location contains every real-world object relevant to the claim |
-| Replay process and report | In-process replay service plus host | Frozen policy/subject, path containment, exits, file observations, content hash | Network isolation, clean environment, credential isolation, image/toolchain identity, verifier executable identity, signatures, or task-level adequacy |
-| Principal `evidenceHash` | Authenticated HTTP caller or local CLI | Nonempty, exact attestation coordinates, issuer role, distinct from replay hash | Report availability, bytes matching the hash, report schema, pass rule, verifier origin, signature, independence beyond hash inequality, or whether it settles `evidence.claim` |
-| Challenge `evidenceHash`, disclosure, summary | Authenticated HTTP caller or local CLI | Current revision/subject, issuer role, disclosure/summary consistency | Report availability, evaluator authenticity, or truth of the negative result |
-| `evaluatorHash` and `EvaluationReport` | External evaluation adapter | Evaluation ID/dependency/executor coordinates and delivery revision/subject | That the hash names the running evaluator, the report came from it, or its `passed` value follows a frozen rule |
-| HTTP principal identity | Principal mutation middleware plus server-wide Basic auth | Mutation is denied when auth is absent; one configured username/password is checked when enabled | Per-verifier roles, distinct principal credentials, report signatures, or separation among authenticated callers |
-| Local CLI principal identity | Process and filesystem boundary | Local service constructs fixed `local-owner` role | OS-level separation from an executor that can reach the same control process or state |
-| Database ledger | Local institution process | Transactional state/event/head consistency while writing | External checkpoint, signature, remote witness, or tamper detection after a trusted database rewrite |
+| Input or boundary                             | Current owner                                             | Institution checks                                                                                                                         | Institution does not check                                                                                                                                                      |
+| --------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal, claim, replay policy, protected hashes  | Principal plus OpenCode compiler at proposal/issue        | Canonical `specHash`, executable OpenCode authority, user-named replay artifacts, shape, finite replay structure, immutable revision rules | Whether the claim is useful, the policy is sufficient, protected bytes are a sound oracle, or the stopping rule is valid                                                        |
+| `subjectHash` at executor handoff             | Location Snapshot service                                 | Replay and attestation must name it exactly                                                                                                | That the configured Location contains every real-world object relevant to the claim                                                                                             |
+| Replay process and report                     | In-process replay service plus host                       | Frozen policy/subject, path containment, exits, file observations, content hash                                                            | Network isolation, clean environment, credential isolation, image/toolchain identity, verifier executable identity, signatures, or task-level adequacy                          |
+| Principal `evidenceHash`                      | Authenticated HTTP caller or local CLI                    | Nonempty, exact attestation coordinates, issuer role, distinct from replay hash                                                            | Report availability, bytes matching the hash, report schema, pass rule, verifier origin, signature, independence beyond hash inequality, or whether it settles `evidence.claim` |
+| Challenge `evidenceHash`, disclosure, summary | Authenticated HTTP caller or local CLI                    | Current revision/subject, issuer role, disclosure/summary consistency                                                                      | Report availability, evaluator authenticity, or truth of the negative result                                                                                                    |
+| `evaluatorHash` and `EvaluationReport`        | External evaluation adapter                               | Evaluation ID/dependency/executor coordinates and delivery revision/subject                                                                | That the hash names the running evaluator, the report came from it, or its `passed` value follows a frozen rule                                                                 |
+| HTTP principal identity                       | Principal mutation middleware plus server-wide Basic auth | Mutation is denied when auth is absent; one configured username/password is checked when enabled                                           | Per-verifier roles, distinct principal credentials, report signatures, or separation among authenticated callers                                                                |
+| Local CLI principal identity                  | Process and filesystem boundary                           | Local service constructs fixed `local-owner` role                                                                                          | OS-level separation from an executor that can reach the same control process or state                                                                                           |
+| Database ledger                               | Local institution process                                 | Transactional state/event/head consistency while writing                                                                                   | External checkpoint, signature, remote witness, or tamper detection after a trusted database rewrite                                                                            |
 
 An explicitly unsecured server permits read-only Contract observation but
 denies principal mutations. Embedded routes are likewise unable to mutate
@@ -173,11 +173,17 @@ the server credential or reach the plane database directly.
 The existing `issueEvaluation` and `settleEvaluation` path gives an external
 evaluation a durable obligation and binds its identity to the delivery ID,
 delivery revision, subject, and a caller-provided `evaluatorHash`. An OpenCode
-`EvaluationPlan` now places that issuance in the compiled operation before an
-executor binding is created, so partial formation fails outstanding rather than
-silently degrading into delivery-only finality. It correctly reopens a delivery
-on a failed report and can discharge a separate evaluation Contract on a
-passing report.
+`EvaluationPlan` now becomes part of one content-addressed formation. Delivery
+and Evaluation are admitted in one transaction, and the executable binding is
+created only after its receipt commits. Exact retry returns that receipt;
+omitted or changed components conflict with the root Contract's formation
+identity. It correctly reopens a delivery on a failed report and can discharge a
+separate evaluation Contract on a passing report.
+
+This closes silent post-admission formation loss. It does not preserve a plan
+lost before the formation transaction commits, decide whether Evaluation is
+semantically necessary, authenticate the evaluator, or make an optional
+EvaluationPlan mandatory.
 
 It is still an orchestration adapter, not a mechanical verifier boundary.
 `settleEvaluation` receives the already-parsed report, pass bit, evidence hash,

@@ -70,3 +70,25 @@ export const ProContractLedgerTable = sqliteTable("pro_contract_ledger", {
   head_seq: integer().notNull(),
   head_hash: text().notNull(),
 })
+
+export const ProContractFormationTable = sqliteTable(
+  "pro_contract_formation",
+  {
+    hash: text().primaryKey(),
+    root_contract_id: text().notNull(),
+    data: text({ mode: "json" })
+      .$type<{
+        formationHash: string
+        contextHash: string
+        rootContractID: ProContract.ID
+        components: ReadonlyArray<{ contractID: ProContract.ID; specHash: string }>
+        frontier: number
+        ledgerHash: string
+      }>()
+      .notNull(),
+    time_created: integer()
+      .notNull()
+      .$default(() => Date.now()),
+  },
+  (table) => [uniqueIndex("pro_contract_formation_root_idx").on(table.root_contract_id)],
+)
