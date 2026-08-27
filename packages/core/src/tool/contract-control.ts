@@ -31,13 +31,20 @@ const layer = Layer.effectDiscard(
       .register({
         contract_propose: Tool.make({
           description:
-            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the current optimization objective, spec.policy only to an exact policy offered to future Contracts, and evidence.claim to the exact proposition the evidence may settle. A requirement may set policy: true only when its discharged source Contract defines the principal-ratified spec.policy. An implementation Contract that promises a build command or user-named output artifact must include finite replay checks and every user-named artifact path. Do not guess implementation-specific source paths; the build check covers its inputs. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
-          input: Schema.Struct({ spec: ProContract.Spec }),
-          output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
+            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the current optimization objective, spec.policy only to an exact policy offered to future Contracts, and evidence.claim to the exact proposition the evidence may settle. When delivery evidence does not settle the intended quality claim, include evaluation so that dependent evaluation is persisted before execution starts. A requirement may set policy: true only when its discharged source Contract defines the principal-ratified spec.policy. An implementation Contract that promises a build command or user-named output artifact must include finite replay checks and every user-named artifact path. Do not guess implementation-specific source paths; the build check covers its inputs. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
+          input: Schema.Struct({
+            spec: ProContract.Spec,
+            evaluation: ProContract.EvaluationPlan.pipe(Schema.optional),
+          }),
+          output: Schema.Struct({
+            contractID: ProContract.ID,
+            sessionID: SessionSchema.ID,
+            evaluationContractID: ProContract.ID.pipe(Schema.optional),
+          }),
           toModelOutput: ({ output }) => [
             {
               type: "text",
-              text: `Contract ${output.contractID} was approved and scheduled in Session ${output.sessionID}. Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
+              text: `Contract ${output.contractID} was approved and scheduled in Session ${output.sessionID}.${output.evaluationContractID ? ` Evaluation ${output.evaluationContractID} remains outstanding until independent evidence settles the quality claim.` : ""} Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
             },
           ],
           execute: (input, context) =>
@@ -52,6 +59,7 @@ const layer = Layer.effectDiscard(
                 spec: input.spec,
                 request,
                 configuredPolicy: Config.latest(yield* config.entries(), "contract_policy"),
+                evaluation: input.evaluation,
               })
               if (compiled.type === "rejected") return yield* new ToolFailure({ message: compiled.reason })
               const spec = compiled.spec
@@ -61,7 +69,7 @@ const layer = Layer.effectDiscard(
               yield* permissions.assert({
                 id: PermissionV2.ID.create(`per_${key}`),
                 action: "contract_issue",
-                resources: [specHash],
+                resources: [specHash, ...(input.evaluation ? [compiled.manifestHash] : [])],
                 metadata: {
                   contractID,
                   specHash,
@@ -75,6 +83,9 @@ const layer = Layer.effectDiscard(
                     `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}${item.policy ? " (policy)" : ""}`).join(", ") || "none"}`,
                     `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                     `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
+                    input.evaluation
+                      ? `Evaluation: ${input.evaluation.evaluatorHash}, deadline ${input.evaluation.deadline}`
+                      : "Evaluation: none; delivery settlement is final for this scope",
                     `Compiler manifest: ${compiled.manifestHash}`,
                     `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
                   ]
@@ -91,12 +102,19 @@ const layer = Layer.effectDiscard(
                 spec,
                 location: session.location,
                 model: session.model,
+                evaluation: input.evaluation,
                 now,
               })
               if (issued.decision.type === "rejected")
                 return yield* new ToolFailure({ message: issued.decision.reason })
+              if (issued.evaluation?.decision.type === "rejected")
+                return yield* new ToolFailure({ message: issued.evaluation.decision.reason })
               if (!issued.execution) return yield* new ToolFailure({ message: "Contract execution was not created" })
-              return { contractID, sessionID: issued.execution.sessionID }
+              return {
+                contractID,
+                sessionID: issued.execution.sessionID,
+                evaluationContractID: issued.evaluation?.contract?.id,
+              }
             }).pipe(
               Effect.mapError((error) =>
                 error instanceof ToolFailure

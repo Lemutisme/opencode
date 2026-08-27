@@ -44,7 +44,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             evidence: ctx.payload.evidence ?? defaults.evidence,
             resolution: ctx.payload.resolution ?? defaults.resolution,
           }
-          const compiled = ProContractOpenCode.compileSpec({ spec })
+          const compiled = ProContractOpenCode.compileSpec({ spec, evaluation: ctx.payload.evaluation })
           if (compiled.type === "rejected")
             return yield* new ConflictError({ message: compiled.reason, resource: ctx.payload.id })
           const issued = yield* bindings.issue({
@@ -53,12 +53,15 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             spec: compiled.spec,
             location: ctx.payload.location,
             model: ctx.payload.model,
+            evaluation: ctx.payload.evaluation,
             now,
           })
           if (issued.decision.type === "rejected")
             return yield* new ConflictError({ message: issued.decision.reason, resource: ctx.payload.id })
           const contract = issued.contract
           if (!contract) return yield* Effect.die("Accepted contract was not loaded")
+          if (issued.evaluation?.decision.type === "rejected")
+            return yield* new ConflictError({ message: issued.evaluation.decision.reason, resource: id })
           const execution = issued.execution
           if (!execution) return yield* Effect.die("Accepted contract execution was not created")
           if (
@@ -72,7 +75,11 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
           return {
             data: ProContract.info(contract),
             execution,
-            receipt: { frontier: issued.frontier, hash: issued.hash },
+            evaluation: issued.evaluation?.contract ? ProContract.info(issued.evaluation.contract) : undefined,
+            receipt: {
+              frontier: issued.evaluation?.frontier ?? issued.frontier,
+              hash: issued.evaluation?.hash ?? issued.hash,
+            },
           }
         }),
       )

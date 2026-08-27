@@ -1027,6 +1027,7 @@ export function make(options: ClientOptions) {
               budget: input["budget"],
               evidence: input["evidence"],
               resolution: input["resolution"],
+              evaluation: input["evaluation"],
             },
             successStatus: 200,
             declaredStatuses: [409, 401, 400],

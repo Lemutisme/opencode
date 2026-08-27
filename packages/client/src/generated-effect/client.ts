@@ -696,6 +696,7 @@ type Endpoint18_0Input = {
   readonly budget?: Endpoint18_0Request["payload"]["budget"]
   readonly evidence?: Endpoint18_0Request["payload"]["evidence"]
   readonly resolution?: Endpoint18_0Request["payload"]["resolution"]
+  readonly evaluation?: Endpoint18_0Request["payload"]["evaluation"]
 }
 const Endpoint18_0 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_0Input) =>
   raw["proContract.issue"]({
@@ -713,6 +714,7 @@ const Endpoint18_0 = (raw: RawClient["server.proContract"]) => (input: Endpoint1
       budget: input["budget"],
       evidence: input["evidence"],
       resolution: input["resolution"],
+      evaluation: input["evaluation"],
     },
   }).pipe(Effect.mapError(mapClientError))
 

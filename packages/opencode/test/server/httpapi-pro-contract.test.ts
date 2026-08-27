@@ -88,6 +88,51 @@ describe("ProContract HttpApi", () => {
     }
   })
 
+  test("pre-issues evaluation before returning a delivery execution", async () => {
+    Flag.OPENCODE_SERVER_PASSWORD = "contract-secret"
+    process.env.OPENCODE_SERVER_PASSWORD = "contract-secret"
+    const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+    try {
+      const issued = await fetch(new URL("/api/contract", listener.url), {
+        method: "POST",
+        headers: { authorization: authorization(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "pct_http_evaluated",
+          scope: "http-evaluated",
+          goal: "Deliver an implementation whose behavior is independently evaluated",
+          location: { directory: process.cwd() },
+          model: { providerID: "openai", id: "gpt-5.4" },
+          evaluation: {
+            evaluatorHash: "behavior-evaluator-v1",
+            deadline: Date.now() + 2 * 24 * 60 * 60 * 1_000,
+          },
+        }),
+      })
+
+      expect(issued.status).toBe(200)
+      const body = await issued.json()
+      expect(body).toMatchObject({
+        data: { id: "pct_http_evaluated" },
+        execution: { contractID: "pct_http_evaluated", dispatched: false },
+        evaluation: {
+          id: expect.stringMatching(/^pct_eval_/),
+          status: "dormant",
+          spec: { requires: [{ contractID: "pct_http_evaluated", revision: 1 }] },
+        },
+        receipt: { frontier: 1 },
+      })
+      const quiet = await fetch(new URL("/api/contract/quiet?scope=http-evaluated", listener.url), {
+        headers: { authorization: authorization() },
+      })
+      expect(await quiet.json()).toMatchObject({
+        quiet: false,
+        outstanding: expect.arrayContaining(["pct_http_evaluated", body.evaluation.id]),
+      })
+    } finally {
+      await listener.stop(true)
+    }
+  })
+
   test("fails principal mutations closed when server authentication is disabled", async () => {
     Flag.OPENCODE_SERVER_PASSWORD = undefined
     delete process.env.OPENCODE_SERVER_PASSWORD

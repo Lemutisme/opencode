@@ -9,12 +9,16 @@ import { Config } from "@/config/config"
 import { Session } from "@/session/session"
 import * as Tool from "./tool"
 
-export const Parameters = Schema.Struct({ spec: ProContract.Spec })
+export const Parameters = Schema.Struct({
+  spec: ProContract.Spec,
+  evaluation: ProContract.EvaluationPlan.pipe(Schema.optional),
+})
 export const formationMetadataKey = "procontractFormation"
 
 type Metadata = {
   contractID: ProContract.ID
   sessionID: string
+  evaluationContractID?: ProContract.ID
 }
 
 export const ContractProposeTool = Tool.define<
@@ -31,7 +35,7 @@ export const ContractProposeTool = Tool.define<
 
     return {
       description:
-        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the current optimization objective, spec.policy only to an exact policy offered to future Contracts, and evidence.claim to the exact proposition the evidence may settle. A requirement may set policy: true only when its discharged source Contract defines the principal-ratified spec.policy. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
+        "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the current optimization objective, spec.policy only to an exact policy offered to future Contracts, and evidence.claim to the exact proposition the evidence may settle. When delivery evidence does not settle the intended quality claim, include evaluation so that dependent evaluation is persisted before execution starts. A requirement may set policy: true only when its discharged source Contract defines the principal-ratified spec.policy. An implementation Contract that promises a build command or named output artifact must include evidence.replay with finite checks and every required artifact path. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
       parameters: Parameters,
       execute: (input, ctx) =>
         Effect.gen(function* () {
@@ -51,6 +55,7 @@ export const ContractProposeTool = Tool.define<
             spec: input.spec,
             request,
             configuredPolicy: (yield* config.get()).contract_policy,
+            evaluation: input.evaluation,
           })
           if (compiled.type === "rejected") return yield* Effect.die(compiled.reason)
           const spec = compiled.spec
@@ -59,7 +64,7 @@ export const ContractProposeTool = Tool.define<
           const specHash = compiled.specHash
           yield* ctx.ask({
             permission: "contract_issue",
-            patterns: [specHash],
+            patterns: [specHash, ...(input.evaluation ? [compiled.manifestHash] : [])],
             always: [],
             metadata: {
               contractID,
@@ -74,6 +79,9 @@ export const ContractProposeTool = Tool.define<
                 `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}${item.policy ? " (policy)" : ""}`).join(", ") || "none"}`,
                 `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                 `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
+                input.evaluation
+                  ? `Evaluation: ${input.evaluation.evaluatorHash}, deadline ${input.evaluation.deadline}`
+                  : "Evaluation: none; delivery settlement is final for this scope",
                 `Compiler manifest: ${compiled.manifestHash}`,
                 `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
               ]
@@ -91,9 +99,11 @@ export const ContractProposeTool = Tool.define<
               providerID: session.model.providerID,
               variant: session.model.variant ? ModelV2.VariantID.make(session.model.variant) : undefined,
             }),
+            evaluation: input.evaluation,
             now,
           })
           if (issued.decision.type === "rejected") return yield* Effect.die(issued.decision.reason)
+          if (issued.evaluation?.decision.type === "rejected") return yield* Effect.die(issued.evaluation.decision.reason)
           if (!issued.execution) return yield* Effect.die("Contract execution was not created")
           yield* sessions.setMetadata({
             sessionID: session.id,
@@ -101,8 +111,12 @@ export const ContractProposeTool = Tool.define<
           })
           return {
             title: "Contract issued",
-            output: `Contract ${contractID} was approved and scheduled in Session ${issued.execution.sessionID}. Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
-            metadata: { contractID, sessionID: issued.execution.sessionID },
+            output: `Contract ${contractID} was approved and scheduled in Session ${issued.execution.sessionID}.${issued.evaluation?.contract ? ` Evaluation ${issued.evaluation.contract.id} remains outstanding until independent evidence settles the quality claim.` : ""} Stop work in this Session; the dedicated Contract executor now owns the obligation.`,
+            metadata: {
+              contractID,
+              sessionID: issued.execution.sessionID,
+              evaluationContractID: issued.evaluation?.contract?.id,
+            },
           }
         }),
     }

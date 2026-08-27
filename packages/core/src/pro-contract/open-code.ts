@@ -38,8 +38,11 @@ export interface Interface {
     readonly spec: Schema.Spec
     readonly location: Location.Ref
     readonly model: Model.Ref
+    readonly evaluation?: Schema.EvaluationPlan
     readonly now: number
-  }) => Effect.Effect<ProContract.IssueReceipt & { readonly execution?: Binding }>
+  }) => Effect.Effect<
+    ProContract.IssueReceipt & { readonly execution?: Binding; readonly evaluation?: ProContract.IssueReceipt }
+  >
   readonly create: (input: {
     readonly contractID: Schema.ID
     readonly revision: number
@@ -70,12 +73,16 @@ const LEASE_MS = 30_000
 const AUTHORITIES = new Set(["filesystem.read", "filesystem.write", "process.execute"])
 
 export type CompilerViolation = {
-  readonly rule: "authority" | "artifact"
+  readonly rule: "authority" | "artifact" | "evaluation"
   readonly values: ReadonlyArray<string>
   readonly message: string
 }
 
-export function diagnoseSpec(input: { readonly spec: Schema.Spec; readonly request?: string }) {
+export function diagnoseSpec(input: {
+  readonly spec: Schema.Spec
+  readonly request?: string
+  readonly evaluation?: Schema.EvaluationPlan
+}) {
   const unknown = input.spec.authority.filter((authority) => !AUTHORITIES.has(authority))
   const unnamed = input.request
     ? (input.spec.evidence.replay?.artifacts ?? []).filter(
@@ -101,6 +108,15 @@ export function diagnoseSpec(input: { readonly spec: Schema.Spec; readonly reque
           },
         ]
       : []),
+    ...(input.evaluation && input.evaluation.deadline <= input.spec.budget.deadline
+      ? [
+          {
+            rule: "evaluation" as const,
+            values: [String(input.evaluation.deadline)],
+            message: "Evaluation deadline must outlive the Delivery deadline",
+          },
+        ]
+      : []),
   ] satisfies CompilerViolation[]
 }
 
@@ -108,6 +124,7 @@ export function compileSpec(input: {
   readonly spec: Schema.Spec
   readonly request?: string
   readonly configuredPolicy?: Schema.Requirement
+  readonly evaluation?: Schema.EvaluationPlan
 }) {
   const draft = ProContract.normalizeSpec(input.spec)
   const inherited =
@@ -128,7 +145,7 @@ export function compileSpec(input: {
         ? [inherited.brief, original].filter(Boolean).join("\n\n")
         : inherited.brief,
   })
-  const violations = diagnoseSpec({ spec, request: input.request })
+  const violations = diagnoseSpec({ spec, request: input.request, evaluation: input.evaluation })
   if (violations.length)
     return { type: "rejected" as const, reason: violations.map((item) => item.message).join("; "), violations }
   const specHash = ProContract.hashSpec(spec)
@@ -140,6 +157,7 @@ export function compileSpec(input: {
     authority: spec.authority,
     replayArtifacts: spec.evidence.replay?.artifacts ?? [],
     policyRequirement: spec.requires.find((requirement) => requirement.policy),
+    evaluation: input.evaluation,
   }
   return { type: "accepted" as const, spec, specHash, manifest, manifestHash: Hash.sha256(JSON.stringify(manifest)) }
 }
@@ -315,6 +333,14 @@ const layer = Layer.effect(
           executor: "opencode",
         })
         if (receipt.decision.type === "rejected" || !receipt.contract) return receipt
+        const evaluation = input.evaluation
+          ? yield* contracts.issueEvaluation({
+              deliveryContractID: receipt.contract.id,
+              evaluatorHash: input.evaluation.evaluatorHash,
+              deadline: input.evaluation.deadline,
+            })
+          : undefined
+        if (evaluation?.decision.type === "rejected") return { ...receipt, evaluation }
         const execution = yield* create({
           contractID: receipt.contract.id,
           revision: receipt.contract.revision,
@@ -322,7 +348,7 @@ const layer = Layer.effect(
           model: input.model,
           nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
         })
-        return { ...receipt, execution }
+        return { ...receipt, execution, evaluation }
       }),
       create,
       claim: Effect.fn("ProContractOpenCode.claim")(function* (contractID, now) {

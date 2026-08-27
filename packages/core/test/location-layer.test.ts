@@ -260,6 +260,17 @@ describe("LocationServiceMap", () => {
               requires: [policyRequirement],
               brief: [proposal.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
             }
+            const evaluation = ProContract.EvaluationPlan.make({
+              evaluatorHash: "evaluator-v1",
+              deadline: proposal.budget.deadline + 1,
+            })
+            const compiled = ProContractOpenCode.compileSpec({
+              spec: proposal,
+              request,
+              configuredPolicy: policyRequirement,
+              evaluation,
+            })
+            if (compiled.type === "rejected") return yield* Effect.die(compiled.reason)
             expect((yield* registry.materialize()).definitions.map((item) => item.name)).toContain("contract_propose")
             const execution = yield* settleTool(registry, {
               sessionID,
@@ -268,7 +279,7 @@ describe("LocationServiceMap", () => {
                 type: "tool-call",
                 id: "call-contract-propose",
                 name: "contract_propose",
-                input: { spec: proposal },
+                input: { spec: proposal, evaluation },
               },
             }).pipe(Effect.forkChild)
             yield* Effect.yieldNow
@@ -276,15 +287,23 @@ describe("LocationServiceMap", () => {
             expect(pending).toHaveLength(1)
             const approval = pending[0]
             if (!approval) yield* Effect.die("Contract proposal did not request permission")
-            expect(approval).toMatchObject({ action: "contract_issue", resources: [ProContract.hashSpec(expected)] })
+            expect(approval).toMatchObject({
+              action: "contract_issue",
+              resources: [ProContract.hashSpec(expected), compiled.manifestHash],
+            })
             const contractID = ProContract.ID.make(String(approval.metadata?.contractID))
             expect(yield* contracts.get(contractID)).toBeUndefined()
 
             yield* permissions.reply({ requestID: approval.id, reply: "once" })
             const settled = yield* Fiber.join(execution)
 
-            expect(settled.output?.structured).toMatchObject({ contractID })
+            const evaluationContractID = ProContract.evaluationID(contractID, 1, evaluation.evaluatorHash)
+            expect(settled.output?.structured).toMatchObject({ contractID, evaluationContractID })
             expect(yield* contracts.get(contractID)).toMatchObject({ id: contractID, spec: expected })
+            expect(yield* contracts.get(evaluationContractID)).toMatchObject({
+              id: evaluationContractID,
+              spec: { requires: [{ contractID, revision: 1 }] },
+            })
             expect(yield* bindings.get(contractID)).toMatchObject({ contractID, model: { id: "test" } })
 
             const unnamedArtifact = yield* settleTool(registry, {

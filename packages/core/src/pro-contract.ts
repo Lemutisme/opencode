@@ -7,6 +7,7 @@ export {
   Capability,
   Challenge,
   Evidence,
+  EvaluationPlan,
   Handoff,
   ID,
   Info,

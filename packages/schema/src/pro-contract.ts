@@ -128,6 +128,16 @@ export const Resolution = Schema.Struct({
 }).annotate({ identifier: "ProContract.Resolution" })
 export interface Resolution extends Schema.Schema.Type<typeof Resolution> {}
 
+export const EvaluationPlan = Schema.Struct({
+  evaluatorHash: Schema.NonEmptyString,
+  deadline: NonNegativeInt,
+}).annotate({
+  identifier: "ProContract.EvaluationPlan",
+  description:
+    "Pre-issue a dependent Evaluation Contract before exposing delivery execution when delivery evidence alone cannot settle the intended quality claim.",
+})
+export interface EvaluationPlan extends Schema.Schema.Type<typeof EvaluationPlan> {}
+
 export const Spec = Schema.Struct({
   trigger: Trigger,
   goal: Schema.NonEmptyString,

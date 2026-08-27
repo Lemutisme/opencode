@@ -51,7 +51,7 @@ describe("OpenCode Contract compiler", () => {
         const accepted = corpus.filter(
           (item) =>
             !ProContractOpenCode.diagnoseSpec({ spec: item.spec, request: item.request }).some(
-              (violation) => candidate[violation.rule],
+              (violation) => violation.rule === "evaluation" || candidate[violation.rule],
             ),
         )
         return {
@@ -69,9 +69,14 @@ describe("OpenCode Contract compiler", () => {
   })
 
   test("compiles one deterministic principal-readable manifest", () => {
+    const evaluation = ProContract.EvaluationPlan.make({
+      evaluatorHash: "evaluator-v1",
+      deadline: base.budget.deadline + 100,
+    })
     const input = {
       spec: { ...base, evidence: { type: "principal" as const } },
       request,
+      evaluation,
       configuredPolicy: {
         contractID: ProContract.ID.make("pct_compiler_policy"),
         revision: 1,
@@ -79,7 +84,9 @@ describe("OpenCode Contract compiler", () => {
       },
     }
     const first = ProContractOpenCode.compileSpec(input)
-    const second = ProContractOpenCode.compileSpec(first.type === "accepted" ? { spec: first.spec, request } : input)
+    const second = ProContractOpenCode.compileSpec(
+      first.type === "accepted" ? { spec: first.spec, request, evaluation } : input,
+    )
 
     expect(first).toMatchObject({
       type: "accepted",
@@ -92,11 +99,31 @@ describe("OpenCode Contract compiler", () => {
         version: 1,
         adapter: "opencode",
         authority: base.authority,
+        evaluation,
       },
       specHash: expect.any(String),
       manifestHash: expect.any(String),
     })
     expect(second).toEqual(first)
+    const changed = ProContractOpenCode.compileSpec({
+      ...input,
+      evaluation: { ...evaluation, deadline: evaluation.deadline + 1 },
+    })
+    expect(changed.type).toBe("accepted")
+    if (changed.type === "accepted") expect(changed.manifestHash).not.toBe(first.manifestHash)
+  })
+
+  test("rejects an evaluation deadline that cannot outlive delivery", () => {
+    expect(
+      ProContractOpenCode.compileSpec({
+        spec: base,
+        request,
+        evaluation: { evaluatorHash: "evaluator-v1", deadline: base.budget.deadline },
+      }),
+    ).toMatchObject({
+      type: "rejected",
+      violations: [{ rule: "evaluation" }],
+    })
   })
 
   test("returns every compiler violation without mutating the draft", () => {

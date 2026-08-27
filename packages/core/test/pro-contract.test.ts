@@ -1789,6 +1789,61 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
+  schedulerIt.effect("persists evaluation duty before exposing a delivery execution", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const evaluation = ProContract.EvaluationPlan.make({
+        evaluatorHash: "evaluator-v1",
+        deadline: spec.budget.deadline + 100,
+      })
+      const issued = yield* bindings.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        evaluation,
+        now: 0,
+      })
+      const evaluationID = ProContract.evaluationID(contractID, 1, evaluation.evaluatorHash)
+
+      expect(issued.execution).toMatchObject({ contractID, dispatched: false })
+      expect(issued.evaluation?.contract).toMatchObject({ id: evaluationID, status: "dormant" })
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({
+        quiet: false,
+        outstanding: expect.arrayContaining([contractID, evaluationID]),
+      })
+    }),
+  )
+
+  schedulerIt.effect("does not expose execution when evaluation reservation conflicts", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* contracts.issueEvaluation({
+        deliveryContractID: contractID,
+        evaluatorHash: "evaluator-v1",
+        deadline: spec.budget.deadline + 100,
+      })
+      const issued = yield* bindings.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        evaluation: { evaluatorHash: "evaluator-v1", deadline: spec.budget.deadline + 101 },
+        now: 0,
+      })
+
+      expect(issued.evaluation?.decision).toEqual({ type: "rejected", reason: "contract already exists" })
+      expect(issued.execution).toBeUndefined()
+      expect(yield* bindings.get(contractID)).toBeUndefined()
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: false })
+    }),
+  )
+
   schedulerIt.effect("enforces turn and action budgets atomically", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service

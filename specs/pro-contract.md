@@ -383,12 +383,16 @@ principal intent
 ```
 
 When delivery evidence does not establish the optimization goal, compile two
-ordinary obligations. Issue a dependent Evaluation Contract immediately after
-the Delivery Contract, before execution completes. Its deterministic identity
-binds the delivery revision and evaluator hash. Delivery may discharge on exact
+ordinary obligations. OpenCode may bind an `EvaluationPlan` to the compiled
+issue operation. The adapter persists its dependent Evaluation Contract after
+the Delivery admission but before it creates an executable Session binding. A
+conflict or crash therefore leaves outstanding duty without exposing execution;
+it cannot leave a delivery-only path to false quiet. The deterministic
+Evaluation identity binds the delivery revision and evaluator hash, and its
+deadline must outlive the Delivery deadline. Delivery may discharge on exact
 artifact evidence, but the shared scope remains non-quiet until an external
 report accepts the same subject hash. A failed report challenges Delivery while
-Evaluation remains outstanding. This composition adds no lifecycle state:
+Evaluation remains outstanding. This edge composition adds no lifecycle state:
 
 ```text
 Delivery: artifact exists and reproduces

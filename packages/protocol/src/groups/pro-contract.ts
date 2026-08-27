@@ -52,8 +52,14 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
         budget: ProContract.Budget.pipe(Schema.optional),
         evidence: ProContract.Evidence.pipe(Schema.optional),
         resolution: ProContract.Resolution.pipe(Schema.optional),
+        evaluation: ProContract.EvaluationPlan.pipe(Schema.optional),
       }),
-      success: Schema.Struct({ data: ProContract.Info, execution: OpenCodeExecution, receipt: Receipt }),
+      success: Schema.Struct({
+        data: ProContract.Info,
+        execution: OpenCodeExecution,
+        evaluation: ProContract.Info.pipe(Schema.optional),
+        receipt: Receipt,
+      }),
       error: ConflictError,
     })
       .middleware(PrincipalAuthorization)

@@ -172,9 +172,12 @@ the server credential or reach the plane database directly.
 
 The existing `issueEvaluation` and `settleEvaluation` path gives an external
 evaluation a durable obligation and binds its identity to the delivery ID,
-delivery revision, subject, and a caller-provided `evaluatorHash`. It correctly
-reopens a delivery on a failed report and can discharge a separate evaluation
-Contract on a passing report.
+delivery revision, subject, and a caller-provided `evaluatorHash`. An OpenCode
+`EvaluationPlan` now places that issuance in the compiled operation before an
+executor binding is created, so partial formation fails outstanding rather than
+silently degrading into delivery-only finality. It correctly reopens a delivery
+on a failed report and can discharge a separate evaluation Contract on a
+passing report.
 
 It is still an orchestration adapter, not a mechanical verifier boundary.
 `settleEvaluation` receives the already-parsed report, pass bit, evidence hash,

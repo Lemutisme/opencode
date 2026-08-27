@@ -163,13 +163,14 @@ describe("tool.registry", () => {
         budget: { ...defaults.budget, deadline: 1 },
         resolution: { ...defaults.resolution, maxAttempts: 1 },
       }
+      const evaluation = ProContract.EvaluationPlan.make({ evaluatorHash: "evaluator-v1", deadline: 2 })
       const tool =
         (yield* registry.all()).find((item) => item.id === "contract_propose") ??
         (yield* Effect.die("contract_propose not found"))
       const asked: Array<{ permission: string; patterns: string[] }> = []
 
       const result = yield* tool.execute(
-        { spec: proposal },
+        { spec: proposal, evaluation },
         {
           sessionID: session.id,
           messageID: MessageID.make("msg_contract_proposal"),
@@ -193,7 +194,25 @@ describe("tool.registry", () => {
       expect(contract.spec.requires).toEqual([policyRequirement])
       expect(contract.spec.budget).toEqual(proposal.budget)
       expect(contract.spec.resolution).toEqual(proposal.resolution)
-      expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec)] }])
+      const compiled = ProContractOpenCode.compileSpec({
+        spec: proposal,
+        request: "Use the prepared data at /home/data",
+        configuredPolicy: policyRequirement,
+        evaluation,
+      })
+      if (compiled.type === "rejected") return yield* Effect.die(compiled.reason)
+      expect(asked).toEqual([
+        { permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec), compiled.manifestHash] },
+      ])
+      expect(result.metadata.evaluationContractID).toBe(
+        ProContract.evaluationID(result.metadata.contractID, 1, evaluation.evaluatorHash),
+      )
+      const evaluationContractID = result.metadata.evaluationContractID
+      if (!evaluationContractID) return yield* Effect.die("Evaluation Contract was not issued")
+      expect(yield* contracts.get(evaluationContractID)).toMatchObject({
+        status: "dormant",
+        spec: { requires: [{ contractID: result.metadata.contractID, revision: 1 }] },
+      })
       expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({
         sessionID: result.metadata.sessionID,
         model: { id: "test", providerID: "test" },
@@ -214,7 +233,7 @@ describe("tool.registry", () => {
         )
         .pipe(Effect.exit)
       expect(duplicate._tag).toBe("Failure")
-      expect(yield* contracts.list(session.projectID)).toHaveLength(1)
+      expect(yield* contracts.list(session.projectID)).toHaveLength(2)
     }),
   )
 

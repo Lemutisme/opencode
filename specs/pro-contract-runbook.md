@@ -583,8 +583,25 @@ cohort evaluation or for principal promotion.
 
 ### 4.11 Evaluated delivery
 
-When package/preflight cannot establish the user goal, persist evaluation before
-the Delivery Contract finishes:
+When package/preflight cannot establish the user goal, the preferred HTTP or
+`contract_propose` issue includes an EvaluationPlan:
+
+```json
+{
+  "evaluation": {
+    "evaluatorHash": "sha256:frozen-evaluator",
+    "deadline": 1798761600000
+  }
+}
+```
+
+The Evaluation deadline must outlive the Delivery deadline. OpenCode persists
+the dependent Evaluation before it creates the Delivery execution binding, and
+the issue response returns both Contracts. A reservation conflict therefore
+returns no execution instead of silently degrading to delivery-only finality.
+
+The manual compatibility path can still persist evaluation immediately after a
+previously issued Delivery:
 
 ```bash
 opencode contract evaluation issue pct_delivery \
