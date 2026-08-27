@@ -142,6 +142,7 @@ export interface Interface {
       scopes: readonly RelativePath[]
       ignores?: Repository
       maximumUntrackedFileBytes?: number
+      forceInclude?: readonly RelativePath[]
     }) => Effect.Effect<TreeID, OperationError>
     readonly write: (repository: Repository) => Effect.Effect<TreeID, OperationError>
     readonly files: (input: {
@@ -527,8 +528,8 @@ const layer = Layer.effect(
       )
     })
 
-    const writeTree = Effect.fn("Git.tree.write")(function* (repository: Repository) {
-      return TreeID.make((yield* repositoryOperation("write_tree", repository, ["write-tree"])).text.trim())
+    const writeTree = Effect.fn("Git.tree.write")(function* (repository: Repository, env?: Record<string, string>) {
+      return TreeID.make((yield* repositoryOperation("write_tree", repository, ["write-tree"], { env })).text.trim())
     })
 
     const captureTree = Effect.fn("Git.tree.capture")(
@@ -537,12 +538,39 @@ const layer = Layer.effect(
         scopes: readonly RelativePath[]
         ignores?: Repository
         maximumUntrackedFileBytes?: number
+        forceInclude?: readonly RelativePath[]
       }) =>
         locked(
           input.repository,
           Effect.gen(function* () {
             yield* Effect.forEach(input.scopes, (scope) => refresh({ ...input, scope }), { discard: true })
-            return yield* writeTree(input.repository)
+            const base = yield* writeTree(input.repository)
+            const force = Array.from(
+              new Set(
+                (yield* Effect.forEach(
+                  input.forceInclude ?? [],
+                  (item) =>
+                    fs
+                      .existsSafe(path.join(input.repository.worktree, item))
+                      .pipe(Effect.map((exists) => (exists ? item : undefined))),
+                  { concurrency: 8 },
+                )).filter((item): item is RelativePath => item !== undefined),
+              ),
+            )
+            if (!force.length) return base
+
+            const index = path.join(input.repository.gitDirectory, `capture-${randomUUID()}.index`)
+            const env = { GIT_INDEX_FILE: index, GIT_LITERAL_PATHSPECS: "1" }
+            return yield* Effect.gen(function* () {
+              yield* repositoryOperation("refresh", input.repository, ["read-tree", base], { env })
+              yield* repositoryOperation(
+                "refresh",
+                input.repository,
+                ["add", "--all", "--force", "--sparse", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                { stdin: force.join("\0") + "\0", env },
+              )
+              return yield* writeTree(input.repository, env)
+            }).pipe(Effect.ensuring(fs.remove(index).pipe(Effect.catch(() => Effect.void))))
           }),
         ),
     )
