@@ -95,15 +95,6 @@ import { llmClient } from "../../effect/app-node-platform"
 const SETTLEMENT_WINDOW = 20
 const MAX_PROVIDER_TURN_MS = 15 * 60 * 1_000
 
-function contractContext(contract: ProContract.Contract) {
-  return [
-    `Contract ${contract.id}@${contract.revision} is active; its accepted terms remain authoritative.`,
-    `Optimization goal: ${contract.spec.goal}`,
-    `Settlement claim: ${ProContract.evidenceClaim(contract.spec)}`,
-    "Continue producing the strongest candidate within the institutionally enforced authority and budget. A response cannot settle this duty: report a candidate only when ready, and use blocked or revision controls only for a concrete state change. Verification and settlement remain independent.",
-  ].join("\n")
-}
-
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -276,15 +267,7 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [
-          agent.info?.system,
-          system.baseline,
-          contract?.status === "active"
-            ? contractContext(contract)
-            : contractBinding && contract
-              ? `Contract ${contract.id} is ${contract.status}. No further execution is authorized.`
-              : undefined,
-        ]
+        system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [
