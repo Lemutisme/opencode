@@ -340,6 +340,84 @@ The Pareto result is the simplified implementation at
 within five tests of fixed-point review with one semantic attempt and avoided
 the substantial regressions of mandatory value and review gates.
 
+## 2026-08-28 reliable Contract ablation
+
+This ablation used Luna Max, a six-hour wall limit, 1,000 provider turns,
+4,000 Contract actions, an 80% cache-read gate, the same ProgramBench images,
+and the same behavior-evidence issue policy in both arms. It compared exact
+`2abdc89d05f6a5e5caf13d856074e40f7fbf3796` with two descendants:
+
+- `a1a79159566751ee93b262edac95d3e70b2be4f8` projected the complete immutable
+  goal, claim, brief, policy, authority, budget, and evidence on every turn;
+- `8cc580c84aed38b82d9b3c1ccf5b5750d659e3ec` projected only active duty
+  identity, goal, claim, and the candidate/settlement boundary.
+
+The strict four-instance runs retained infrastructure-invalid trajectories as
+zero rather than replacing them with recovery runs:
+
+| Instance | exact `2abdc89d` | full projection `a1a791595` |
+|---|---:|---:|
+| `mgdm__htmlq.6e31bc8` | 98.21%, 337 turns, $3.04 | 95.88%, 298 turns, $2.15 |
+| `mibk__dupl.1bf052b` | 83.65%, 360 turns, $5.03 | invalid at 263 turns |
+| `eradman__entr.8e2e8b4` | invalid at 233 turns | 84.47%, 268 turns, $1.01 |
+| `ffmpeg__ffmpeg.360a402` | 7.37%, 405 turns, $3.83 | 6.68%, 440 turns, $4.54 |
+| invalid-as-zero mean | **47.31%** | **46.76%** |
+
+The full projection was therefore rejected. Its lower HTMLq cost did not
+compensate for 34 fewer resolved tests. The regressions concentrated in
+remove-node behavior, exact help and error output, missing option values, and
+file/stdin conventions. Its `validate.sh` was 4.9 KiB versus 11.8 KiB for the
+exact-base candidate even though its parser implementation was larger. This
+is evidence that repeatedly elevating executor policy to system authority can
+create settlement-attention bias instead of improving behavioral coverage.
+
+The minimal projection recovered part, but not all, of that loss:
+
+| Instance | minimal projection | full projection | exact base or recovery |
+|---|---:|---:|---:|
+| `mgdm__htmlq.6e31bc8` | 96.63% | 95.88% | 98.21% |
+| `eradman__entr.8e2e8b4` | 86.01% | 84.47% | 93.00% |
+
+It completed both exact deliveries with 99%+ cache reads and used fewer turns
+than the full projection on Entr, but it did not beat the no-projection base.
+`b58eb4fef` consequently restores the product tree exactly to `2abdc89d`.
+The projection commits remain only as falsifiable historical ablations.
+
+Two invalid trajectories exposed an independent adapter reliability defect.
+Neither server container was OOM-killed. Candidate Dupl was explicitly
+classified lost after one transient public-API observation failure; exact-base
+Entr ended as `execution_failed` while a tool was still live, without enough
+persisted exception detail to assert the same immediate cause. Both recovery
+replicates completed after the observer and terminalization path was hardened.
+The runner now:
+
+- accepts only same-Contract, same-revision execution successors with
+  monotonic attempts, turns, and actions (`3845762`);
+- retries up to six transient read-only observations while preserving the
+  wall, turn, action, authentication, and coordinate conflict boundaries
+  (`943bf12`).
+
+The runner suite passes 180 tests. Fixed-runner recovery replicates discharged
+and evaluated at 93.00% for exact-base Entr (343 turns) and 91.42% for
+full-projection Dupl (180 turns). These replicates demonstrate the liveness
+repair but do not overwrite the strict-run invalids or establish a model-side
+performance gain.
+
+The resulting boundary is simpler:
+
+```text
+ProContract Core owns durable duty, authority, attempt identity,
+subject capture, independent settlement, and bounded liveness.
+
+The executor prompt or RSI layer owns search and stopping policy.
+The observer adapter retries temporary absence of evidence;
+it never converts that absence into evidence of absence.
+```
+
+The evidence-backed canonical implementation remains `2abdc89d`; the reliable
+ProgramBench execution coordinate is that OpenCode tree plus runner `943bf12`.
+No claim of overall leaderboard improvement is warranted by this ablation.
+
 ## Local artifacts
 
 The result files are external evaluation records and are not runtime or build
@@ -374,6 +452,11 @@ workspace layout documented by the runbook:
 - [Fresh matched screening](../../run-artifacts/programbench-procontract-screening-20260811-154249/RESULT.md)
 - [Hashcards essential-mechanism ablation](../../run-artifacts/programbench-procontract-ablation-20260811-191048/RESULT.md)
 - [Four-task evidence-policy confirmation](../../run-artifacts/programbench-procontract-confirmation-20260812-003824/RESULT.md)
+- [Reliable exact-base four-task run](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-base-luna4-20260828-v1/RESULT.md)
+- [Full-projection four-task run](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-candidate-luna4-20260828-v1/RESULT.md)
+- [Exact-base Entr recovery](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-base-entr-recovery-20260828-v1/RESULT.md)
+- [Full-projection Dupl recovery](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-candidate-dupl-recovery-20260828-v1/RESULT.md)
+- [Minimal-duty two-task run](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-minimal-luna2-20260828-v1/RESULT.md)
 
 ## Decision rule for future additions
 
