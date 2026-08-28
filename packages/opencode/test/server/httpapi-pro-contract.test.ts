@@ -134,7 +134,7 @@ describe("ProContract HttpApi", () => {
         id: "pct_http",
         scope: "http",
         goal: "Exercise the contract ledger",
-        policy: "Preserve verified behavior in future Contracts",
+        executionPolicy: "Preserve verified behavior in future Contracts",
         brief: "Preserve this handoff across future execution.",
         location: { directory: process.cwd() },
         model: { providerID: "openai", id: "gpt-5.3-codex" },
@@ -158,19 +158,50 @@ describe("ProContract HttpApi", () => {
           status: "dormant",
           spec: {
             goal: "Exercise the contract ledger",
-            policy: "Preserve verified behavior in future Contracts",
             brief: "Preserve this handoff across future execution.",
             requires: [],
           },
         },
-        execution: { contractID: "pct_http", dispatched: false },
+        execution: {
+          contractID: "pct_http",
+          executionPolicy: "Preserve verified behavior in future Contracts",
+          dispatched: false,
+        },
         receipt: { frontier: 0 },
       })
+      const legacyRetry = await fetch(new URL("/api/contract", listener.url), {
+        method: "POST",
+        headers: { authorization: authorization(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "pct_http",
+          scope: "http",
+          goal: "Exercise the contract ledger",
+          policy: "Preserve verified behavior in future Contracts",
+          brief: "Preserve this handoff across future execution.",
+          location: { directory: process.cwd() },
+          model: { providerID: "openai", id: "gpt-5.3-codex" },
+        }),
+      })
+      expect(legacyRetry.status).toBe(200)
+      const conflictingPolicy = await fetch(new URL("/api/contract", listener.url), {
+        method: "POST",
+        headers: { authorization: authorization(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "pct_http_conflict",
+          scope: "http",
+          goal: "Reject ambiguous execution policy",
+          executionPolicy: "Policy A",
+          policy: "Policy B",
+          location: { directory: process.cwd() },
+          model: { providerID: "openai", id: "gpt-5.3-codex" },
+        }),
+      })
+      expect(conflictingPolicy.status).toBe(409)
 
       const before = await fetch(new URL("/api/contract/quiet?scope=http", listener.url), {
         headers: { authorization: authorization() },
       })
-      expect(await before.json()).toMatchObject({ quiet: false, frontier: 0, outstanding: ["pct_http"] })
+      expect(await before.json()).toMatchObject({ quiet: false, frontier: 1, outstanding: ["pct_http"] })
 
       const release = () =>
         fetch(new URL("/api/contract/pct_http/release", listener.url), {
@@ -184,7 +215,7 @@ describe("ProContract HttpApi", () => {
       const after = await fetch(new URL("/api/contract/quiet?scope=http", listener.url), {
         headers: { authorization: authorization() },
       })
-      expect(await after.json()).toMatchObject({ quiet: true, frontier: 2, outstanding: [] })
+      expect(await after.json()).toMatchObject({ quiet: true, frontier: 3, outstanding: [] })
     } finally {
       await listener.stop(true)
     }

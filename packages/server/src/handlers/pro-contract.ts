@@ -33,10 +33,16 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
           const now = yield* Clock.currentTimeMillis
           const id = ctx.payload.id ?? ProContract.ID.create()
           const defaults = (yield* contracts.get(id))?.spec ?? ProContract.defaultSpec(ctx.payload.goal, now)
+          if (
+            ctx.payload.executionPolicy !== undefined &&
+            ctx.payload.policy !== undefined &&
+            ctx.payload.executionPolicy !== ctx.payload.policy
+          )
+            return yield* new ConflictError({ message: "execution policy aliases conflict", resource: id })
+          const executionPolicy = ctx.payload.executionPolicy ?? ctx.payload.policy
           const spec = {
             trigger: ctx.payload.trigger ?? defaults.trigger,
             goal: ctx.payload.goal,
-            policy: ctx.payload.policy ?? defaults.policy,
             brief: ctx.payload.brief ?? defaults.brief,
             requires: ctx.payload.requires ?? defaults.requires,
             authority: ctx.payload.authority ?? defaults.authority,
@@ -50,6 +56,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             spec,
             location: ctx.payload.location,
             model: ctx.payload.model,
+            executionPolicy,
             now,
           })
           if (issued.decision.type === "rejected")
@@ -63,7 +70,8 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             execution.location.workspaceID !== ctx.payload.location.workspaceID ||
             execution.model.providerID !== ctx.payload.model.providerID ||
             execution.model.id !== ctx.payload.model.id ||
-            execution.model.variant !== ctx.payload.model.variant
+            execution.model.variant !== ctx.payload.model.variant ||
+            execution.executionPolicy !== executionPolicy
           )
             return yield* new ConflictError({ message: "contract execution binding does not match", resource: id })
           return {

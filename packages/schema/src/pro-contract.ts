@@ -20,7 +20,7 @@ export const Requirement = Schema.Struct({
   contractID: ID,
   revision: PositiveInt,
   policy: Schema.Literal(true).pipe(optional).annotate({
-    description: "Treat this evidenced Contract's exact policy as the execution policy for the dependent Contract.",
+    description: "Deprecated legacy execution-policy marker. New Contracts ignore it.",
   }),
 }).annotate({ identifier: "ProContract.Requirement" })
 export interface Requirement extends Schema.Schema.Type<typeof Requirement> {}
@@ -132,7 +132,7 @@ export const Spec = Schema.Struct({
   trigger: Trigger,
   goal: Schema.NonEmptyString,
   policy: Schema.NonEmptyString.pipe(optional).annotate({
-    description: "Exact execution policy offered to future Contracts after this Contract is independently evidenced.",
+    description: "Deprecated legacy execution policy. New Contracts keep execution policy outside their terms.",
   }),
   brief: Schema.String.annotate({
     description:

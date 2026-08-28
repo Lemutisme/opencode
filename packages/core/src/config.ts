@@ -100,7 +100,7 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   contract_policy: Schema.Struct({ contractID: ProContract.ID, revision: PositiveInt, policy: Schema.Literal(true) })
     .pipe(Schema.optional)
     .annotate({
-      description: "Principal-selected, evidenced Policy Contract inherited by new Contract proposals",
+      description: "Deprecated compatibility field. Execution policy is selected outside Contract configuration.",
     }),
   references: ConfigReference.Info.pipe(Schema.optional).annotate({
     description: "Named local directories or Git repositories available as external context",

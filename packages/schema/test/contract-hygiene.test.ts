@@ -52,7 +52,7 @@ describe("contract hygiene", () => {
     ).toThrow()
   })
 
-  test("contract requirements mark only explicit execution policies", () => {
+  test("contract requirements decode the legacy execution-policy marker", () => {
     const decode = Schema.decodeUnknownSync(ProContract.Requirement)
     expect(decode({ contractID: "pct_policy", revision: 1, policy: true })).toEqual({
       contractID: ProContract.ID.make("pct_policy"),

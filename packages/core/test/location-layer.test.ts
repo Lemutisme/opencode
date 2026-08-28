@@ -172,11 +172,6 @@ describe("LocationServiceMap", () => {
     ).pipe(
       Effect.flatMap((dir) =>
         Effect.gen(function* () {
-          const policyID = ProContract.ID.make("pct_v2_default_policy")
-          const policyRequirement = { contractID: policyID, revision: 1, policy: true as const }
-          yield* Effect.promise(() =>
-            fs.writeFile(path.join(dir.path, "opencode.json"), JSON.stringify({ contract_policy: policyRequirement })),
-          )
           const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
           const sessionID = SessionV2.ID.make("ses_contract_proposal")
           const { db } = yield* Database.Service
@@ -224,21 +219,6 @@ describe("LocationServiceMap", () => {
             const agents = yield* AgentV2.Service
             const contracts = yield* ProContract.Service
             const bindings = yield* ProContractOpenCode.Service
-            const policySpec = {
-              ...ProContract.defaultSpec("Ratify the default execution policy", Date.now()),
-              policy: "Preserve verified behavior",
-            }
-            yield* contracts.issue({ id: policyID, scope: "policy", spec: policySpec, executor: "policy" })
-            yield* contracts.activate(policyID, 1, Date.now())
-            yield* contracts.reportReady({
-              contractID: policyID,
-              revision: 1,
-              summary: "policy ready",
-              uncertainties: [],
-              subjectHash: "policy-subject",
-              time: Date.now(),
-            })
-            yield* contracts.principalAttest({ contractID: policyID, evidenceHash: "policy-evidence" })
             yield* agents.transform((draft) =>
               draft.update(AgentV2.defaultID, (agent) => {
                 agent.permissions.push({ action: "contract_issue", resource: "*", effect: "ask" })
@@ -257,7 +237,6 @@ describe("LocationServiceMap", () => {
             }
             const expected = {
               ...proposal,
-              requires: [policyRequirement],
               brief: [proposal.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
             }
             expect((yield* registry.materialize()).definitions.map((item) => item.name)).toContain("contract_propose")
@@ -268,7 +247,7 @@ describe("LocationServiceMap", () => {
                 type: "tool-call",
                 id: "call-contract-propose",
                 name: "contract_propose",
-                input: { spec: proposal },
+                input: { spec: proposal, executionPolicy: "Preserve verified behavior" },
               },
             }).pipe(Effect.forkChild)
             yield* Effect.yieldNow
@@ -285,7 +264,11 @@ describe("LocationServiceMap", () => {
 
             expect(settled.output?.structured).toMatchObject({ contractID })
             expect(yield* contracts.get(contractID)).toMatchObject({ id: contractID, spec: expected })
-            expect(yield* bindings.get(contractID)).toMatchObject({ contractID, model: { id: "test" } })
+            expect(yield* bindings.get(contractID)).toMatchObject({
+              contractID,
+              model: { id: "test" },
+              executionPolicy: "Preserve verified behavior",
+            })
 
             const unnamedArtifact = yield* settleTool(registry, {
               sessionID,

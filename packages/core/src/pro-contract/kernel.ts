@@ -109,8 +109,24 @@ export const empty: State = { contracts: {}, attestations: {} }
 
 const institutionCommands = new Set<Command["type"]>(["activate", "report-ready", "report-blocked", "escalate"])
 
+export function canonicalSpec(spec: ProContract.Spec) {
+  return ProContract.Spec.make({
+    trigger: spec.trigger,
+    goal: spec.goal,
+    brief: spec.brief,
+    requires: spec.requires.map((requirement) => ({
+      contractID: requirement.contractID,
+      revision: requirement.revision,
+    })),
+    authority: spec.authority,
+    budget: spec.budget,
+    evidence: spec.evidence,
+    resolution: spec.resolution,
+  })
+}
+
 export function hashSpec(spec: ProContract.Spec) {
-  return Hash.sha256(JSON.stringify(ProContract.Spec.make(spec)))
+  return Hash.sha256(JSON.stringify(canonicalSpec(spec)))
 }
 
 export function hashReplay(policy: ProContract.ReplayPolicy) {
@@ -131,12 +147,11 @@ export function transition(state: State, command: Command): Result {
     if (command.actor !== command.draft.issuer) return reject("only the issuer may issue the contract")
     if (command.draft.issuer === command.draft.executor) return reject("issuer and executor must be distinct")
     if (command.draft.specHash !== hashSpec(command.draft.spec)) return reject("specification hash does not match")
-    const replay = command.draft.spec.evidence.replay
+    const spec = canonicalSpec(command.draft.spec)
+    const replay = spec.evidence.replay
     if (replay && replay.checks.length === 0 && replay.protected.length === 0 && replay.artifacts.length === 0)
       return reject("replay policy is empty")
     if (replay?.checks.some((check) => check.argv.length === 0)) return reject("replay check command is empty")
-    if (command.draft.spec.requires.filter((requirement) => requirement.policy).length > 1)
-      return reject("contract may require only one execution policy")
     const existing = state.contracts[command.draft.id]
     if (existing) {
       if (
@@ -148,22 +163,19 @@ export function transition(state: State, command: Command): Result {
         return accept(state)
       return reject("contract already exists")
     }
-    for (const requirement of command.draft.spec.requires) {
+    for (const requirement of spec.requires) {
       if (requirement.contractID === command.draft.id) return reject("contract cannot require itself")
       const dependency = state.contracts[requirement.contractID]
       if (!dependency) return reject(`required contract not found: ${requirement.contractID}`)
       if (dependency.issuer !== command.draft.issuer) return reject("required contract issuer does not match")
       if (dependency.revision !== requirement.revision) return reject("required contract revision does not match")
       if (dependency.status === "released") return reject("required contract was released")
-      if (requirement.policy && !dependency.spec.policy) return reject("required contract defines no execution policy")
-      if (requirement.policy && (dependency.status !== "discharged" || !dependency.attestationID))
-        return reject("execution policy is not evidenced")
     }
     return accept({
       ...state,
       contracts: {
         ...state.contracts,
-        [command.draft.id]: { ...command.draft, revision: 1, status: "dormant" },
+        [command.draft.id]: { ...command.draft, spec, revision: 1, status: "dormant" },
       },
     })
   }
@@ -320,7 +332,8 @@ export function transition(state: State, command: Command): Result {
     if (contract.pendingRevision) return reject("a revision petition is already pending")
     if (command.specHash === contract.specHash) return reject("the proposed revision is unchanged")
     if (command.specHash !== hashSpec(command.spec)) return reject("specification hash does not match")
-    if (JSON.stringify(command.spec.requires) !== JSON.stringify(contract.spec.requires))
+    const spec = canonicalSpec(command.spec)
+    if (JSON.stringify(spec.requires) !== JSON.stringify(contract.spec.requires))
       return reject("contract dependencies cannot change during revision")
     return accept({
       ...state,
@@ -328,7 +341,7 @@ export function transition(state: State, command: Command): Result {
         ...state.contracts,
         [contract.id]: {
           ...contract,
-          pendingRevision: { spec: command.spec, specHash: command.specHash, reason: command.reason },
+          pendingRevision: { spec, specHash: command.specHash, reason: command.reason },
         },
       },
     })

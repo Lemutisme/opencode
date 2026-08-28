@@ -2,7 +2,6 @@ export * as ContractControlTools from "./contract-control"
 
 import { ToolFailure } from "@opencode-ai/llm"
 import { Clock, Effect, Exit, Layer, Schema } from "effect"
-import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
@@ -19,7 +18,6 @@ import { Tools } from "./tools"
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
-    const config = yield* Config.Service
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
     const replayVerifier = yield* ProContractReplay.Service
@@ -31,8 +29,11 @@ const layer = Layer.effectDiscard(
       .register({
         contract_propose: Tool.make({
           description:
-            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Set spec.goal to the current optimization objective, spec.policy only to an exact policy offered to future Contracts, and evidence.claim to the exact proposition the evidence may settle. A requirement may set policy: true only when its discharged source Contract defines the principal-ratified spec.policy. An implementation Contract that promises a build command or user-named output artifact must include finite replay checks and every user-named artifact path. Do not guess implementation-specific source paths; the build check covers its inputs. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
-          input: Schema.Struct({ spec: ProContract.Spec }),
+            "Propose a persistent Contract when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Keep executionPolicy separate from spec: it guides the executor but does not alter Contract identity, revision, or settlement. Pass it only when supplied by an independent policy selector; do not invent one. Set spec.goal to the current optimization objective and evidence.claim to the exact proposition the evidence may settle. An implementation Contract that promises a build command or user-named output artifact must include evidence.replay with finite checks and every user-named artifact path. Do not guess implementation-specific source paths; the build check covers its inputs. Preserve user-supplied quality criteria and stopping rules in the brief. Budgets and attempt limits are exact shared ceilings; budget.deadline is an absolute Unix timestamp in milliseconds. The exact draft requires principal approval before it is issued.",
+          input: Schema.Struct({
+            spec: ProContract.Spec,
+            executionPolicy: Schema.NonEmptyString.pipe(Schema.optional),
+          }),
           output: Schema.Struct({ contractID: ProContract.ID, sessionID: SessionSchema.ID }),
           toModelOutput: ({ output }) => [
             {
@@ -47,6 +48,7 @@ const layer = Layer.effectDiscard(
               if (!session.model)
                 return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
               const now = yield* Clock.currentTimeMillis
+              const executionPolicy = input.executionPolicy ?? input.spec.policy
               const request = (yield* sessions.context(context.sessionID)).find((item) => item.type === "user")?.text
               const unnamedArtifacts = request
                 ? (input.spec.evidence.replay?.artifacts ?? []).filter(
@@ -58,25 +60,12 @@ const layer = Layer.effectDiscard(
                   message: `Replay artifacts must be exact paths named by the user: ${unnamedArtifacts.join(", ")}`,
                 })
               const draft = ProContract.normalizeSpec(input.spec)
-              const configuredPolicy = Config.latest(yield* config.entries(), "contract_policy")
-              const inherited =
-                configuredPolicy && !draft.requires.some((requirement) => requirement.policy)
-                  ? {
-                      ...draft,
-                      requires: [
-                        ...draft.requires.filter(
-                          (requirement) => requirement.contractID !== configuredPolicy.contractID,
-                        ),
-                        configuredPolicy,
-                      ],
-                    }
-                  : draft
               const spec = request
                 ? {
-                    ...inherited,
-                    brief: [inherited.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
+                    ...draft,
+                    brief: [draft.brief, `Original request:\n${request}`].filter(Boolean).join("\n\n"),
                   }
-                : inherited
+                : draft
               const key = Hash.sha256(`${context.sessionID}:${context.assistantMessageID}:${context.toolCallID}`)
               const contractID = ProContract.ID.make(`pct_${key}`)
               const specHash = ProContract.hashSpec(spec)
@@ -90,11 +79,11 @@ const layer = Layer.effectDiscard(
                   goal: spec.goal,
                   details: [
                     spec.brief ? `Brief: ${spec.brief}` : undefined,
-                    spec.policy ? `Future policy: ${spec.policy}` : undefined,
+                    executionPolicy ? `Execution policy: ${executionPolicy}` : undefined,
                     `Trigger: ${JSON.stringify(spec.trigger)}`,
                     `Authority: ${spec.authority.join(", ")}`,
                     `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
-                    `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}${item.policy ? " (policy)" : ""}`).join(", ") || "none"}`,
+                    `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
                     `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                     `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
                     `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
@@ -112,11 +101,14 @@ const layer = Layer.effectDiscard(
                 spec,
                 location: session.location,
                 model: session.model,
+                executionPolicy,
                 now,
               })
               if (issued.decision.type === "rejected")
                 return yield* new ToolFailure({ message: issued.decision.reason })
               if (!issued.execution) return yield* new ToolFailure({ message: "Contract execution was not created" })
+              if (issued.execution.executionPolicy !== executionPolicy)
+                return yield* new ToolFailure({ message: "Contract execution policy does not match" })
               return { contractID, sessionID: issued.execution.sessionID }
             }).pipe(
               Effect.mapError((error) =>
@@ -295,7 +287,6 @@ export const node = makeLocationNode({
   layer,
   deps: [
     ToolRegistry.node,
-    Config.node,
     PermissionV2.node,
     ProContract.node,
     ProContractOpenCode.node,

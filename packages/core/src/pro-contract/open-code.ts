@@ -17,6 +17,7 @@ export type Binding = {
   readonly revision: number
   readonly location: Location.Ref
   readonly model: Model.Ref
+  readonly executionPolicy?: string
   readonly sessionID: SessionSchema.ID
   readonly promptID: SessionMessage.ID
   readonly dispatched: boolean
@@ -37,6 +38,7 @@ export interface Interface {
     readonly spec: Schema.Spec
     readonly location: Location.Ref
     readonly model: Model.Ref
+    readonly executionPolicy?: string
     readonly now: number
   }) => Effect.Effect<ProContract.IssueReceipt & { readonly execution?: Binding }>
   readonly create: (input: {
@@ -44,6 +46,7 @@ export interface Interface {
     readonly revision: number
     readonly location: Location.Ref
     readonly model: Model.Ref
+    readonly executionPolicy?: string
     readonly nextActionAt: number
   }) => Effect.Effect<Binding>
   readonly claim: (contractID: Schema.ID, now: number) => Effect.Effect<Binding | undefined>
@@ -196,6 +199,7 @@ const layer = Layer.effect(
       readonly revision: number
       readonly location: Location.Ref
       readonly model: Model.Ref
+      readonly executionPolicy?: string
       readonly nextActionAt: number
     }) {
       const binding: Binding = {
@@ -203,6 +207,7 @@ const layer = Layer.effect(
         revision: input.revision,
         location: input.location,
         model: input.model,
+        executionPolicy: input.executionPolicy,
         sessionID: SessionSchema.ID.create(),
         promptID: SessionMessage.ID.create(),
         dispatched: false,
@@ -243,6 +248,7 @@ const layer = Layer.effect(
           revision: receipt.contract.revision,
           location: input.location,
           model: input.model,
+          executionPolicy: input.executionPolicy,
           nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
         })
         return { ...receipt, execution }

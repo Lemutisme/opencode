@@ -208,66 +208,36 @@ describe("ProContract kernel", () => {
     ).toEqual({ type: "rejected", reason: "required contract was released" })
   })
 
-  test("binds one evidenced Contract as an immutable execution policy", () => {
+  test("keeps execution policy metadata outside obligation identity", () => {
     const policyID = ProContract.ID.make("pct_policy")
-    const policyAttestationID = ProContract.AttestationID.make("pca_policy")
     const policySpec = {
       ...spec,
-      goal: "Ratify the candidate execution policy",
       policy: "Preserve established behavior before exploring new behavior",
     }
     const policy = {
       ...draft,
       id: policyID,
-      spec: policySpec,
+      spec,
       specHash: ProContract.hashSpec(policySpec),
       revision: 1,
-      status: "discharged" as const,
-      handoff: { summary: "policy frozen", uncertainties: [], subjectHash: "policy-subject", time: 0 },
-      attestationID: policyAttestationID,
+      status: "dormant" as const,
     }
     const state: ProContract.State = {
       contracts: { [policyID]: policy },
-      attestations: {
-        [policyAttestationID]: {
-          id: policyAttestationID,
-          contractID: policyID,
-          revision: 1,
-          specHash: policy.specHash,
-          subjectHash: policy.handoff.subjectHash,
-          evidenceHash: "policy-evidence",
-          verifierID: draft.issuer,
-          class: "principal",
-        },
-      },
+      attestations: {},
     }
     const policyRequirement = { contractID: policyID, revision: 1, policy: true as const }
     const taskSpec = { ...spec, requires: [policyRequirement] }
     const taskDraft = { ...draft, spec: taskSpec, specHash: ProContract.hashSpec(taskSpec) }
 
-    expect(
-      ProContract.transition(state, { type: "issue", actor: taskDraft.issuer, draft: taskDraft }).decision,
-    ).toEqual({ type: "accepted" })
-    expect(
-      ProContract.transition(
-        { ...state, contracts: { [policyID]: { ...policy, spec, specHash: draft.specHash } } },
-        { type: "issue", actor: taskDraft.issuer, draft: taskDraft },
-      ).decision,
-    ).toEqual({ type: "rejected", reason: "required contract defines no execution policy" })
-    expect(
-      ProContract.transition(
-        { ...state, contracts: { [policyID]: { ...policy, status: "dormant", attestationID: undefined } } },
-        { type: "issue", actor: taskDraft.issuer, draft: taskDraft },
-      ).decision,
-    ).toEqual({ type: "rejected", reason: "execution policy is not evidenced" })
-    const ambiguous = { ...taskSpec, requires: [policyRequirement, policyRequirement] }
-    expect(
-      ProContract.transition(state, {
-        type: "issue",
-        actor: taskDraft.issuer,
-        draft: { ...taskDraft, spec: ambiguous, specHash: ProContract.hashSpec(ambiguous) },
-      }).decision,
-    ).toEqual({ type: "rejected", reason: "contract may require only one execution policy" })
+    expect(ProContract.hashSpec(policySpec)).toBe(ProContract.hashSpec(spec))
+    const result = ProContract.transition(state, { type: "issue", actor: taskDraft.issuer, draft: taskDraft })
+    expect(result.decision).toEqual({ type: "accepted" })
+    expect(result.state.contracts[taskDraft.id]?.spec).toEqual({
+      ...spec,
+      requires: [{ contractID: policyID, revision: 1 }],
+    })
+    expect(result.state.contracts[taskDraft.id]?.spec).not.toHaveProperty("policy")
   })
 
   test("rejects executor testimony and preserves authoritative state", () => {
@@ -654,7 +624,7 @@ describe("ProContract kernel", () => {
     const upstreamAttestationID = ProContract.AttestationID.make("pca_support_upstream")
     const childAttestationID = ProContract.AttestationID.make("pca_support_child")
     const grandchildAttestationID = ProContract.AttestationID.make("pca_support_grandchild")
-    const upstreamSpec = { ...spec, policy: "Preserve supported prerequisites" }
+    const upstreamSpec = spec
     const upstream = {
       ...draft,
       id: upstreamID,
@@ -665,7 +635,7 @@ describe("ProContract kernel", () => {
       handoff: { summary: "upstream", uncertainties: [], subjectHash: "upstream-subject", time: 0 },
       attestationID: upstreamAttestationID,
     }
-    const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1, policy: true as const }] }
+    const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
     const child = {
       ...draft,
       id: childID,
@@ -1491,6 +1461,7 @@ describe("OpenCode Contract binding", () => {
         revision: 1,
         location: { directory: AbsolutePath.make("/project") },
         model: executionModel,
+        executionPolicy: "Probe boundaries before changing the implementation.",
         nextActionAt: 0,
       })
       yield* contracts.issue({
@@ -1515,7 +1486,7 @@ describe("OpenCode Contract binding", () => {
           .pipe(Effect.orDie),
       ).toMatchObject({
         prompt: {
-          text: "Implement the exact approved task.\n\nWhen the task is ready for independent verification, call contract_report_ready. If work is blocked, call contract_report_blocked. If the approved terms must change, call contract_propose_revision.",
+          text: "Implement the exact approved task.\n\nExecution policy:\n\nProbe boundaries before changing the implementation.\n\nWhen the task is ready for independent verification, call contract_report_ready. If work is blocked, call contract_report_blocked. If the approved terms must change, call contract_propose_revision.",
         },
       })
       expect(wakeCalls).toEqual([binding.sessionID])

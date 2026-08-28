@@ -69,14 +69,6 @@ const replacements = [
 ] as const
 
 const it = testEffect(LayerNode.compile(root, replacements))
-const policyID = ProContract.ID.make("pct_default_policy")
-const policyRequirement = { contractID: policyID, revision: 1, policy: true as const }
-const withPolicy = testEffect(
-  LayerNode.compile(root, [
-    [Config.node, TestConfig.layer({ get: () => Effect.succeed({ contract_policy: policyRequirement }) })],
-    [RuntimeFlags.node, RuntimeFlags.layer()],
-  ]),
-)
 const withCodeMode = testEffect(
   LayerNode.compile(root, [
     [Config.node, configLayer],
@@ -132,27 +124,12 @@ describe("tool.registry", () => {
     }),
   )
 
-  withPolicy.instance("inherits the principal-selected policy into the approved Contract", () =>
+  it.instance("keeps execution policy outside the approved Contract", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const sessions = yield* Session.Service
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
-      const policySpec = {
-        ...ProContract.defaultSpec("Ratify the default execution policy", Date.now()),
-        policy: "Preserve verified behavior",
-      }
-      yield* contracts.issue({ id: policyID, scope: "policy", spec: policySpec, executor: "policy" })
-      yield* contracts.activate(policyID, 1, Date.now())
-      yield* contracts.reportReady({
-        contractID: policyID,
-        revision: 1,
-        summary: "policy ready",
-        uncertainties: [],
-        subjectHash: "policy-subject",
-        time: Date.now(),
-      })
-      yield* contracts.principalAttest({ contractID: policyID, evidenceHash: "policy-evidence" })
       const session = yield* sessions.create({
         model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") },
       })
@@ -169,7 +146,7 @@ describe("tool.registry", () => {
       const asked: Array<{ permission: string; patterns: string[] }> = []
 
       const result = yield* tool.execute(
-        { spec: proposal },
+        { spec: proposal, executionPolicy: "Preserve verified behavior" },
         {
           sessionID: session.id,
           messageID: MessageID.make("msg_contract_proposal"),
@@ -190,13 +167,15 @@ describe("tool.registry", () => {
       const contract = yield* contracts.get(result.metadata.contractID)
       if (!contract) return yield* Effect.die("Contract was not issued")
       expect(contract.spec.brief).toBe("Original request:\nUse the prepared data at /home/data")
-      expect(contract.spec.requires).toEqual([policyRequirement])
+      expect(contract.spec.requires).toEqual([])
+      expect(contract.spec).not.toHaveProperty("policy")
       expect(contract.spec.budget).toEqual(proposal.budget)
       expect(contract.spec.resolution).toEqual(proposal.resolution)
       expect(asked).toEqual([{ permission: "contract_issue", patterns: [ProContract.hashSpec(contract.spec)] }])
       expect(yield* bindings.get(result.metadata.contractID)).toMatchObject({
         sessionID: result.metadata.sessionID,
         model: { id: "test", providerID: "test" },
+        executionPolicy: "Preserve verified behavior",
       })
       const duplicate = yield* tool
         .execute(

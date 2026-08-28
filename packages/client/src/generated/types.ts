@@ -2819,6 +2819,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -2851,6 +2852,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -2883,6 +2885,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -2911,10 +2914,44 @@ export type ServerProContractIssueInput = {
     } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["goal"]
+  readonly executionPolicy?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly executionPolicy?: string | null
+    readonly policy?: string | null
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{
+      readonly contractID: string
+      readonly revision: number
+      readonly policy?: true
+    }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<string> | null
+    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly claim?: string
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["executionPolicy"]
   readonly policy?: {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -2947,6 +2984,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -2979,6 +3017,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3011,6 +3050,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3043,6 +3083,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3075,6 +3116,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3107,6 +3149,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3139,6 +3182,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3171,6 +3215,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3203,6 +3248,7 @@ export type ServerProContractIssueInput = {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
+    readonly executionPolicy?: string | null
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{
@@ -3332,6 +3378,7 @@ export type ServerProContractIssueOutput = {
     readonly revision: number
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly executionPolicy?: string
     readonly sessionID: string
     readonly promptID: string
     readonly dispatched: boolean
@@ -3559,6 +3606,7 @@ export type ServerProContractExecutionOutput = {
   readonly revision: number
   readonly location: { readonly directory: string; readonly workspaceID?: string }
   readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+  readonly executionPolicy?: string
   readonly sessionID: string
   readonly promptID: string
   readonly dispatched: boolean

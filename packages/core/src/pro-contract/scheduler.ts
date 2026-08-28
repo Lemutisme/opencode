@@ -81,7 +81,6 @@ const layer = Layer.effect(
                       .get(requirement.contractID)
                       .pipe(Effect.map((dependency) => (dependency ? { requirement, dependency } : undefined))),
                   )
-              const policy = dependencies.find((item) => item?.requirement.policy)?.dependency.spec.policy
               const prompt = {
                 id: current.promptID,
                 sessionID: current.sessionID,
@@ -90,9 +89,9 @@ const layer = Layer.effect(
                     ? "Continue the approved task after a transient execution interruption."
                     : [
                         contract.spec.brief || contract.spec.goal,
-                        ...(policy ? ["Ratified execution policy:", policy] : []),
+                        ...(current.executionPolicy ? ["Execution policy:", current.executionPolicy] : []),
                         ...dependencies.flatMap((item) =>
-                          item && !item.requirement.policy
+                          item
                             ? [
                                 `Verified prerequisite: ${item.dependency.spec.goal}` +
                                   (item.dependency.handoff ? `\n${item.dependency.handoff.summary}` : ""),

@@ -128,7 +128,7 @@ export const Info = Schema.Struct({
   contract_policy: Schema.optional(
     Schema.Struct({ contractID: ProContract.ID, revision: PositiveInt, policy: Schema.Literal(true) }),
   ).annotate({
-    description: "Principal-selected, evidenced Policy Contract inherited by new Contract proposals",
+    description: "Deprecated compatibility field. Execution policy is selected outside Contract configuration.",
   }),
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),

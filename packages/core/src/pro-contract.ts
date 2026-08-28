@@ -140,8 +140,9 @@ export function evaluationID(deliveryContractID: Schema.ID, revision: number, ev
 }
 
 export function normalizeSpec(spec: Schema.Spec) {
-  if (spec.evidence.claim) return spec
-  return Schema.Spec.make({ ...spec, evidence: { ...spec.evidence, claim: spec.goal } })
+  const canonical = ProContractKernel.canonicalSpec(spec)
+  if (canonical.evidence.claim) return canonical
+  return Schema.Spec.make({ ...canonical, evidence: { ...canonical.evidence, claim: canonical.goal } })
 }
 
 export function defaultSpec(goal: string, now: number): Schema.Spec {
