@@ -57,6 +57,15 @@ describe("ProContract replay verifier", () => {
                   argv: [
                     process.execPath,
                     "-e",
+                    "const env=process.env;process.exit(env.HOME?.includes('pro-contract-replay')&&env.XDG_CACHE_HOME?.includes('pro-contract-replay')&&env.TMPDIR?.includes('pro-contract-replay')&&!env.OPENAI_API_KEY&&!env.OPENCODE_SERVER_PASSWORD?0:1)",
+                  ],
+                  timeout: 10_000,
+                  exit: 0,
+                },
+                {
+                  argv: [
+                    process.execPath,
+                    "-e",
                     "const fs=require('fs');fs.writeFileSync('built.txt','built');process.exit(fs.readFileSync('verify.txt','utf8').trim()==='pass'?0:1)",
                   ],
                   timeout: 10_000,

@@ -105,6 +105,9 @@ const layer = Layer.effect(
       const relative = path.relative(location.project.directory, location.directory)
       const policyHash = ProContractKernel.hashReplay(input.policy)
       return yield* Effect.gen(function* () {
+        yield* Effect.forEach(["home", "cache", "config", "data", "tmp"], (directory) =>
+          fs.ensureDir(path.join(run, directory)).pipe(Effect.orDie),
+        )
         yield* snapshots.materialize({ snapshot: Snapshot.ID.make(input.subjectHash), directory: project })
         const root = yield* fs.realPath(path.resolve(project, relative)).pipe(Effect.orDie)
         const checks = yield* Effect.forEach(
@@ -124,7 +127,17 @@ const layer = Layer.effect(
                   ChildProcess.make(command, args, {
                     cwd,
                     stdin: "ignore",
-                    extendEnv: true,
+                    env: {
+                      PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+                      HOME: path.join(run, "home"),
+                      XDG_CACHE_HOME: path.join(run, "cache"),
+                      XDG_CONFIG_HOME: path.join(run, "config"),
+                      XDG_DATA_HOME: path.join(run, "data"),
+                      TMPDIR: path.join(run, "tmp"),
+                      LANG: "C.UTF-8",
+                      LC_ALL: "C.UTF-8",
+                    },
+                    extendEnv: false,
                     detached: process.platform !== "win32",
                     forceKillAfter: Duration.seconds(3),
                   }),
