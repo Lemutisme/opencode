@@ -661,7 +661,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("projects only the immutable Contract constitution", () =>
+  it.effect("projects only the active Contract duty", () =>
     Effect.gen(function* () {
       yield* setup
       const contracts = yield* ProContract.Service
@@ -770,14 +770,15 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(1)
       expect(requests[0]?.tools).toEqual([])
       const projected = requests[0]?.system.map((part) => part.text).join("\n") ?? ""
-      expect(projected).toContain(`<pro_contract id="${contract.id}" revision="1">`)
+      expect(projected).toContain(`Contract ${contract.id}@1 is active`)
       expect(projected).toContain("Optimization goal: Inspect the repository without changing it")
       expect(projected).toContain("Settlement claim: Repository inspection evidence is available")
-      expect(projected).toContain("The failing behavior is isolated to argument parsing.")
-      expect(projected).toContain(spec.policy)
-      expect(projected).toContain("Delegated authority: filesystem.read, organization.approve.")
-      expect(projected).toContain("Shared ceiling:")
-      expect(projected).toContain("Evidence policy:")
+      expect(projected).toContain("A response cannot settle this duty")
+      expect(projected).not.toContain("The failing behavior is isolated to argument parsing.")
+      expect(projected).not.toContain(spec.policy)
+      expect(projected).not.toContain("Delegated authority")
+      expect(projected).not.toContain("Shared ceiling")
+      expect(projected).not.toContain("Evidence policy")
       expect(projected).not.toContain(dependencySpec.policy)
       expect(projected).not.toContain(`${dependencyID}@1`)
       expect(projected).not.toContain(`${prerequisiteID}@1`)
@@ -854,8 +855,8 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(2)
       const challengedProjection = requests[1]?.system.map((part) => part.text).join("\n") ?? ""
-      expect(challengedProjection).toContain(spec.policy)
       expect(challengedProjection).toContain("Inspect the repository without changing it")
+      expect(challengedProjection).not.toContain(spec.policy)
       expect(challengedProjection).not.toContain("Independent output mismatch")
       expect(challengedProjection).not.toContain("negative-witness")
       expect(challengedProjection).not.toContain("candidate-subject")

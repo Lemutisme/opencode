@@ -97,17 +97,10 @@ const MAX_PROVIDER_TURN_MS = 15 * 60 * 1_000
 
 function contractContext(contract: ProContract.Contract) {
   return [
-    `<pro_contract id="${contract.id}" revision="${contract.revision}">`,
+    `Contract ${contract.id}@${contract.revision} is active; its accepted terms remain authoritative.`,
     `Optimization goal: ${contract.spec.goal}`,
     `Settlement claim: ${ProContract.evidenceClaim(contract.spec)}`,
-    ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
-    ...(contract.spec.policy ? ["Execution policy:", contract.spec.policy] : []),
-    `Delegated authority: ${contract.spec.authority.join(", ")}.`,
-    `Shared ceiling: ${contract.spec.budget.turns} provider turns and ${contract.spec.budget.actions} tool actions; deadline ${contract.spec.budget.deadline}. The institution enforces this ceiling.`,
-    `Evidence policy: ${JSON.stringify(contract.spec.evidence)}.`,
-    "Produce the strongest candidate the goal and budget permit. The executor reports a candidate; only the independent verifier and institution settle the claim.",
-    "Use the Contract control tools only for a ready candidate, a concrete blocker, or a material change to the approved terms. Do not petition a revision merely to restate or clarify unchanged terms.",
-    "</pro_contract>",
+    "Continue producing the strongest candidate within the institutionally enforced authority and budget. A response cannot settle this duty: report a candidate only when ready, and use blocked or revision controls only for a concrete state change. Verification and settlement remain independent.",
   ].join("\n")
 }
 
