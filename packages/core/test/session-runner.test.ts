@@ -661,7 +661,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("enforces active contracts without repeating the institution dossier", () =>
+  it.effect("projects only the immutable Contract constitution", () =>
     Effect.gen(function* () {
       yield* setup
       const contracts = yield* ProContract.Service
@@ -708,6 +708,8 @@ describe("SessionRunnerLLM", () => {
       yield* contracts.principalAttest({ contractID: prerequisiteID, evidenceHash: "prerequisite-evidence" })
       const spec = {
         ...ProContract.defaultSpec("Inspect the repository without changing it", Date.now()),
+        policy:
+          "Enumerate documented behavior, boundaries, errors, and material interactions; preserve observations as regression checks.",
         authority: ["filesystem.read", "organization.approve"],
         brief: "The failing behavior is isolated to argument parsing.",
         requires: [
@@ -768,16 +770,17 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(1)
       expect(requests[0]?.tools).toEqual([])
       const projected = requests[0]?.system.map((part) => part.text).join("\n") ?? ""
-      expect(projected).not.toContain("<pro_contract")
-      expect(projected).not.toContain("Inspect the repository without changing it")
-      expect(projected).not.toContain("Repository inspection evidence is available")
-      expect(projected).not.toContain("The failing behavior is isolated to argument parsing.")
+      expect(projected).toContain(`<pro_contract id="${contract.id}" revision="1">`)
+      expect(projected).toContain("Optimization goal: Inspect the repository without changing it")
+      expect(projected).toContain("Settlement claim: Repository inspection evidence is available")
+      expect(projected).toContain("The failing behavior is isolated to argument parsing.")
+      expect(projected).toContain(spec.policy)
+      expect(projected).toContain("Delegated authority: filesystem.read, organization.approve.")
+      expect(projected).toContain("Shared ceiling:")
+      expect(projected).toContain("Evidence policy:")
       expect(projected).not.toContain(dependencySpec.policy)
       expect(projected).not.toContain(`${dependencyID}@1`)
       expect(projected).not.toContain(`${prerequisiteID}@1`)
-      expect(projected).not.toContain("Delegated authority")
-      expect(projected).not.toContain("Shared ceiling")
-      expect(projected).not.toContain("Evidence policy")
       expect(projected).not.toContain("waiting for a reproducible input")
       expect(requests[0]?.messages.at(-1)).toMatchObject({
         role: "system",
@@ -851,6 +854,8 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(2)
       const challengedProjection = requests[1]?.system.map((part) => part.text).join("\n") ?? ""
+      expect(challengedProjection).toContain(spec.policy)
+      expect(challengedProjection).toContain("Inspect the repository without changing it")
       expect(challengedProjection).not.toContain("Independent output mismatch")
       expect(challengedProjection).not.toContain("negative-witness")
       expect(challengedProjection).not.toContain("candidate-subject")

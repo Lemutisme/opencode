@@ -95,6 +95,22 @@ import { llmClient } from "../../effect/app-node-platform"
 const SETTLEMENT_WINDOW = 20
 const MAX_PROVIDER_TURN_MS = 15 * 60 * 1_000
 
+function contractContext(contract: ProContract.Contract) {
+  return [
+    `<pro_contract id="${contract.id}" revision="${contract.revision}">`,
+    `Optimization goal: ${contract.spec.goal}`,
+    `Settlement claim: ${ProContract.evidenceClaim(contract.spec)}`,
+    ...(contract.spec.brief ? ["Handoff brief:", contract.spec.brief] : []),
+    ...(contract.spec.policy ? ["Execution policy:", contract.spec.policy] : []),
+    `Delegated authority: ${contract.spec.authority.join(", ")}.`,
+    `Shared ceiling: ${contract.spec.budget.turns} provider turns and ${contract.spec.budget.actions} tool actions; deadline ${contract.spec.budget.deadline}. The institution enforces this ceiling.`,
+    `Evidence policy: ${JSON.stringify(contract.spec.evidence)}.`,
+    "Produce the strongest candidate the goal and budget permit. The executor reports a candidate; only the independent verifier and institution settle the claim.",
+    "Use the Contract control tools only for a ready candidate, a concrete blocker, or a material change to the approved terms. Do not petition a revision merely to restate or clarify unchanged terms.",
+    "</pro_contract>",
+  ].join("\n")
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -267,7 +283,15 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline]
+        system: [
+          agent.info?.system,
+          system.baseline,
+          contract?.status === "active"
+            ? contractContext(contract)
+            : contractBinding && contract
+              ? `Contract ${contract.id} is ${contract.status}. No further execution is authorized.`
+              : undefined,
+        ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [
