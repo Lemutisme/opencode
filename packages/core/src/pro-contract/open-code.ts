@@ -10,6 +10,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { ProContract } from "../pro-contract"
+import { formationFaultBarrier } from "./formation-fault"
 import { ProContractOpenCodeSessionTable, ProContractOpenCodeTable, ProContractTable } from "./sql"
 import { Hash } from "../util/hash"
 
@@ -394,6 +395,7 @@ const layer = Layer.effect(
           issues: plan.issues,
         })
         if (formed.decision.type === "rejected") return formed
+        yield* formationFaultBarrier("after_commit_before_binding")
         const contract = formed.contracts.find((item) => item.id === input.id)
         if (!contract) return yield* Effect.die("Formation did not return the Delivery Contract")
         const evaluation = plan.evaluationID

@@ -24,6 +24,7 @@ import { asc, eq } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
 import { Database } from "./database/database"
 import { makeGlobalNode } from "./effect/app-node"
+import { formationFaultBarrier } from "./pro-contract/formation-fault"
 import { ProContractKernel } from "./pro-contract/kernel"
 import {
   ProContractAttestationTable,
@@ -463,6 +464,7 @@ const layer = Layer.effect(
                   })
                   .run()
                   .pipe(Effect.orDie)
+              if (formation) yield* formationFaultBarrier("before_commit")
               return { state: next, results, formation, frontier: last.seq, hash: last.hash }
             }),
           { behavior: "immediate" },
