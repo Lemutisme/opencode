@@ -418,6 +418,67 @@ The evidence-backed canonical implementation remains `2abdc89d`; the reliable
 ProgramBench execution coordinate is that OpenCode tree plus runner `943bf12`.
 No claim of overall leaderboard improvement is warranted by this ablation.
 
+## 2026-08-29 policy/Contract separation
+
+The prior ablation still left execution policy inside the Contract vocabulary.
+`7054140b61e5cdeceef61f6bc6e6520eefe7ac79` separates it operationally:
+
+- canonical Contract terms and `specHash` exclude execution policy;
+- the OpenCode execution binding durably owns optional `executionPolicy`;
+- the scheduler injects it once when it creates each executor Session;
+- Session rotation preserves it without changing Contract revision;
+- replay policy remains part of the evidence boundary and is not conflated
+  with search policy;
+- the HTTP compatibility alias `policy` is lifted into the binding and never
+  enters the Contract.
+
+`910d9f285` then removes `Spec.policy`, `Requirement.policy`, the inherited
+Policy Contract configuration, and the CLI policy-selection command from the
+canonical type and configuration vocabulary. Legacy extra fields are discarded
+from new requests at schema/service canonicalization boundaries; historical
+ledger rows are not rewritten. This second commit is a type-level closure of the
+behavior benchmarked at `7054140b6`, not a separately benchmarked model change.
+
+The discriminating ProgramBench experiment used the same Luna Max model, two
+instances, six-hour/1,000-turn/4,000-action ceilings, and the exact same binary
+SHA-256 `b9a8f3e6ce4064fb78fd08870ab972e41504d90848341fc44b73a9a1929e12a1`.
+Both arms used the same Contract-term template, evidence replay, task images,
+and cache gate; campaign-specific IDs and absolute deadlines necessarily
+differed. The only experimental treatment was whether the execution binding
+contained the behavioral policy. Search and stopping instructions were removed
+from the Contract brief in both arms.
+
+| Instance | policy on | policy off | Effect |
+|---|---:|---:|---:|
+| `mgdm__htmlq.6e31bc8` | 95.67%, 447 turns, $3.95 | 95.33%, 207 turns, $1.52 | +0.34pp at 2.59x cost |
+| `eradman__entr.8e2e8b4` | **98.46%**, 232 turns, $0.90 | 71.84%, 299 turns, $1.47 | **+26.62pp**, fewer turns and cost |
+| mean | **97.07%** | 83.58% | **+13.48pp** |
+
+All four trajectories discharged, passed exact replay and preflight, became
+quiet, and recorded 99.22-99.62% cache-read ratios. Thus policy is a real
+capability input, but its value is task-dependent: it was decisive and
+Pareto-improving on Entr while barely improving HTMLq at excessive cost.
+
+The performance-first architecture is therefore not policy-free execution and
+not policy inside ProContract. It is:
+
+```text
+ProContract(terms, authority, evidence, settlement)
+  + PolicySelector(task, trajectory evidence) -> executionPolicy | none
+```
+
+The current behavioral policy should remain available for Entr-like stateful
+tasks, but must not be a universal default. A subsequent RSI controller should
+learn the selector and a positive stopping rule; the observed HTMLq overrun
+shows that “delivery replay alone is not a stopping condition” is insufficient
+without a bounded evidence-saturation criterion. These are policy revisions,
+not Contract revisions.
+
+The two-instance result is a mechanism screen, not a leaderboard-wide claim.
+Relative to the earlier non-matched exact-base/recovery observations (98.21%
+HTMLq and 93.00% Entr), the split-policy mean is 1.46 points higher, but a larger
+matched replicate is required before claiming general improvement.
+
 ## Local artifacts
 
 The result files are external evaluation records and are not runtime or build
@@ -457,6 +518,8 @@ workspace layout documented by the runbook:
 - [Exact-base Entr recovery](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-base-entr-recovery-20260828-v1/RESULT.md)
 - [Full-projection Dupl recovery](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-candidate-dupl-recovery-20260828-v1/RESULT.md)
 - [Minimal-duty two-task run](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-minimal-luna2-20260828-v1/RESULT.md)
+- [Policy-split behavioral arm](../../.config/superpowers/worktrees/ProgramBench/policy-split/output/policy-split-on-luna2-20260828-v1/RESULT.md)
+- [Policy-split no-policy arm](../../.config/superpowers/worktrees/ProgramBench/policy-split/output/policy-split-off-luna2-20260828-v2/RESULT.md)
 
 ## Decision rule for future additions
 
