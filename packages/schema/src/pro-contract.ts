@@ -19,9 +19,6 @@ export type AttestationID = typeof AttestationID.Type
 export const Requirement = Schema.Struct({
   contractID: ID,
   revision: PositiveInt,
-  policy: Schema.Literal(true).pipe(optional).annotate({
-    description: "Deprecated legacy execution-policy marker. New Contracts ignore it.",
-  }),
 }).annotate({ identifier: "ProContract.Requirement" })
 export interface Requirement extends Schema.Schema.Type<typeof Requirement> {}
 
@@ -131,9 +128,6 @@ export interface Resolution extends Schema.Schema.Type<typeof Resolution> {}
 export const Spec = Schema.Struct({
   trigger: Trigger,
   goal: Schema.NonEmptyString,
-  policy: Schema.NonEmptyString.pipe(optional).annotate({
-    description: "Deprecated legacy execution policy. New Contracts keep execution policy outside their terms.",
-  }),
   brief: Schema.String.annotate({
     description:
       "Self-contained handoff brief. Preserve user-stated quality criteria. For open-ended optimization, state the evaluation protocol, required exploration, known quality floor, stopping rule, and assumptions; expose missing criteria instead of inventing them.",

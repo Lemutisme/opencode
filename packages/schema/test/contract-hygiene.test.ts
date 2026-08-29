@@ -52,14 +52,16 @@ describe("contract hygiene", () => {
     ).toThrow()
   })
 
-  test("contract requirements decode the legacy execution-policy marker", () => {
+  test("contract requirements discard legacy execution-policy metadata", () => {
     const decode = Schema.decodeUnknownSync(ProContract.Requirement)
     expect(decode({ contractID: "pct_policy", revision: 1, policy: true })).toEqual({
       contractID: ProContract.ID.make("pct_policy"),
       revision: 1,
-      policy: true,
     })
-    expect(() => decode({ contractID: "pct_policy", revision: 1, policy: false })).toThrow()
+    expect(decode({ contractID: "pct_policy", revision: 1, policy: false })).toEqual({
+      contractID: ProContract.ID.make("pct_policy"),
+      revision: 1,
+    })
   })
 
   test("contract authority identifiers stay adapter-defined", () => {

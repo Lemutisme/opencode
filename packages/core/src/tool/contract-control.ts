@@ -48,7 +48,7 @@ const layer = Layer.effectDiscard(
               if (!session.model)
                 return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
               const now = yield* Clock.currentTimeMillis
-              const executionPolicy = input.executionPolicy ?? input.spec.policy
+              const executionPolicy = input.executionPolicy
               const request = (yield* sessions.context(context.sessionID)).find((item) => item.type === "user")?.text
               const unnamedArtifacts = request
                 ? (input.spec.evidence.replay?.artifacts ?? []).filter(

@@ -44,7 +44,7 @@ export const ContractProposeTool = Tool.define<
             return yield* Effect.die("This Session already delegated its obligation to a Contract")
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
-          const executionPolicy = input.executionPolicy ?? input.spec.policy
+          const executionPolicy = input.executionPolicy
           const draft = ProContract.normalizeSpec(input.spec)
           const request = ctx.messages
             .findLast((item) => item.info.role === "user")

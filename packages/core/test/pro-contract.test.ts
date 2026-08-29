@@ -1099,13 +1099,12 @@ describe("ProContract ledger", () => {
     }),
   )
 
-  it.effect("persists challenged policy support and affected dependents atomically", () =>
+  it.effect("persists challenged dependency support and affected dependents atomically", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const upstreamID = ProContract.ID.make("pct_ledger_support_upstream")
       const childID = ProContract.ID.make("pct_ledger_support_child")
-      const policySpec = { ...spec, policy: "Preserve supported prerequisites" }
-      yield* contracts.issue({ id: upstreamID, scope: "support", spec: policySpec, executor: "upstream" })
+      yield* contracts.issue({ id: upstreamID, scope: "support", spec, executor: "upstream" })
       yield* contracts.activate(upstreamID, 1, 0)
       yield* contracts.reportReady({
         contractID: upstreamID,
@@ -1116,7 +1115,7 @@ describe("ProContract ledger", () => {
         time: 0,
       })
       yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
-      const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1, policy: true as const }] }
+      const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
       yield* contracts.issue({ id: childID, scope: "support", spec: childSpec, executor: "child" })
       yield* contracts.activate(childID, 1, 1)
       yield* contracts.reportReady({
