@@ -438,6 +438,10 @@ canonical type and configuration vocabulary. Legacy extra fields are discarded
 from new requests at schema/service canonicalization boundaries; historical
 ledger rows are not rewritten. This second commit is a type-level closure of the
 behavior benchmarked at `7054140b6`, not a separately benchmarked model change.
+Its Linux binary SHA-256
+`202384bca1ca5493f15a55d51ec8d2a461bdd96a60bc5b8004e19d8fd4771e1a`
+passed real native discharge/replay/attestation/quiet and pending-revision
+lifecycle integration tests with a deterministic provider.
 
 The discriminating ProgramBench experiment used the same Luna Max model, two
 instances, six-hour/1,000-turn/4,000-action ceilings, and the exact same binary
