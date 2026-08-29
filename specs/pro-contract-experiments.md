@@ -483,6 +483,48 @@ Relative to the earlier non-matched exact-base/recovery observations (98.21%
 HTMLq and 93.00% Entr), the split-policy mean is 1.46 points higher, but a larger
 matched replicate is required before claiming general improvement.
 
+### Six-instance head validation and public comparison
+
+A subsequent run validated the schema-closed `910d9f285` binary on six more
+instances. The binary SHA-256 was
+`202384bca1ca5493f15a55d51ec8d2a461bdd96a60bc5b8004e19d8fd4771e1a`;
+the model remained Luna Max with the same six-hour/1,000-turn/4,000-action
+limits and behavioral execution policy. All six inference trajectories
+discharged, passed replay and preflight, became quiet, and recorded
+99.06-99.47% cache-read ratios.
+
+Public comparison values were read from [programbench.com](https://programbench.com/)
+on 2026-08-29; the site reports an update date of 2026-08-16. Public runs use
+mini-SWE-agent and different models, so they are reference coordinates rather
+than matched causal controls.
+
+| Instance | Luna Max ProContract | Canonical | Public best | Sol xhigh | Cost: ours / Sol |
+|---|---:|---|---:|---:|---:|
+| `mfridman__tparse.2416b4b` | 87.53% | valid | 91.8% | 90.8% | $2.54 / $8.73 |
+| `mibk__dupl.1bf052b` | **92.76%** | valid | 92.8% | 92.0% | $3.48 / $3.57 |
+| `mookid__diffr.2152742` | **92.74%** | valid | 93.1% | 91.4% | $2.97 / $8.54 |
+| `guumaster__hostctl.d6d9699` | 72.50% | valid | 96.7% | 72.7% | $1.73 / $5.03 |
+| `ffmpeg__ffmpeg.360a402` | 5.49% | valid | 8.1% | 6.9% | $0.85 / $4.03 |
+| `nikoladucak__caps-log.2cf2d1e` | 84.75% raw | **invalid** | 79.7% | 79.7% | $3.36 / $7.42 |
+
+Caps-log repeated the known evaluator defect on branch `c0e6b8d64108`:
+`results_read_failed` plus three `not_run` tests. Its raw score is reported for
+diagnosis only; canonical aggregation assigns zero.
+
+The strict six-instance mean is therefore 58.50%. Across the five canonical
+valid tasks, the mean is 70.20% versus 70.76% from the website's rounded Sol
+xhigh values, while measured inference cost is about 61% lower. Dupl and Diffr
+beat Sol xhigh; Tparse, Hostctl, and FFmpeg do not. The run is not leaderboard
+competitive with the public-best per-task mean, and the large Hostctl gap plus
+FFmpeg early stopping identify concrete policy/RSI work.
+
+Combining these six with the earlier policy-on Entr and HTMLq mechanism screen
+gives an eight-instance strict mean of 68.14%, with Caps-log assigned zero.
+This is 8.58 points above the historical `2abdc89d` strict eight-instance mean
+of 59.56%, but below the same-task website Sol xhigh rounded mean of 78.31%.
+The eight-task result is assembled from two frozen campaigns and is not a
+single matched leaderboard submission.
+
 ## Local artifacts
 
 The result files are external evaluation records and are not runtime or build
@@ -524,6 +566,7 @@ workspace layout documented by the runbook:
 - [Minimal-duty two-task run](../../.config/superpowers/worktrees/ProgramBench/full-runner/output/reliable-minimal-luna2-20260828-v1/RESULT.md)
 - [Policy-split behavioral arm](../../.config/superpowers/worktrees/ProgramBench/policy-split/output/policy-split-on-luna2-20260828-v1/RESULT.md)
 - [Policy-split no-policy arm](../../.config/superpowers/worktrees/ProgramBench/policy-split/output/policy-split-off-luna2-20260828-v2/RESULT.md)
+- [Policy-split head six-instance run](../../.config/superpowers/worktrees/ProgramBench/policy-split/output/policy-split-head-luna6-20260829-v1/RESULT.md)
 
 ## Decision rule for future additions
 
