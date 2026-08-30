@@ -342,7 +342,7 @@ const layer = Layer.effect(
             budget: { turns: 1, actions: 1, deadline: input.deadline },
             evidence: {
               type: "principal",
-              claim: `Evaluator ${input.evaluatorHash} accepted the exact handoff from ${delivery.id}@${delivery.revision}.`,
+              claim: `Evaluator ${input.evaluatorHash} produced an authentic report for the exact handoff from ${delivery.id}@${delivery.revision}.`,
             },
             resolution: { maxAttempts: 1, retryDelay: 0 },
           }),
@@ -368,21 +368,6 @@ const layer = Layer.effect(
         if (delivery.revision !== report.deliveryRevision || delivery.handoff.subjectHash !== report.subjectHash)
           return yield* Effect.die("Evaluation subject does not match delivery handoff")
 
-        if (!report.passed)
-          return yield* execute({
-            type: "challenge",
-            actor: delivery.issuer,
-            contractID: delivery.id,
-            challenge: {
-              revision: delivery.revision,
-              subjectHash: report.subjectHash,
-              evidenceHash: input.evidenceHash,
-              disclosure: report.disclosure,
-              summary: report.disclosure === "executor" ? report.summary : undefined,
-              time: input.time,
-            },
-          })
-
         const activated =
           evaluation.status === "dormant"
             ? yield* execute({
@@ -403,7 +388,9 @@ const layer = Layer.effect(
                 contractID: current.id,
                 revision: current.revision,
                 summary:
-                  report.disclosure === "sealed" ? "External evaluator accepted sealed evidence" : report.summary,
+                  report.disclosure === "sealed"
+                    ? `External evaluator produced a sealed ${report.passed ? "passing" : "failing"} report`
+                    : report.summary,
                 uncertainties: [],
                 subjectHash: report.subjectHash,
                 time: input.time,

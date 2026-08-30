@@ -968,7 +968,7 @@ describe("ProContract ledger", () => {
     }),
   )
 
-  it.effect("keeps evaluation outstanding until external evidence accepts the exact delivery", () =>
+  it.effect("keeps evaluation outstanding until an external report covers the exact delivery", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
@@ -1014,13 +1014,13 @@ describe("ProContract ledger", () => {
 
       expect(settled.state.contracts[evaluationID]).toMatchObject({
         status: "discharged",
-        handoff: { summary: "External evaluator accepted sealed evidence" },
+        handoff: { summary: "External evaluator produced a sealed passing report" },
       })
       expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: true, outstanding: [] })
     }),
   )
 
-  it.effect("reopens failed delivery and preserves evaluation duty", () =>
+  it.effect("settles a failing evaluation without defeating the delivery claim", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
@@ -1042,7 +1042,7 @@ describe("ProContract ledger", () => {
       })
       yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
 
-      yield* contracts.settleEvaluation({
+      const settled = yield* contracts.settleEvaluation({
         contractID: evaluationID,
         evidenceHash: "negative-evidence",
         time: 2,
@@ -1057,15 +1057,14 @@ describe("ProContract ledger", () => {
         },
       })
 
-      expect(yield* contracts.get(contractID)).toMatchObject({
-        status: "dormant",
-        challenge: { evidenceHash: "negative-evidence", summary: "behavior rejected" },
+      expect(settled.state.contracts[evaluationID]).toMatchObject({
+        status: "discharged",
+        handoff: { summary: "behavior rejected" },
       })
-      expect(yield* contracts.get(evaluationID)).toMatchObject({ status: "dormant" })
-      expect(yield* contracts.quiet(draft.scope)).toMatchObject({
-        quiet: false,
-        outstanding: expect.arrayContaining([contractID, evaluationID]),
-      })
+      const delivery = yield* contracts.get(contractID)
+      expect(delivery?.status).toBe("discharged")
+      expect(delivery?.challenge).toBeUndefined()
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: true, outstanding: [] })
     }),
   )
 
