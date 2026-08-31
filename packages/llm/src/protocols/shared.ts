@@ -6,6 +6,7 @@ import {
   InvalidProviderOutputReason,
   InvalidRequestReason,
   LLMError,
+  TransportReason,
   type ContentPart,
   type LLMRequest,
   type MediaPart,
@@ -92,6 +93,13 @@ export const eventError = (route: string, message: string, raw?: string) =>
     module: "ProviderShared",
     method: "stream",
     reason: new InvalidProviderOutputReason({ route, message, raw }),
+  })
+
+export const transportError = (message: string, kind?: string) =>
+  new LLMError({
+    module: "ProviderShared",
+    method: "stream",
+    reason: new TransportReason({ message, kind }),
   })
 
 export const parseJson = (route: string, input: string, message: string) =>

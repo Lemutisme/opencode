@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { AuthenticationReason, LLMError, RateLimitReason } from "@opencode-ai/llm"
+import { AuthenticationReason, LLMError, RateLimitReason, TransportReason } from "@opencode-ai/llm"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ProContract } from "@opencode-ai/core/pro-contract"
@@ -1318,9 +1318,15 @@ const retryableFailure = new LLMError({
   method: "stream",
   reason: new RateLimitReason({ message: "Try later", retryAfterMs: 1_000 }),
 })
+const transportFailure = new LLMError({
+  module: "test",
+  method: "stream",
+  reason: new TransportReason({ message: "Connection lost" }),
+})
 const terminalExecutionIt = makeTerminalExecutionIt(() => Effect.void)
 const terminalFailureExecutionIt = makeTerminalExecutionIt(() => Effect.fail(terminalFailure))
 const retryableFailureExecutionIt = makeTerminalExecutionIt(() => Effect.fail(retryableFailure))
+const transportFailureExecutionIt = makeTerminalExecutionIt(() => Effect.fail(transportFailure))
 
 function makeTerminalExecutionIt(run: SessionRunner.Interface["run"]) {
   return testEffect(
@@ -1425,6 +1431,34 @@ describe("OpenCode Contract binding", () => {
       const attempt = yield* bindings.claim(contractID, 0)
 
       expect(yield* execution.resume(attempt!.sessionID).pipe(Effect.flip)).toBe(retryableFailure)
+      expect(yield* contracts.get(contractID)).toMatchObject({ status: "active" })
+      expect(yield* bindings.get(contractID)).toMatchObject({
+        attempts: 1,
+        dispatched: false,
+        turnsUsed: 0,
+        actionsUsed: 0,
+      })
+      expect((yield* bindings.get(contractID))?.promptID).not.toBe(attempt!.promptID)
+    }),
+  )
+
+  transportFailureExecutionIt.effect("conserves a contract across transport loss", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const execution = yield* SessionExecution.Service
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+
+      expect(yield* execution.resume(attempt!.sessionID).pipe(Effect.flip)).toBe(transportFailure)
       expect(yield* contracts.get(contractID)).toMatchObject({ status: "active" })
       expect(yield* bindings.get(contractID)).toMatchObject({
         attempts: 1,

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import * as OpenAIChat from "../src/protocols/openai-chat"
 import * as OpenAIResponses from "../src/protocols/openai-responses"
-import { ContentPart, LLMEvent, LLMRequest, Model, ModelID, ProviderID, Usage } from "../src/schema"
+import { ContentPart, LLMEvent, LLMRequest, Model, ModelID, ProviderID, TransportReason, Usage } from "../src/schema"
 import { ProviderShared } from "../src/protocols/shared"
 
 const model = new Model({
@@ -15,6 +15,10 @@ const decodeLLMRequest = Schema.decodeUnknownSync(LLMRequest as unknown as Schem
 const decodeLLMEvent = Schema.decodeUnknownSync(LLMEvent as unknown as Schema.Decoder<LLMEvent>)
 
 describe("llm schema", () => {
+  test("classifies transport loss as retryable", () => {
+    expect(new TransportReason({ message: "Connection lost" }).retryable).toBe(true)
+  })
+
   test("decodes a minimal request", () => {
     const input: unknown = {
       id: "req_1",

@@ -136,10 +136,9 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
             prepared.framing.frame(
               response.stream.pipe(
                 Stream.mapError((error) =>
-                  ProviderShared.eventError(
-                    `${request.model.provider}/${request.model.route.id}`,
+                  ProviderShared.transportError(
                     `Failed to read ${request.model.provider}/${request.model.route.id} stream`,
-                    ProviderShared.errorText(error),
+                    error instanceof Error ? error.name : "ResponseStream",
                   ),
                 ),
               ),
