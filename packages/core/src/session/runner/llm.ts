@@ -266,6 +266,13 @@ const layer = Layer.effect(
           contract.spec.budget.actions - contractBinding.actionsUsed <= SETTLEMENT_WINDOW)
       const request = LLM.request({
         model,
+        http: {
+          headers: {
+            "x-session-affinity": session.id,
+            "X-Session-Id": session.id,
+            ...(session.parentID ? { "x-parent-session-id": session.parentID } : {}),
+          },
+        },
         providerOptions: { openai: { promptCacheKey } },
         system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
