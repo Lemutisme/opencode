@@ -52,6 +52,17 @@ describe("contract hygiene", () => {
     ).toThrow()
   })
 
+  test("subject coordinates bind the specification and declared artifacts", () => {
+    const decode = Schema.decodeUnknownSync(ProContract.SubjectCoordinate)
+    const input: unknown = { hash: "subject", specHash: "spec", artifacts: ["compile.sh", "executable"] }
+    expect(decode(input) as unknown).toEqual({
+      hash: "subject",
+      specHash: "spec",
+      artifacts: ["compile.sh", "executable"],
+    })
+    expect(() => decode({ hash: "subject", specHash: "spec", artifacts: ["../secret"] })).toThrow()
+  })
+
   test("contract requirements discard legacy execution-policy metadata", () => {
     const decode = Schema.decodeUnknownSync(ProContract.Requirement)
     expect(decode({ contractID: "pct_policy", revision: 1, policy: true })).toEqual({

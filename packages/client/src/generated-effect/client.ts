@@ -687,6 +687,7 @@ type Endpoint18_0Input = {
   readonly scope: Endpoint18_0Request["payload"]["scope"]
   readonly goal: Endpoint18_0Request["payload"]["goal"]
   readonly executionPolicy?: Endpoint18_0Request["payload"]["executionPolicy"]
+  readonly executionPolicyCoordinate?: Endpoint18_0Request["payload"]["executionPolicyCoordinate"]
   readonly policy?: Endpoint18_0Request["payload"]["policy"]
   readonly brief?: Endpoint18_0Request["payload"]["brief"]
   readonly requires?: Endpoint18_0Request["payload"]["requires"]
@@ -705,6 +706,7 @@ const Endpoint18_0 = (raw: RawClient["server.proContract"]) => (input: Endpoint1
       scope: input["scope"],
       goal: input["goal"],
       executionPolicy: input["executionPolicy"],
+      executionPolicyCoordinate: input["executionPolicyCoordinate"],
       policy: input["policy"],
       brief: input["brief"],
       requires: input["requires"],
@@ -759,6 +761,7 @@ type Endpoint18_6Request = Parameters<RawClient["server.proContract"]["proContra
 type Endpoint18_6Input = {
   readonly contractID: Endpoint18_6Request["params"]["contractID"]
   readonly revision: Endpoint18_6Request["payload"]["revision"]
+  readonly specHash: Endpoint18_6Request["payload"]["specHash"]
   readonly subjectHash: Endpoint18_6Request["payload"]["subjectHash"]
   readonly evidenceHash: Endpoint18_6Request["payload"]["evidenceHash"]
   readonly disclosure: Endpoint18_6Request["payload"]["disclosure"]
@@ -769,6 +772,7 @@ const Endpoint18_6 = (raw: RawClient["server.proContract"]) => (input: Endpoint1
     params: { contractID: input["contractID"] },
     payload: {
       revision: input["revision"],
+      specHash: input["specHash"],
       subjectHash: input["subjectHash"],
       evidenceHash: input["evidenceHash"],
       disclosure: input["disclosure"],
@@ -779,29 +783,40 @@ const Endpoint18_6 = (raw: RawClient["server.proContract"]) => (input: Endpoint1
 type Endpoint18_7Request = Parameters<RawClient["server.proContract"]["proContract.decideRevision"]>[0]
 type Endpoint18_7Input = {
   readonly contractID: Endpoint18_7Request["params"]["contractID"]
+  readonly revision: Endpoint18_7Request["payload"]["revision"]
+  readonly specHash: Endpoint18_7Request["payload"]["specHash"]
   readonly accept: Endpoint18_7Request["payload"]["accept"]
 }
 const Endpoint18_7 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_7Input) =>
   raw["proContract.decideRevision"]({
     params: { contractID: input["contractID"] },
-    payload: { accept: input["accept"] },
+    payload: { revision: input["revision"], specHash: input["specHash"], accept: input["accept"] },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint18_8Request = Parameters<RawClient["server.proContract"]["proContract.release"]>[0]
 type Endpoint18_8Input = {
   readonly contractID: Endpoint18_8Request["params"]["contractID"]
+  readonly revision: Endpoint18_8Request["payload"]["revision"]
+  readonly specHash: Endpoint18_8Request["payload"]["specHash"]
   readonly reason: Endpoint18_8Request["payload"]["reason"]
 }
 const Endpoint18_8 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_8Input) =>
   raw["proContract.release"]({
     params: { contractID: input["contractID"] },
-    payload: { reason: input["reason"] },
+    payload: { revision: input["revision"], specHash: input["specHash"], reason: input["reason"] },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint18_9Request = Parameters<RawClient["server.proContract"]["proContract.resume"]>[0]
-type Endpoint18_9Input = { readonly contractID: Endpoint18_9Request["params"]["contractID"] }
+type Endpoint18_9Input = {
+  readonly contractID: Endpoint18_9Request["params"]["contractID"]
+  readonly revision: Endpoint18_9Request["payload"]["revision"]
+  readonly specHash: Endpoint18_9Request["payload"]["specHash"]
+}
 const Endpoint18_9 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_9Input) =>
-  raw["proContract.resume"]({ params: { contractID: input["contractID"] } }).pipe(Effect.mapError(mapClientError))
+  raw["proContract.resume"]({
+    params: { contractID: input["contractID"] },
+    payload: { revision: input["revision"], specHash: input["specHash"] },
+  }).pipe(Effect.mapError(mapClientError))
 
 const adaptGroup18 = (raw: RawClient["server.proContract"]) => ({
   issue: Endpoint18_0(raw),

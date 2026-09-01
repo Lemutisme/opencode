@@ -46,6 +46,8 @@ export type Command =
       readonly type: "decide-revision"
       readonly actor: string
       readonly contractID: ProContract.ID
+      readonly revision: number
+      readonly specHash: string
       readonly accept: boolean
     }
   | {
@@ -61,7 +63,13 @@ export type Command =
       readonly revision: number
       readonly time: number
     }
-  | { readonly type: "resume"; readonly actor: string; readonly contractID: ProContract.ID }
+  | {
+      readonly type: "resume"
+      readonly actor: string
+      readonly contractID: ProContract.ID
+      readonly revision: number
+      readonly specHash: string
+    }
   | {
       readonly type: "challenge"
       readonly actor: string
@@ -95,7 +103,14 @@ export type Command =
       readonly reason: string
       readonly time: number
     }
-  | { readonly type: "release"; readonly actor: string; readonly contractID: ProContract.ID; readonly reason: string }
+  | {
+      readonly type: "release"
+      readonly actor: string
+      readonly contractID: ProContract.ID
+      readonly revision: number
+      readonly specHash: string
+      readonly reason: string
+    }
 
 export type Decision = { readonly type: "accepted" } | { readonly type: "rejected"; readonly reason: string }
 
@@ -117,6 +132,7 @@ export function canonicalSpec(spec: ProContract.Spec) {
     requires: spec.requires.map((requirement) => ({
       contractID: requirement.contractID,
       revision: requirement.revision,
+      ...(requirement.relation ? { relation: requirement.relation } : {}),
     })),
     authority: spec.authority,
     budget: spec.budget,
@@ -131,6 +147,19 @@ export function hashSpec(spec: ProContract.Spec) {
 
 export function hashReplay(policy: ProContract.ReplayPolicy) {
   return Hash.sha256(JSON.stringify(ProContract.ReplayPolicy.make(policy)))
+}
+
+export function subjectCoordinate(contract: Contract, hash: string) {
+  return ProContract.SubjectCoordinate.make({
+    hash,
+    specHash: contract.specHash,
+    artifacts: [...new Set(contract.spec.evidence.replay?.artifacts ?? [])].sort(),
+  })
+}
+
+export function handoffSubject(contract: Contract) {
+  if (!contract.handoff) return undefined
+  return contract.handoff.subject ?? subjectCoordinate(contract, contract.handoff.subjectHash)
 }
 
 export function transition(state: State, command: Command): Result {
@@ -191,7 +220,8 @@ export function transition(state: State, command: Command): Result {
     if (contract.status !== "discharged" && contract.status !== "verification")
       return reject("contract is not awaiting adjudication")
     if (command.challenge.revision !== contract.revision) return reject("challenge revision does not match")
-    if (!contract.handoff || command.challenge.subjectHash !== contract.handoff.subjectHash)
+    if (command.challenge.specHash !== contract.specHash) return reject("challenge specification does not match")
+    if (!contract.handoff || command.challenge.subjectHash !== handoffSubject(contract)?.hash)
       return reject("challenge subject does not match")
     if (command.challenge.disclosure === "executor" && !command.challenge.summary)
       return reject("executor-visible challenge requires a summary")
@@ -205,7 +235,10 @@ export function transition(state: State, command: Command): Result {
       Object.values(state.contracts)
         .filter(
           (item) =>
-            !affected.has(item.id) && item.spec.requires.some((requirement) => requirement.contractID === dependencyID),
+            !affected.has(item.id) &&
+            item.spec.requires.some(
+              (requirement) => requirement.contractID === dependencyID && requirement.relation !== "subject",
+            ),
         )
         .forEach((item) => {
           affected.add(item.id)
@@ -282,6 +315,7 @@ export function transition(state: State, command: Command): Result {
             handoff: undefined,
             challenge: {
               revision: contract.revision,
+              specHash: contract.specHash,
               subjectHash: command.subjectHash,
               evidenceHash: challenge.evidenceHash,
               disclosure: "executor",
@@ -305,6 +339,7 @@ export function transition(state: State, command: Command): Result {
           handoff: {
             summary: command.summary,
             uncertainties: command.uncertainties,
+            subject: subjectCoordinate(contract, command.subjectHash),
             subjectHash: command.subjectHash,
             replay: command.replay,
             time: command.time,
@@ -350,6 +385,8 @@ export function transition(state: State, command: Command): Result {
   if (command.type === "decide-revision") {
     if (command.actor !== contract.issuer) return reject("only the issuer may decide a revision")
     if (!contract.pendingRevision) return reject("no revision petition is pending")
+    if (command.revision !== contract.revision || command.specHash !== contract.pendingRevision.specHash)
+      return reject("revision decision coordinate does not match")
     if (command.accept && dependent) return reject(`contract is required by outstanding contract: ${dependent.id}`)
     return accept({
       ...state,
@@ -375,6 +412,8 @@ export function transition(state: State, command: Command): Result {
 
   if (command.type === "release") {
     if (command.actor !== contract.issuer) return reject("only the issuer may release the contract")
+    if (command.revision !== contract.revision || command.specHash !== contract.specHash)
+      return reject("release coordinate does not match")
     if (dependent) return reject(`contract is required by outstanding contract: ${dependent.id}`)
     return accept({
       ...state,
@@ -419,6 +458,8 @@ export function transition(state: State, command: Command): Result {
   if (command.type === "resume") {
     if (command.actor !== contract.issuer) return reject("only the issuer may resume the contract")
     if (contract.status !== "escalated") return reject("contract is not escalated")
+    if (command.revision !== contract.revision || command.specHash !== contract.specHash)
+      return reject("resume coordinate does not match")
     if (contract.pendingRevision) return reject("contract has a pending revision")
     return accept({
       ...state,
@@ -457,14 +498,14 @@ export function transition(state: State, command: Command): Result {
     if (state.attestations[command.attestation.id]) return reject("attestation already exists")
     if (command.attestation.revision !== contract.revision) return reject("attestation revision does not match")
     if (command.attestation.specHash !== contract.specHash) return reject("attestation specification does not match")
-    if (command.attestation.subjectHash !== contract.handoff.subjectHash)
+    if (command.attestation.subjectHash !== handoffSubject(contract)?.hash)
       return reject("attestation subject does not match")
     const replay = contract.spec.evidence.replay
     if (
       replay &&
       (!contract.handoff.replay?.passed ||
         contract.handoff.replay.policyHash !== hashReplay(replay) ||
-        contract.handoff.replay.subjectHash !== contract.handoff.subjectHash)
+        contract.handoff.replay.subjectHash !== handoffSubject(contract)?.hash)
     )
       return reject("replay evidence does not support discharge")
     if (replay && command.attestation.evidenceHash === contract.handoff.replay?.evidenceHash)

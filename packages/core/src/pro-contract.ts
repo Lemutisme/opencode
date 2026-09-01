@@ -7,6 +7,7 @@ export {
   Capability,
   Challenge,
   Evidence,
+  ExecutionPolicyCoordinate,
   Handoff,
   ID,
   Info,
@@ -16,6 +17,7 @@ export {
   ReplayResult,
   Spec,
   Status,
+  SubjectCoordinate,
 } from "@opencode-ai/schema/pro-contract"
 
 import { ProContract as Schema } from "@opencode-ai/schema/pro-contract"
@@ -41,8 +43,10 @@ export type EvaluationReport = {
   readonly deliveryContractID: Schema.ID
   readonly deliveryRevision: number
   readonly subjectHash: string
+  readonly claimHash: string
   readonly evaluatorHash: string
   readonly passed: boolean
+  readonly defeatsClaim: boolean
   readonly disclosure: "executor" | "sealed"
   readonly summary: string
 }
@@ -65,10 +69,16 @@ export interface Interface {
     readonly evidenceHash: string
     readonly time: number
   }) => Effect.Effect<Receipt>
-  readonly release: (input: { readonly contractID: Schema.ID; readonly reason: string }) => Effect.Effect<Receipt>
+  readonly release: (input: {
+    readonly contractID: Schema.ID
+    readonly revision: number
+    readonly specHash: string
+    readonly reason: string
+  }) => Effect.Effect<Receipt>
   readonly challenge: (input: {
     readonly contractID: Schema.ID
     readonly revision: number
+    readonly specHash: string
     readonly subjectHash: string
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
@@ -91,7 +101,11 @@ export interface Interface {
     readonly time: number
   }) => Effect.Effect<Receipt>
   readonly activate: (contractID: Schema.ID, revision: number, now: number) => Effect.Effect<Receipt>
-  readonly resume: (contractID: Schema.ID) => Effect.Effect<Receipt>
+  readonly resume: (input: {
+    readonly contractID: Schema.ID
+    readonly revision: number
+    readonly specHash: string
+  }) => Effect.Effect<Receipt>
   readonly escalate: (input: {
     readonly contractID: Schema.ID
     readonly revision: number
@@ -105,6 +119,8 @@ export interface Interface {
   }) => Effect.Effect<Receipt>
   readonly decideRevision: (input: {
     readonly contractID: Schema.ID
+    readonly revision: number
+    readonly specHash: string
     readonly accept: boolean
   }) => Effect.Effect<Receipt>
   readonly principalAttest: (input: {
@@ -133,6 +149,10 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Pr
 
 export function evidenceClaim(spec: Schema.Spec) {
   return spec.evidence.claim ?? spec.goal
+}
+
+export function claimHash(spec: Schema.Spec) {
+  return Hash.sha256(JSON.stringify(evidenceClaim(spec)))
 }
 
 export function evaluationID(deliveryContractID: Schema.ID, revision: number, evaluatorHash: string) {
@@ -181,37 +201,43 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
 
-    const execute = Effect.fn("ProContract.execute")((command: ProContractKernel.Command) =>
+    const executeAll = Effect.fn("ProContract.executeAll")((commands: ReadonlyArray<ProContractKernel.Command>) =>
       db
         .transaction(
           (tx) =>
             Effect.gen(function* () {
-              const contractID = command.type === "issue" ? command.draft.id : command.contractID
+              if (commands.length === 0) return yield* Effect.die("Atomic Contract transition is empty")
               const stored = yield* tx
                 .select({ data: ProContractTable.data })
                 .from(ProContractTable)
                 .all()
                 .pipe(Effect.orDie)
-              const attestationID = command.type === "discharge" ? command.attestation.id : undefined
-              const attestation = attestationID
-                ? yield* tx
-                    .select({ data: ProContractAttestationTable.data })
-                    .from(ProContractAttestationTable)
-                    .where(eq(ProContractAttestationTable.id, attestationID))
-                    .get()
-                    .pipe(Effect.orDie)
-                : undefined
-              const result = ProContractKernel.transition(
-                {
-                  contracts: Object.fromEntries(stored.map((row) => [row.data.id, row.data])),
-                  attestations: attestation ? { [attestation.data.id]: attestation.data } : {},
-                },
-                command,
+              const storedAttestations = yield* tx
+                .select({ data: ProContractAttestationTable.data })
+                .from(ProContractAttestationTable)
+                .all()
+                .pipe(Effect.orDie)
+              const initial: ProContractKernel.State = {
+                contracts: Object.fromEntries(stored.map((row) => [row.data.id, row.data])),
+                attestations: Object.fromEntries(storedAttestations.map((row) => [row.data.id, row.data])),
+              }
+              const results = commands.reduce(
+                (items, command) => [
+                  ...items,
+                  ProContractKernel.transition(items.at(-1)?.state ?? initial, command),
+                ],
+                [] as ProContractKernel.Result[],
               )
-              const current = result.state.contracts[contractID]
-              if (result.decision.type === "accepted" && current)
+              const rejected = results.find((result) => result.decision.type === "rejected")
+              if (commands.length > 1 && rejected?.decision.type === "rejected")
+                return yield* Effect.die(`Atomic Contract transition rejected: ${rejected.decision.reason}`)
+              const result = results.at(-1)
+              if (!result) return yield* Effect.die("Atomic Contract transition produced no result")
+              if (result.decision.type === "accepted")
                 yield* Effect.forEach(
-                  command.type === "challenge" ? Object.values(result.state.contracts) : [current],
+                  Object.values(result.state.contracts).filter(
+                    (contract) => initial.contracts[contract.id] !== contract,
+                  ),
                   (current) =>
                     tx
                       .insert(ProContractTable)
@@ -224,51 +250,79 @@ const layer = Layer.effect(
                       .pipe(Effect.orDie),
                   { discard: true },
                 )
-              if (result.decision.type === "accepted" && command.type === "discharge") {
-                const recorded = result.state.attestations[command.attestation.id]
-                if (!recorded) return yield* Effect.die("Accepted attestation was not recorded")
-                yield* tx
-                  .insert(ProContractAttestationTable)
-                  .values({ id: recorded.id, contract_id: recorded.contractID, data: recorded })
-                  .run()
-                  .pipe(Effect.orDie)
-              }
+              if (result.decision.type === "accepted")
+                yield* Effect.forEach(
+                  Object.values(result.state.attestations).filter(
+                    (attestation) => initial.attestations[attestation.id] !== attestation,
+                  ),
+                  (attestation) =>
+                    tx
+                      .insert(ProContractAttestationTable)
+                      .values({ id: attestation.id, contract_id: attestation.contractID, data: attestation })
+                      .run()
+                      .pipe(Effect.orDie),
+                  { discard: true },
+                )
               const head = yield* tx
                 .select()
                 .from(ProContractLedgerTable)
                 .where(eq(ProContractLedgerTable.id, 1))
                 .get()
                 .pipe(Effect.orDie)
-              const frontier = (head?.head_seq ?? -1) + 1
-              const previous = head?.head_hash ?? ZERO_HASH
-              const hash = Hash.sha256(JSON.stringify([previous, frontier, command, result.decision]))
+              const events = results.reduce(
+                (items, current, index) => {
+                  const previous = items.at(-1)?.hash ?? head?.head_hash ?? ZERO_HASH
+                  const seq = (head?.head_seq ?? -1) + index + 1
+                  const command = commands[index]
+                  if (!command) return items
+                  return [
+                    ...items,
+                    {
+                      seq,
+                      contract_id: command.type === "issue" ? command.draft.id : command.contractID,
+                      command,
+                      decision: current.decision,
+                      previous_hash: previous,
+                      hash: Hash.sha256(JSON.stringify([previous, seq, command, current.decision])),
+                    },
+                  ]
+                },
+                [] as Array<{
+                  seq: number
+                  contract_id: string
+                  command: ProContractKernel.Command
+                  decision: ProContractKernel.Decision
+                  previous_hash: string
+                  hash: string
+                }>,
+              )
+              yield* Effect.forEach(
+                events,
+                (event) => tx.insert(ProContractEventTable).values(event).run().pipe(Effect.orDie),
+                { discard: true },
+              )
+              const last = events.at(-1)
+              if (!last) return yield* Effect.die("Atomic Contract transition produced no ledger event")
               yield* tx
-                .insert(ProContractEventTable)
-                .values({
-                  seq: frontier,
-                  contract_id: contractID,
-                  command,
-                  decision: result.decision,
-                  previous_hash: previous,
-                  hash,
+                .insert(ProContractLedgerTable)
+                .values({ id: 1, head_seq: last.seq, head_hash: last.hash })
+                .onConflictDoUpdate({
+                  target: ProContractLedgerTable.id,
+                  set: { head_seq: last.seq, head_hash: last.hash },
                 })
                 .run()
                 .pipe(Effect.orDie)
-              yield* tx
-                .insert(ProContractLedgerTable)
-                .values({ id: 1, head_seq: frontier, head_hash: hash })
-                .onConflictDoUpdate({ target: ProContractLedgerTable.id, set: { head_seq: frontier, head_hash: hash } })
-                .run()
-                .pipe(Effect.orDie)
-              return { ...result, frontier, hash }
+              return { ...result, frontier: last.seq, hash: last.hash }
             }),
           { behavior: "immediate" },
         )
         .pipe(Effect.orDie),
     )
 
-    const discharge = Effect.fnUntraced(function* (contract: ProContractKernel.Contract, evidenceHash: string) {
-      return yield* execute({
+    const execute = Effect.fn("ProContract.execute")((command: ProContractKernel.Command) => executeAll([command]))
+
+    const dischargeCommand = (contract: ProContractKernel.Contract, evidenceHash: string) =>
+      ({
         type: "discharge",
         actor: contract.issuer,
         contractID: contract.id,
@@ -276,12 +330,15 @@ const layer = Layer.effect(
           id: Schema.AttestationID.create(),
           revision: contract.revision,
           specHash: contract.specHash,
-          subjectHash: contract.handoff?.subjectHash ?? "",
+          subjectHash: ProContractKernel.handoffSubject(contract)?.hash ?? "",
           evidenceHash,
           verifierID: contract.issuer,
           class: "principal",
         },
-      })
+      }) as const
+
+    const discharge = Effect.fnUntraced(function* (contract: ProContractKernel.Contract, evidenceHash: string) {
+      return yield* execute(dischargeCommand(contract, evidenceHash))
     })
 
     const get = Effect.fn("ProContract.get")(function* (id: Schema.ID) {
@@ -336,8 +393,8 @@ const layer = Layer.effect(
           spec: Schema.Spec.make({
             trigger: { type: "immediate" },
             goal: `Independently evaluate the exact handoff for: ${delivery.spec.goal}`,
-            brief: `Evaluate ${delivery.id}@${delivery.revision} with evaluator ${input.evaluatorHash}. Delivery evidence alone does not settle this obligation.`,
-            requires: [{ contractID: delivery.id, revision: delivery.revision }],
+            brief: `Evaluate ${delivery.id}@${delivery.revision} claim ${claimHash(delivery.spec)} with evaluator ${input.evaluatorHash}. Delivery evidence alone does not settle this obligation.`,
+            requires: [{ contractID: delivery.id, revision: delivery.revision, relation: "subject" }],
             authority: [],
             budget: { turns: 1, actions: 1, deadline: input.deadline },
             evidence: {
@@ -359,13 +416,21 @@ const layer = Layer.effect(
         if (
           evaluation.spec.requires.length !== 1 ||
           evaluation.spec.requires[0]?.contractID !== report.deliveryContractID ||
-          evaluation.spec.requires[0]?.revision !== report.deliveryRevision
+          evaluation.spec.requires[0]?.revision !== report.deliveryRevision ||
+          evaluation.spec.requires[0]?.relation !== "subject"
         )
           return yield* Effect.die("Evaluation dependency does not match report")
         const delivery = yield* get(report.deliveryContractID)
         if (!delivery?.handoff || delivery.status !== "discharged" || !delivery.attestationID)
           return yield* Effect.die("Delivery Contract is not independently evidenced")
-        if (delivery.revision !== report.deliveryRevision || delivery.handoff.subjectHash !== report.subjectHash)
+        if (report.claimHash !== claimHash(delivery.spec))
+          return yield* Effect.die("Evaluation claim does not match delivery claim")
+        if (report.passed && report.defeatsClaim)
+          return yield* Effect.die("Passing evaluation cannot defeat the target claim")
+        if (
+          delivery.revision !== report.deliveryRevision ||
+          ProContractKernel.handoffSubject(delivery)?.hash !== report.subjectHash
+        )
           return yield* Effect.die("Evaluation subject does not match delivery handoff")
 
         const activated =
@@ -398,7 +463,24 @@ const layer = Layer.effect(
             : undefined
         if (ready?.decision.type === "rejected") return ready
         const handedOff = ready?.state.contracts[current.id] ?? current
-        return yield* discharge(handedOff, input.evidenceHash)
+        if (!report.defeatsClaim) return yield* discharge(handedOff, input.evidenceHash)
+        return yield* executeAll([
+          dischargeCommand(handedOff, input.evidenceHash),
+          {
+            type: "challenge",
+            actor: delivery.issuer,
+            contractID: delivery.id,
+            challenge: {
+              revision: delivery.revision,
+              specHash: delivery.specHash,
+              subjectHash: report.subjectHash,
+              evidenceHash: input.evidenceHash,
+              disclosure: report.disclosure,
+              summary: report.disclosure === "executor" ? report.summary : undefined,
+              time: input.time,
+            },
+          },
+        ])
       }),
       release: (input) => execute({ type: "release", actor: "local-owner", ...input }),
       challenge: (input) =>
@@ -408,6 +490,7 @@ const layer = Layer.effect(
           contractID: input.contractID,
           challenge: {
             revision: input.revision,
+            specHash: input.specHash,
             subjectHash: input.subjectHash,
             evidenceHash: input.evidenceHash,
             disclosure: input.disclosure,
@@ -419,7 +502,7 @@ const layer = Layer.effect(
       reportBlocked: (input) => execute({ type: "report-blocked", actor: "institution", ...input }),
       activate: (contractID, revision, time) =>
         execute({ type: "activate", actor: "institution", contractID, revision, time }),
-      resume: (contractID) => execute({ type: "resume", actor: "local-owner", contractID }),
+      resume: (input) => execute({ type: "resume", actor: "local-owner", ...input }),
       escalate: (input) => execute({ type: "escalate", actor: "institution", ...input }),
       petitionRevision: Effect.fn("ProContract.petitionRevision")(function* (input) {
         const contract = yield* get(input.contractID)

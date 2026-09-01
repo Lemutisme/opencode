@@ -89,7 +89,6 @@ const layer = Layer.effect(
                     ? "Continue the approved task after a transient execution interruption."
                     : [
                         contract.spec.brief || contract.spec.goal,
-                        ...(current.executionPolicy ? ["Execution policy:", current.executionPolicy] : []),
                         ...dependencies.flatMap((item) =>
                           item
                             ? [

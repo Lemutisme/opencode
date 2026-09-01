@@ -2,9 +2,9 @@
 
 This audit records what the current ProContract institution checks itself, what
 it accepts from a trusted caller, and what remains the responsibility of an
-external verifier. It describes the runtime retained on
-`procontract-strength` after the default execution policy was removed. It does
-not claim that a hash proves the truth of the bytes it names.
+external verifier. It describes the `contract-tcb` runtime after execution
+policy was removed from Contract terms and given its own binding coordinate.
+It does not claim that a hash proves the truth of the bytes it names.
 
 ## Result
 
@@ -40,7 +40,8 @@ principal-approved Spec
   -> durable Contract and execution binding
   -> dedicated active Session
   -> contract_report_ready(summary, uncertainties)
-  -> institution captures exact Location Snapshot as subjectHash
+  -> institution captures exact Location Snapshot as
+     SubjectCoordinate(subjectHash, specHash, artifacts)
   -> optional frozen replay runs on that Snapshot
      -> unavailable: escalate
      -> failed finite report: durable visible challenge, return dormant
@@ -63,7 +64,7 @@ bit, replay evidence hash, attestation, or challenge through that tool.
 
 ### Frozen terms
 
-`Spec` freezes the trigger, optimization goal, optional future policy, handoff
+`Spec` freezes the trigger, optimization goal, handoff
 brief, exact prerequisite revisions, capabilities, budget, evidence policy,
 and resolution policy. The kernel recomputes its canonical `specHash` at issue
 and revision admission. A revision cannot change dependency edges, and only
@@ -118,7 +119,7 @@ Discharge is a total kernel transition. It requires:
 - no pending revision;
 - a new attestation ID;
 - the exact Contract revision and `specHash`;
-- the exact handoff `subjectHash`;
+- the exact handoff `SubjectCoordinate` and claim implied by `specHash`;
 - a supporting replay result when replay was frozen;
 - an actor and attestation verifier equal to the issuer;
 - a principal evidence hash distinct from replay evidence when replay exists.
@@ -130,7 +131,7 @@ global hash-chain frontier are written in one immediate database transaction.
 ### Challenge and responsibility closure
 
 Only the issuer can challenge a Contract in `verification` or `discharged`,
-and the challenge must name its exact revision and handoff subject. A visible
+and the challenge must name its exact revision, `specHash`, and handoff subject. A visible
 challenge returns the source Contract to `dormant`; a sealed challenge moves it
 to `escalated` without disclosing a summary to the executor. Both remove its
 current handoff and attestation support.
@@ -145,11 +146,11 @@ responsibility instead of erasing history.
 | Input or boundary | Current owner | Institution checks | Institution does not check |
 | --- | --- | --- | --- |
 | Goal, claim, replay policy, protected hashes | Principal at proposal/issue | Canonical `specHash`, shape, finite replay structure, immutable revision rules | Whether the claim is useful, the policy is sufficient, protected bytes are a sound oracle, or the stopping rule is valid |
-| `subjectHash` at executor handoff | Location Snapshot service | Replay and attestation must name it exactly | That the configured Location contains every real-world object relevant to the claim |
+| Subject coordinate at executor handoff | Location Snapshot service | Subject hash, `specHash`, and declared artifacts are bound; replay and attestation must name it exactly | That the configured Location contains every real-world object relevant to the claim |
 | Replay process and report | In-process replay service plus host | Frozen policy/subject, path containment, exits, file observations, content hash | Network isolation, clean environment, credential isolation, image/toolchain identity, verifier executable identity, signatures, or task-level adequacy |
 | Principal `evidenceHash` | Authenticated HTTP caller or local CLI | Nonempty, exact attestation coordinates, issuer role, distinct from replay hash | Report availability, bytes matching the hash, report schema, pass rule, verifier origin, signature, independence beyond hash inequality, or whether it settles `evidence.claim` |
-| Challenge `evidenceHash`, disclosure, summary | Authenticated HTTP caller or local CLI | Current revision/subject, issuer role, disclosure/summary consistency | Report availability, evaluator authenticity, or truth of the negative result |
-| `evaluatorHash` and `EvaluationReport` | External evaluation adapter | Evaluation ID/dependency/executor coordinates and delivery revision/subject | That the hash names the running evaluator, the report came from it, or its `passed` value follows a frozen rule |
+| Challenge `evidenceHash`, disclosure, summary | Authenticated HTTP caller or local CLI | Current revision/`specHash`/subject, issuer role, disclosure/summary consistency | Report availability, evaluator authenticity, or truth of the negative result |
+| `evaluatorHash` and `EvaluationReport` | External evaluation adapter | Evaluation ID, subject relation, delivery revision/subject, `claimHash`, and explicit `defeatsClaim` | That the hash names the running evaluator, the report came from it, or its verdict follows a sound frozen rule |
 | HTTP principal identity | Principal mutation middleware plus server-wide Basic auth | Mutation is denied when auth is absent; one configured username/password is checked when enabled | Per-verifier roles, distinct principal credentials, report signatures, or separation among authenticated callers |
 | Local CLI principal identity | Process and filesystem boundary | Local service constructs fixed `local-owner` role | OS-level separation from an executor that can reach the same control process or state |
 | Database ledger | Local institution process | Transactional state/event/head consistency while writing | External checkpoint, signature, remote witness, or tamper detection after a trusted database rewrite |
@@ -165,9 +166,12 @@ the server credential or reach the plane database directly.
 
 The existing `issueEvaluation` and `settleEvaluation` path gives an external
 evaluation a durable obligation and binds its identity to the delivery ID,
-delivery revision, subject, and a caller-provided `evaluatorHash`. It correctly
-reopens a delivery on a failed report and can discharge a separate evaluation
-Contract on a passing report.
+delivery revision, subject, exact `claimHash`, and caller-provided
+`evaluatorHash`. An authentic report discharges Evaluation even when it records
+a low score. Only `defeatsClaim: true` restores Delivery responsibility, and
+that Evaluation discharge plus subject-bound challenge is one atomic ledger
+transaction. A non-supporting `subject` dependency prevents the resulting
+historical report from being invalidated by the very defeater it records.
 
 It is still an orchestration adapter, not a mechanical verifier boundary.
 `settleEvaluation` receives the already-parsed report, pass bit, evidence hash,
@@ -188,7 +192,7 @@ contractID
 revision
 specHash
 subjectHash
-evidence.claim
+claimHash
 frozen replay policy hash and replay evidence hash, when configured
 verifier executable or manifest hash
 ```
@@ -199,8 +203,9 @@ persist the report, recompute its content hash, refetch the Contract immediately
 before mutation, and then choose exactly one action:
 
 ```text
-matching current coordinates + pass -> principal attestation
-matching current coordinates + fail -> subject-bound challenge
+matching current coordinates + supports      -> principal attestation
+matching current coordinates + observation  -> settle Evaluation only
+matching current coordinates + defeatsClaim -> atomic Evaluation settlement + challenge
 stale/mismatched coordinates         -> no authoritative mutation
 verifier unavailable                 -> no fabricated pass or fail
 ```

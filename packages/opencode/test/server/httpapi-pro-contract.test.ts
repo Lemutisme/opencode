@@ -92,14 +92,15 @@ describe("ProContract HttpApi", () => {
           "/api/contract/pct_missing/challenge",
           {
             revision: 1,
+            specHash: "forged-spec",
             subjectHash: "forged-subject",
             evidenceHash: "forged-evidence",
             disclosure: "executor",
             summary: "forged challenge",
           },
         ],
-        ["/api/contract/pct_missing/revision/decision", { accept: true }],
-        ["/api/contract/pct_missing/release", { reason: "forged release" }],
+        ["/api/contract/pct_missing/revision/decision", { revision: 1, specHash: "forged-spec", accept: true }],
+        ["/api/contract/pct_missing/release", { revision: 1, specHash: "forged-spec", reason: "forged release" }],
       ] as const
       for (const [path, body] of mutations) {
         const mutation = await fetch(new URL(path, listener.url), {
@@ -113,6 +114,8 @@ describe("ProContract HttpApi", () => {
         (
           await fetch(new URL("/api/contract/pct_missing/resume", listener.url), {
             method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ revision: 1, specHash: "forged-spec" }),
           })
         ).status,
       ).toBe(401)
@@ -152,7 +155,8 @@ describe("ProContract HttpApi", () => {
         body: payload,
       })
       expect(issued.status).toBe(200)
-      expect(await issued.json()).toMatchObject({
+      const issuedBody = (await issued.json()) as { data: { specHash: string } }
+      expect(issuedBody).toMatchObject({
         data: {
           id: "pct_http",
           status: "dormant",
@@ -165,6 +169,7 @@ describe("ProContract HttpApi", () => {
         execution: {
           contractID: "pct_http",
           executionPolicy: "Preserve verified behavior in future Contracts",
+          executionPolicyCoordinate: { policyHash: expect.any(String), lineage: [] },
           dispatched: false,
         },
         receipt: { frontier: 0 },
@@ -197,6 +202,20 @@ describe("ProContract HttpApi", () => {
         }),
       })
       expect(conflictingPolicy.status).toBe(409)
+      const forgedCoordinate = await fetch(new URL("/api/contract", listener.url), {
+        method: "POST",
+        headers: { authorization: authorization(), "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "pct_http_forged_policy",
+          scope: "http",
+          goal: "Reject a forged execution policy coordinate",
+          executionPolicy: "Policy A",
+          executionPolicyCoordinate: { policyHash: "forged", lineage: [] },
+          location: { directory: process.cwd() },
+          model: { providerID: "openai", id: "gpt-5.3-codex" },
+        }),
+      })
+      expect(forgedCoordinate.status).toBe(409)
 
       const before = await fetch(new URL("/api/contract/quiet?scope=http", listener.url), {
         headers: { authorization: authorization() },
@@ -207,7 +226,11 @@ describe("ProContract HttpApi", () => {
         fetch(new URL("/api/contract/pct_http/release", listener.url), {
           method: "POST",
           headers: { authorization: authorization(), "content-type": "application/json" },
-          body: JSON.stringify({ reason: "explicit release" }),
+          body: JSON.stringify({
+            revision: 1,
+            specHash: issuedBody.data.specHash,
+            reason: "explicit release",
+          }),
         })
       expect((await release()).status).toBe(200)
       expect((await release()).status).toBe(409)

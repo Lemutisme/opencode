@@ -160,47 +160,19 @@ Continue normally     create no Contract
 
 Rejecting a proposal creates neither a Contract nor an execution binding.
 
-A proposal may bind one previously discharged Contract as its execution policy
-by setting `policy: true` on that requirement. OpenCode injects the policy
-Contract's exact `spec.policy` and evidence identities into the dedicated
-Session. A Policy Contract keeps its current ratification work in `goal` and
-the future execution rule in `policy`; the two must not be conflated. The policy
-is part of the approved `specHash`, applies only to the new Contract, and cannot
-override its authority or settlement terms. Challenging the Policy Contract
-invalidates its dependent support through the normal remediation path.
+Execution policy is supplied separately from the approved Contract terms. The
+binding records the exact text plus
+`ExecutionPolicyCoordinate(policyHash, lineage, selectorHash,
+approvalReceipt)`, and the Session runner projects it as a system/developer
+policy fragment. It does not enter `Spec`, `specHash`, `requires`, or revision.
+Changing policy therefore requires a new binding decision but never silently
+changes what is owed.
 
-To retain one principal-selected policy for future natural-language proposals,
-select it in the location's `opencode.json` after its Contract is discharged:
-
-```bash
-opencode contract policy pct_policy_example --config ./opencode.json
-```
-
-The command fails unless the exact Contract is discharged with a current
-handoff and attestation, then prints the specification, subject, evidence, and
-attestation identities written into the selection. Its resulting configuration
-is equivalent to:
-
-```json
-{
-  "contract_policy": {
-    "contractID": "pct_policy_example",
-    "revision": 1,
-    "policy": true
-  }
-}
-```
-
-The setting is a default compiler input, not an authority grant. An explicit
-policy in a proposal overrides it, every inherited edge remains visible in the
-approval UI, and a challenged default causes new issuance to fail closed.
-Delete the setting to clear it or replace the exact ID and revision after a new
-policy is independently discharged. Existing Contracts keep their frozen
-policy edge.
-
-```bash
-opencode contract policy --clear --config ./opencode.json
-```
+OpenCode currently has no global `contract_policy` setting and no
+`opencode contract policy` promotion command. A discharged policy artifact is
+still only a candidate. Canonical adoption and rollback require the separate
+succession register described in the design specification; do not emulate that
+missing authority by pasting policy into a Task Contract brief.
 
 ### 4.2 Unattended formation
 
@@ -594,8 +566,10 @@ After evaluating the exported delivery handoff, submit a finite report:
   "deliveryContractID": "pct_delivery",
   "deliveryRevision": 1,
   "subjectHash": "exact-delivery-subject",
+  "claimHash": "sha256:exact-settlement-claim",
   "evaluatorHash": "sha256:frozen-evaluator",
   "passed": false,
+  "defeatsClaim": true,
   "disclosure": "executor",
   "summary": "Behavioral compatibility floor was not met"
 }
@@ -605,13 +579,16 @@ After evaluating the exported delivery handoff, submit a finite report:
 opencode contract evaluation settle pct_eval_... --report evaluation.json
 ```
 
-A passing report discharges Evaluation. A failed report challenges the exact
-Delivery handoff: visible evidence returns Delivery to dormant remediation,
-while sealed evidence escalates it without disclosing feedback. Evaluation
-remains outstanding in both cases, so `contract quiet <scope>` stays false. The
-command validates the deterministic evaluation ID, exact dependency, delivery
-attestation, subject hash, and evaluator identity before accepting the report
-hash as evidence.
+Every authentic report discharges the Evaluation duty. A low score with
+`defeatsClaim: false` remains capability evidence and does not rewrite a
+narrower Delivery claim. A report with `defeatsClaim: true` must bind that
+Delivery's exact `claimHash`; Evaluation discharge and Delivery challenge then
+commit atomically. Visible evidence returns Delivery to dormant remediation,
+while sealed evidence escalates it without disclosing feedback. The settled
+report uses a non-supporting `subject` relation, so defeating the target claim
+does not erase the historical fact that the report was produced. The command
+validates deterministic evaluation identity, exact revision, subject,
+claim, delivery attestation, and evaluator identity before accepting evidence.
 
 ## 5. MLE-bench: one CPU-friendly instance
 
@@ -1056,19 +1033,18 @@ Do not use ProgramBench official hidden evaluation as iterative training data.
 Use owned private tasks for search, freeze the candidate, and reserve official
 benchmarks for external confirmation.
 
-An accepted JSON report is still a petition, not authority. Capture it in a
-read-only Evaluation Contract, independently attest its exact hashes, and let a
-Selection Contract require both the candidate and evaluation before placing
-the accepted text in `spec.policy`. Only then may the principal run
-`opencode contract policy` to make that exact policy the default for future
-Contracts.
+An accepted JSON report is still a petition, not succession authority. Capture
+it in a read-only Evaluation Contract and independently attest its exact hashes.
+Current OpenCode can bind a principal-selected policy to one future execution
+through an `ExecutionPolicyCoordinate`; it cannot make that candidate a global
+incumbent.
 
 Generate a capability policy only from an exact, signed private Evaluation
 Contract. Aggregate trajectory telemetry without behavioral utility may propose
-an efficiency experiment, but cannot support a capability claim. Materialize
-the approved text as `spec.policy` and bind it through `requires.policy`; never
-paste learned policy into the Task Contract brief. The brief owns immutable
-quality criteria and stopping, while inherited policy owns execution strategy.
+an efficiency experiment, but cannot support a capability claim. Bind approved
+text outside `Spec` with its policy, selector, lineage, and approval hashes;
+never paste learned policy into the Task Contract brief. The brief owns
+immutable quality criteria and stopping, while execution policy owns strategy.
 
 Reject a failed private candidate before confirmation/OOD. Do not make the
 inner executor stop earlier merely to save evaluation cost: outer search stops

@@ -40,6 +40,16 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
           )
             return yield* new ConflictError({ message: "execution policy aliases conflict", resource: id })
           const executionPolicy = ctx.payload.executionPolicy ?? ctx.payload.policy
+          if (ctx.payload.executionPolicyCoordinate && !executionPolicy)
+            return yield* new ConflictError({ message: "execution policy coordinate has no policy", resource: id })
+          const executionPolicyCoordinate = executionPolicy
+            ? ProContractOpenCode.policyCoordinate(executionPolicy, ctx.payload.executionPolicyCoordinate)
+            : undefined
+          if (
+            ctx.payload.executionPolicyCoordinate &&
+            ctx.payload.executionPolicyCoordinate.policyHash !== executionPolicyCoordinate?.policyHash
+          )
+            return yield* new ConflictError({ message: "execution policy hash does not match", resource: id })
           const spec = {
             trigger: ctx.payload.trigger ?? defaults.trigger,
             goal: ctx.payload.goal,
@@ -57,6 +67,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             location: ctx.payload.location,
             model: ctx.payload.model,
             executionPolicy,
+            executionPolicyCoordinate,
             now,
           })
           if (issued.decision.type === "rejected")
@@ -71,7 +82,8 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             execution.model.providerID !== ctx.payload.model.providerID ||
             execution.model.id !== ctx.payload.model.id ||
             execution.model.variant !== ctx.payload.model.variant ||
-            execution.executionPolicy !== executionPolicy
+            execution.executionPolicy !== executionPolicy ||
+            JSON.stringify(execution.executionPolicyCoordinate) !== JSON.stringify(executionPolicyCoordinate)
           )
             return yield* new ConflictError({ message: "contract execution binding does not match", resource: id })
           return {
@@ -129,6 +141,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             .challenge({
               contractID: ctx.params.contractID,
               revision: ctx.payload.revision,
+              specHash: ctx.payload.specHash,
               subjectHash: ctx.payload.subjectHash,
               evidenceHash: ctx.payload.evidenceHash,
               disclosure: ctx.payload.disclosure,
@@ -144,6 +157,8 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
           yield* requireContract(ctx.params.contractID)
           const decision = yield* contracts.decideRevision({
             contractID: ctx.params.contractID,
+            revision: ctx.payload.revision,
+            specHash: ctx.payload.specHash,
             accept: ctx.payload.accept,
           })
           return yield* receipt(decision)
@@ -154,7 +169,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
         Effect.fn(function* (ctx) {
           yield* requireContract(ctx.params.contractID)
           return yield* contracts
-            .release({ contractID: ctx.params.contractID, reason: ctx.payload.reason })
+            .release({ contractID: ctx.params.contractID, ...ctx.payload })
             .pipe(Effect.flatMap(receipt))
         }),
       )
@@ -162,7 +177,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
         "proContract.resume",
         Effect.fn(function* (ctx) {
           yield* requireContract(ctx.params.contractID)
-          return yield* contracts.resume(ctx.params.contractID).pipe(Effect.flatMap(receipt))
+          return yield* contracts.resume({ contractID: ctx.params.contractID, ...ctx.payload }).pipe(Effect.flatMap(receipt))
         }),
       )
   }),

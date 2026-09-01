@@ -274,7 +274,13 @@ const layer = Layer.effect(
           },
         },
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline]
+        system: [
+          agent.info?.system,
+          system.baseline,
+          contractBinding?.executionPolicy
+            ? `Execution policy (${contractBinding.executionPolicyCoordinate?.policyHash ?? "uncoordinated"}):\n${contractBinding.executionPolicy}`
+            : undefined,
+        ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [

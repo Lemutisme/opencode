@@ -97,7 +97,11 @@ export const ContractProposeTool = Tool.define<
           })
           if (issued.decision.type === "rejected") return yield* Effect.die(issued.decision.reason)
           if (!issued.execution) return yield* Effect.die("Contract execution was not created")
-          if (issued.execution.executionPolicy !== executionPolicy)
+          if (
+            issued.execution.executionPolicy !== executionPolicy ||
+            JSON.stringify(issued.execution.executionPolicyCoordinate) !==
+              JSON.stringify(executionPolicy ? ProContractOpenCode.policyCoordinate(executionPolicy) : undefined)
+          )
             return yield* Effect.die("Contract execution policy does not match")
           yield* sessions.setMetadata({
             sessionID: session.id,

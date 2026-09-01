@@ -1998,11 +1998,6 @@ export type Config = {
             }
       }
   instructions?: Array<string>
-  contract_policy?: {
-    contractID: string
-    revision: number
-    policy: true
-  }
   layout?: LayoutConfig
   permission?: PermissionConfig
   tools?: {
@@ -6162,10 +6157,17 @@ export type ProjectCopyCopy = {
   directory: string
 }
 
+export type ProContractExecutionPolicyCoordinate = {
+  policyHash: string
+  lineage: Array<string>
+  selectorHash?: string
+  approvalReceipt?: string
+}
+
 export type ProContractRequirement = {
   contractID: string
   revision: number
-  policy?: true
+  relation?: "support" | "subject"
 }
 
 export type ProContractTrigger =
@@ -6227,7 +6229,6 @@ export type ProContractResolution = {
 export type ProContractSpec = {
   trigger: ProContractTrigger
   goal: string
-  policy?: string
   /**
    * Self-contained handoff brief. Preserve user-stated quality criteria. For open-ended optimization, state the evaluation protocol, required exploration, known quality floor, stopping rule, and assumptions; expose missing criteria instead of inventing them.
    */
@@ -6246,6 +6247,12 @@ export type ProContractBlocked = {
   time: number
 }
 
+export type ProContractSubjectCoordinate = {
+  hash: string
+  specHash: string
+  artifacts: Array<string>
+}
+
 export type ProContractReplayResult = {
   policyHash: string
   subjectHash: string
@@ -6257,6 +6264,7 @@ export type ProContractReplayResult = {
 export type ProContractHandoff = {
   summary: string
   uncertainties: Array<string>
+  subject?: ProContractSubjectCoordinate
   subjectHash: string
   replay?: ProContractReplayResult
   time: number
@@ -6264,6 +6272,7 @@ export type ProContractHandoff = {
 
 export type ProContractChallenge = {
   revision: number
+  specHash: string
   subjectHash: string
   evidenceHash: string
   disclosure: "executor" | "sealed"
@@ -6300,6 +6309,8 @@ export type ProContractOpenCodeExecution = {
   revision: number
   location: LocationRef
   model: ModelRef
+  executionPolicy?: string
+  executionPolicyCoordinate?: ProContractExecutionPolicyCoordinate
   sessionID: string
   promptID: string
   dispatched: boolean
@@ -13788,6 +13799,8 @@ export type V2ProContractIssueData = {
     id?: string
     scope: string
     goal: string
+    executionPolicy?: string
+    executionPolicyCoordinate?: ProContractExecutionPolicyCoordinate
     policy?: string
     brief?: string
     requires?: Array<ProContractRequirement>
@@ -13988,6 +14001,7 @@ export type V2ProContractAttestResponse = V2ProContractAttestResponses[keyof V2P
 export type V2ProContractChallengeData = {
   body: {
     revision: number
+    specHash: string
     subjectHash: string
     evidenceHash: string
     disclosure: "executor" | "sealed"
@@ -14032,6 +14046,8 @@ export type V2ProContractChallengeResponse = V2ProContractChallengeResponses[key
 
 export type V2ProContractDecideRevisionData = {
   body: {
+    revision: number
+    specHash: string
     accept: boolean
   }
   path: {
@@ -14075,6 +14091,8 @@ export type V2ProContractDecideRevisionResponse =
 
 export type V2ProContractReleaseData = {
   body: {
+    revision: number
+    specHash: string
     reason: string
   }
   path: {
@@ -14115,7 +14133,10 @@ export type V2ProContractReleaseResponses = {
 export type V2ProContractReleaseResponse = V2ProContractReleaseResponses[keyof V2ProContractReleaseResponses]
 
 export type V2ProContractResumeData = {
-  body?: never
+  body: {
+    revision: number
+    specHash: string
+  }
   path: {
     contractID: string
   }

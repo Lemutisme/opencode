@@ -723,11 +723,13 @@ describe("SessionRunnerLLM", () => {
         executor: "opencode",
       })
       const contract = issued.contract!
+      const executionPolicy = "Prefer the smallest observation that can falsify the current implementation."
       yield* bindings.create({
         contractID: contract.id,
         revision: contract.revision,
         location: { directory: AbsolutePath.make("/project") },
         model: ModelV2.Ref.make({ id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") }),
+        executionPolicy,
         nextActionAt: 0,
       })
       yield* contracts.activate(contract.id, contract.revision, Date.now())
@@ -778,6 +780,8 @@ describe("SessionRunnerLLM", () => {
       expect(projected).not.toContain("Delegated authority")
       expect(projected).not.toContain("Shared ceiling")
       expect(projected).not.toContain("Evidence policy")
+      expect(projected).toContain(executionPolicy)
+      expect(projected).toContain(ProContractOpenCode.policyCoordinate(executionPolicy).policyHash)
       expect(projected).not.toContain("waiting for a reproducible input")
       expect(requests[0]?.messages.at(-1)).toMatchObject({
         role: "system",
@@ -800,6 +804,7 @@ describe("SessionRunnerLLM", () => {
       yield* contracts.challenge({
         contractID: contract.id,
         revision: contract.revision,
+        specHash: contract.specHash,
         subjectHash: "candidate-subject",
         evidenceHash: "negative-witness",
         disclosure: "executor",
@@ -818,6 +823,7 @@ describe("SessionRunnerLLM", () => {
       yield* contracts.challenge({
         contractID: contract.id,
         revision: contract.revision,
+        specHash: contract.specHash,
         subjectHash: "candidate-subject-2",
         evidenceHash: "offline-witness",
         disclosure: "executor",
@@ -857,7 +863,12 @@ describe("SessionRunnerLLM", () => {
       expect(challengedProjection).not.toContain("Offline build regressed")
       expect(challengedProjection).not.toContain("offline-witness")
 
-      yield* contracts.release({ contractID: contract.id, reason: "test complete" })
+      yield* contracts.release({
+        contractID: contract.id,
+        revision: contract.revision,
+        specHash: contract.specHash,
+        reason: "test complete",
+      })
       yield* session.prompt({
         sessionID: challengedAttempt!.sessionID,
         prompt: Prompt.make({ text: "Continue after release" }),

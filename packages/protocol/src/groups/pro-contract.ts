@@ -25,6 +25,7 @@ export const OpenCodeExecution = Schema.Struct({
   location: Location.Ref,
   model: Model.Ref,
   executionPolicy: Schema.NonEmptyString.pipe(optional),
+  executionPolicyCoordinate: ProContract.ExecutionPolicyCoordinate.pipe(optional),
   sessionID: SessionID,
   promptID: SessionMessage.ID,
   dispatched: Schema.Boolean,
@@ -44,6 +45,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
         scope: Schema.NonEmptyString,
         goal: Schema.NonEmptyString,
         executionPolicy: Schema.NonEmptyString.pipe(Schema.optional),
+        executionPolicyCoordinate: ProContract.ExecutionPolicyCoordinate.pipe(Schema.optional),
         policy: Schema.NonEmptyString.pipe(Schema.optional).annotate({
           description: "Deprecated alias for executionPolicy.",
         }),
@@ -113,6 +115,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
       params: { contractID: ProContract.ID },
       payload: Schema.Struct({
         revision: PositiveInt,
+        specHash: Schema.NonEmptyString,
         subjectHash: Schema.NonEmptyString,
         evidenceHash: Schema.NonEmptyString,
         disclosure: Schema.Literals(["executor", "sealed"]),
@@ -129,7 +132,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
   .add(
     HttpApiEndpoint.post("proContract.decideRevision", "/api/contract/:contractID/revision/decision", {
       params: { contractID: ProContract.ID },
-      payload: Schema.Struct({ accept: Schema.Boolean }),
+      payload: Schema.Struct({ revision: PositiveInt, specHash: Schema.NonEmptyString, accept: Schema.Boolean }),
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
     })
@@ -141,7 +144,11 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
   .add(
     HttpApiEndpoint.post("proContract.release", "/api/contract/:contractID/release", {
       params: { contractID: ProContract.ID },
-      payload: Schema.Struct({ reason: Schema.NonEmptyString }),
+      payload: Schema.Struct({
+        revision: PositiveInt,
+        specHash: Schema.NonEmptyString,
+        reason: Schema.NonEmptyString,
+      }),
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
     })
@@ -151,6 +158,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
   .add(
     HttpApiEndpoint.post("proContract.resume", "/api/contract/:contractID/resume", {
       params: { contractID: ProContract.ID },
+      payload: Schema.Struct({ revision: PositiveInt, specHash: Schema.NonEmptyString }),
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
     })

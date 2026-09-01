@@ -10,6 +10,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { ProContract } from "../pro-contract"
+import { Hash } from "../util/hash"
 import { ProContractOpenCodeSessionTable, ProContractOpenCodeTable, ProContractTable } from "./sql"
 
 export type Binding = {
@@ -18,6 +19,7 @@ export type Binding = {
   readonly location: Location.Ref
   readonly model: Model.Ref
   readonly executionPolicy?: string
+  readonly executionPolicyCoordinate?: Schema.ExecutionPolicyCoordinate
   readonly sessionID: SessionSchema.ID
   readonly promptID: SessionMessage.ID
   readonly dispatched: boolean
@@ -39,6 +41,7 @@ export interface Interface {
     readonly location: Location.Ref
     readonly model: Model.Ref
     readonly executionPolicy?: string
+    readonly executionPolicyCoordinate?: Schema.ExecutionPolicyCoordinate
     readonly now: number
   }) => Effect.Effect<ProContract.IssueReceipt & { readonly execution?: Binding }>
   readonly create: (input: {
@@ -47,6 +50,7 @@ export interface Interface {
     readonly location: Location.Ref
     readonly model: Model.Ref
     readonly executionPolicy?: string
+    readonly executionPolicyCoordinate?: Schema.ExecutionPolicyCoordinate
     readonly nextActionAt: number
   }) => Effect.Effect<Binding>
   readonly claim: (contractID: Schema.ID, now: number) => Effect.Effect<Binding | undefined>
@@ -78,6 +82,18 @@ export function attemptKey(contract: ProContract.Contract) {
         ? contract.blocked.time + ":" + contract.blocked.reason
         : ""
   return contract.revision + ":" + context
+}
+
+export function policyCoordinate(
+  policy: string,
+  coordinate?: Omit<Schema.ExecutionPolicyCoordinate, "policyHash">,
+) {
+  return Schema.ExecutionPolicyCoordinate.make({
+    policyHash: Hash.sha256(policy),
+    lineage: coordinate?.lineage ?? [],
+    selectorHash: coordinate?.selectorHash,
+    approvalReceipt: coordinate?.approvalReceipt,
+  })
 }
 
 const layer = Layer.effect(
@@ -200,6 +216,7 @@ const layer = Layer.effect(
       readonly location: Location.Ref
       readonly model: Model.Ref
       readonly executionPolicy?: string
+      readonly executionPolicyCoordinate?: Schema.ExecutionPolicyCoordinate
       readonly nextActionAt: number
     }) {
       const binding: Binding = {
@@ -208,6 +225,9 @@ const layer = Layer.effect(
         location: input.location,
         model: input.model,
         executionPolicy: input.executionPolicy,
+        executionPolicyCoordinate: input.executionPolicy
+          ? policyCoordinate(input.executionPolicy, input.executionPolicyCoordinate)
+          : undefined,
         sessionID: SessionSchema.ID.create(),
         promptID: SessionMessage.ID.create(),
         dispatched: false,
@@ -249,6 +269,7 @@ const layer = Layer.effect(
           location: input.location,
           model: input.model,
           executionPolicy: input.executionPolicy,
+          executionPolicyCoordinate: input.executionPolicyCoordinate,
           nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
         })
         return { ...receipt, execution }

@@ -98,8 +98,9 @@ routing, not settlement.
    prescribed testimony may support discharge.
 3. **No self-certification** — issuer and executor are distinct, and executor
    testimony cannot become an attestation.
-4. **Exact identity** — revision, terms, candidate subject, evidence, and
-   dependency identities match at every authority-changing transition.
+4. **Exact identity** — revision, terms, candidate subject, declared artifact
+   set, evidence, and dependency identities match at every authority-changing
+   transition; stale commands are rejected rather than retargeted.
 5. **Effect authority** — only the current active revision may spend its bound
    delegation and shared limits.
 6. **Responsibility closure** — accepted challenge atomically removes current
@@ -153,6 +154,16 @@ reminder expose the only additional executor decisions. Exact attestation, evide
 identities remain mandatory in institutional state and decisions but never
 enter a model prompt when the executor cannot inspect or act on them.
 
+Advisory execution policy is a separate system/developer fragment identified by
+`ExecutionPolicyCoordinate`. It is not user task text, a Contract term, or a
+source of settlement authority.
+
+An evaluator report distinguishes observation from defeater. A low score does
+not challenge an unrelated narrow Delivery claim. When authenticated evidence
+explicitly binds and defeats the exact `claimHash`, recording the completed
+Evaluation and restoring responsibility are one atomic institution-store
+operation.
+
 ## Admission tests for Core
 
 A concept belongs in ProContract Core only if removing it would permit at least
@@ -184,7 +195,6 @@ The present public Schema/Service still exposes adapter-specific concepts:
 - `filesystem.read`, `filesystem.write`, and `process.execute` capabilities;
 - provider-turn and tool-action budget units;
 - argv/cwd/protected-file/artifact replay policy;
-- special execution-policy dependency semantics;
 - evaluated-delivery constructors on the core service.
 
 These remain supported until compatibility migrations exist. Their presence is
@@ -198,6 +208,10 @@ Principal HTTP mutations fail closed when server authentication is absent, and
 the reducer validates institution-only actors at runtime. This closes accidental
 unsecured mutation and forged in-memory commands; it does not replace process,
 credential, database, and network isolation between a host plane and worker.
+
+Policy succession remains absent. A policy coordinate makes one execution
+auditable; it does not create a canonical incumbent, adoption authority, judge
+bridge, or rollback transition.
 
 ## Change gate
 

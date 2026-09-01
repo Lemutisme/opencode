@@ -80,7 +80,9 @@ const IssueCommand = effectCmd({
       execution.model.providerID !== executionModel.providerID ||
       execution.model.id !== executionModel.id ||
       execution.model.variant !== executionModel.variant ||
-      execution.executionPolicy !== args.executionPolicy
+      execution.executionPolicy !== args.executionPolicy ||
+      JSON.stringify(execution.executionPolicyCoordinate) !==
+        JSON.stringify(args.executionPolicy ? ProContractOpenCode.policyCoordinate(args.executionPolicy) : undefined)
     )
       return yield* fail("Contract execution binding does not match")
     console.log(JSON.stringify({ contract: ProContract.info(contract), execution }, null, 2))
@@ -93,8 +95,10 @@ const EvaluationReport = Schema.Struct({
   deliveryContractID: ProContract.ID,
   deliveryRevision: Schema.Int.check(Schema.isGreaterThan(0)),
   subjectHash: Schema.NonEmptyString,
+  claimHash: Schema.NonEmptyString,
   evaluatorHash: Schema.NonEmptyString,
   passed: Schema.Boolean,
+  defeatsClaim: Schema.Boolean,
   disclosure: Schema.Literals(["executor", "sealed"]),
   summary: Schema.NonEmptyString,
 })
@@ -275,9 +279,16 @@ const ReleaseCommand = effectCmd({
       .positional("contractID", { type: "string", demandOption: true, describe: "contract ID" })
       .option("reason", { type: "string", demandOption: true, describe: "release reason" }),
   handler: Effect.fn("Cli.contract.release")(function* (args) {
-    const receipt = yield* ProContract.Service.use((service) =>
-      service.release({ contractID: ProContract.ID.make(args.contractID), reason: args.reason }),
-    )
+    const contractID = ProContract.ID.make(args.contractID)
+    const contracts = yield* ProContract.Service
+    const contract = yield* contracts.get(contractID)
+    if (!contract) return yield* fail(`Contract not found: ${contractID}`)
+    const receipt = yield* contracts.release({
+      contractID,
+      revision: contract.revision,
+      specHash: contract.specHash,
+      reason: args.reason,
+    })
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
     console.log(JSON.stringify({ frontier: receipt.frontier, hash: receipt.hash }, null, 2))
     return undefined
@@ -315,9 +326,16 @@ const RevisionDecisionCommand = effectCmd({
       .option("accept", { type: "boolean", demandOption: true, describe: "accept the pending revision" }),
   handler: Effect.fn("Cli.contract.revision")(function* (args) {
     const contractID = ProContract.ID.make(args.contractID)
-    const receipt = yield* ProContract.Service.use((service) =>
-      service.decideRevision({ contractID, accept: args.accept }),
-    )
+    const contracts = yield* ProContract.Service
+    const contract = yield* contracts.get(contractID)
+    if (!contract) return yield* fail(`Contract not found: ${contractID}`)
+    if (!contract.pendingRevision) return yield* fail(`Contract has no pending revision: ${contractID}`)
+    const receipt = yield* contracts.decideRevision({
+      contractID,
+      revision: contract.revision,
+      specHash: contract.pendingRevision.specHash,
+      accept: args.accept,
+    })
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
     console.log(JSON.stringify({ frontier: receipt.frontier, hash: receipt.hash }, null, 2))
     return undefined
@@ -331,7 +349,14 @@ const ResumeCommand = effectCmd({
   builder: (yargs) => yargs.positional("contractID", { type: "string", demandOption: true, describe: "contract ID" }),
   handler: Effect.fn("Cli.contract.resume")(function* (args) {
     const contractID = ProContract.ID.make(args.contractID)
-    const receipt = yield* ProContract.Service.use((service) => service.resume(contractID))
+    const contracts = yield* ProContract.Service
+    const contract = yield* contracts.get(contractID)
+    if (!contract) return yield* fail(`Contract not found: ${contractID}`)
+    const receipt = yield* contracts.resume({
+      contractID,
+      revision: contract.revision,
+      specHash: contract.specHash,
+    })
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
     console.log(JSON.stringify({ frontier: receipt.frontier, hash: receipt.hash }, null, 2))
     return undefined

@@ -718,7 +718,13 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/challenge", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { evidenceHash: "missing", disclosure: "sealed" },
+      body: {
+        revision: 1,
+        specHash: "missing",
+        subjectHash: "missing",
+        evidenceHash: "missing",
+        disclosure: "sealed",
+      },
     }))
     .json(404, object, "status"),
   http.protected
@@ -726,7 +732,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/release", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { reason: "missing" },
+      body: { revision: 1, specHash: "missing", reason: "missing" },
     }))
     .json(404, object, "status"),
   http.protected
@@ -734,6 +740,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/resume", { contractID: "pct_missing" }),
       headers: ctx.headers(),
+      body: { revision: 1, specHash: "missing" },
     }))
     .json(404, object, "status"),
   http.protected
@@ -741,7 +748,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/revision/decision", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { accept: false },
+      body: { revision: 1, specHash: "missing", accept: false },
     }))
     .json(404, object, "status"),
   http.protected.get("/api/location", "v2.location.get").json(200, object),

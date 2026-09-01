@@ -263,7 +263,12 @@ const layer = Layer.effectDiscard(
                   }),
                 ),
               )
-              const decision = yield* contracts.decideRevision({ contractID: contract.id, accept: approved })
+              const decision = yield* contracts.decideRevision({
+                contractID: contract.id,
+                revision: contract.revision,
+                specHash: ProContract.hashSpec(spec),
+                accept: approved,
+              })
               if (decision.decision.type === "rejected")
                 return yield* new ToolFailure({ message: decision.decision.reason })
               if (!approved)

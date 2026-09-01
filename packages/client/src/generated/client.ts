@@ -1018,6 +1018,7 @@ export function make(options: ClientOptions) {
               scope: input["scope"],
               goal: input["goal"],
               executionPolicy: input["executionPolicy"],
+              executionPolicyCoordinate: input["executionPolicyCoordinate"],
               policy: input["policy"],
               brief: input["brief"],
               requires: input["requires"],
@@ -1100,6 +1101,7 @@ export function make(options: ClientOptions) {
             path: `/api/contract/${encodeURIComponent(input.contractID)}/challenge`,
             body: {
               revision: input["revision"],
+              specHash: input["specHash"],
               subjectHash: input["subjectHash"],
               evidenceHash: input["evidenceHash"],
               disclosure: input["disclosure"],
@@ -1116,7 +1118,7 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/contract/${encodeURIComponent(input.contractID)}/revision/decision`,
-            body: { accept: input["accept"] },
+            body: { revision: input["revision"], specHash: input["specHash"], accept: input["accept"] },
             successStatus: 200,
             declaredStatuses: [409, 404, 401, 400],
             empty: false,
@@ -1128,7 +1130,7 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/contract/${encodeURIComponent(input.contractID)}/release`,
-            body: { reason: input["reason"] },
+            body: { revision: input["revision"], specHash: input["specHash"], reason: input["reason"] },
             successStatus: 200,
             declaredStatuses: [409, 404, 401, 400],
             empty: false,
@@ -1140,6 +1142,7 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/contract/${encodeURIComponent(input.contractID)}/resume`,
+            body: { revision: input["revision"], specHash: input["specHash"] },
             successStatus: 200,
             declaredStatuses: [409, 404, 401, 400],
             empty: false,

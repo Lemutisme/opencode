@@ -19,6 +19,7 @@ export type AttestationID = typeof AttestationID.Type
 export const Requirement = Schema.Struct({
   contractID: ID,
   revision: PositiveInt,
+  relation: Schema.Literals(["support", "subject"]).pipe(optional),
 }).annotate({ identifier: "ProContract.Requirement" })
 export interface Requirement extends Schema.Schema.Type<typeof Requirement> {}
 
@@ -35,6 +36,17 @@ export const Capability = Schema.NonEmptyString.annotate({
 })
 export type Capability = typeof Capability.Type
 
+export const ExecutionPolicyCoordinate = Schema.Struct({
+  policyHash: Schema.NonEmptyString,
+  lineage: Schema.Array(Schema.NonEmptyString),
+  selectorHash: Schema.NonEmptyString.pipe(optional),
+  approvalReceipt: Schema.NonEmptyString.pipe(optional),
+}).annotate({
+  identifier: "ProContract.ExecutionPolicyCoordinate",
+  description: "Auditable identity for advisory execution input kept outside Contract specification and revision.",
+})
+export interface ExecutionPolicyCoordinate extends Schema.Schema.Type<typeof ExecutionPolicyCoordinate> {}
+
 export const Budget = Schema.Struct({
   turns: PositiveInt.annotate({
     description: "Exact provider-turn ceiling shared by every attempt.",
@@ -46,9 +58,19 @@ export const Budget = Schema.Struct({
 }).annotate({ identifier: "ProContract.Budget" })
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}
 
-const CandidatePath = RelativePath.check(
+export const CandidatePath = RelativePath.check(
   Schema.isPattern(/^(?![\\/])(?![A-Za-z]:[\\/])(?!.*(?:^|[\\/])\.\.(?:[\\/]|$)).+$/),
 )
+
+export const SubjectCoordinate = Schema.Struct({
+  hash: Schema.NonEmptyString,
+  specHash: Schema.NonEmptyString,
+  artifacts: Schema.Array(CandidatePath),
+}).annotate({
+  identifier: "ProContract.SubjectCoordinate",
+  description: "Exact candidate identity bound to the specification and declared artifact set it answers.",
+})
+export interface SubjectCoordinate extends Schema.Schema.Type<typeof SubjectCoordinate> {}
 
 export const ReplayCheck = Schema.Struct({
   argv: Schema.Array(Schema.NonEmptyString),
@@ -95,6 +117,7 @@ export type Evidence = typeof Evidence.Type
 
 export const Challenge = Schema.Struct({
   revision: PositiveInt,
+  specHash: Schema.NonEmptyString,
   subjectHash: Schema.NonEmptyString,
   evidenceHash: Schema.NonEmptyString,
   disclosure: Schema.Literals(["executor", "sealed"]),
@@ -107,6 +130,7 @@ export interface Challenge extends Schema.Schema.Type<typeof Challenge> {}
 export const Handoff = Schema.Struct({
   summary: Schema.NonEmptyString,
   uncertainties: Schema.Array(Schema.NonEmptyString),
+  subject: SubjectCoordinate.pipe(optional),
   subjectHash: Schema.NonEmptyString,
   replay: ReplayResult.pipe(optional),
   time: NonNegativeInt,

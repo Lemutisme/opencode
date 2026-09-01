@@ -140,7 +140,13 @@ export function DialogContracts(props: { scope?: string } = {}) {
   }
 
   async function decideRevision(contract: ProContractInfo, accept: boolean) {
-    const result = await sdk.client.v2.proContract.decideRevision({ contractID: contract.id, accept })
+    if (!contract.pendingRevision) return
+    const result = await sdk.client.v2.proContract.decideRevision({
+      contractID: contract.id,
+      revision: contract.revision,
+      specHash: contract.pendingRevision.specHash,
+      accept,
+    })
     if (result.error) {
       toast.show({ variant: "error", message: errorMessage(result.error) })
       return dialog.replace(() => <DialogContracts {...props} />)
@@ -150,7 +156,11 @@ export function DialogContracts(props: { scope?: string } = {}) {
   }
 
   async function resume(contract: ProContractInfo) {
-    const result = await sdk.client.v2.proContract.resume({ contractID: contract.id })
+    const result = await sdk.client.v2.proContract.resume({
+      contractID: contract.id,
+      revision: contract.revision,
+      specHash: contract.specHash,
+    })
     if (result.error) {
       toast.show({ variant: "error", message: errorMessage(result.error) })
       return dialog.replace(() => <DialogContracts {...props} />)
@@ -174,7 +184,12 @@ export function DialogContracts(props: { scope?: string } = {}) {
       dialog.replace(() => <DialogContracts {...props} />)
       return
     }
-    const result = await sdk.client.v2.proContract.release({ contractID: contract.id, reason: reason.trim() })
+    const result = await sdk.client.v2.proContract.release({
+      contractID: contract.id,
+      revision: contract.revision,
+      specHash: contract.specHash,
+      reason: reason.trim(),
+    })
     if (result.error) {
       toast.show({ variant: "error", message: errorMessage(result.error) })
       dialog.replace(() => <DialogContracts {...props} />)

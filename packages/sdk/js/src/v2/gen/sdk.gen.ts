@@ -133,6 +133,7 @@ import type {
   ProContractBudget,
   ProContractCapability,
   ProContractEvidence,
+  ProContractExecutionPolicyCoordinate,
   ProContractRequirement,
   ProContractResolution,
   ProContractTrigger,
@@ -7039,6 +7040,8 @@ export class ProContract extends HeyApiClient {
       id?: string
       scope?: string
       goal?: string
+      executionPolicy?: string
+      executionPolicyCoordinate?: ProContractExecutionPolicyCoordinate
       policy?: string
       brief?: string
       requires?: Array<ProContractRequirement>
@@ -7060,6 +7063,8 @@ export class ProContract extends HeyApiClient {
             { in: "body", key: "id" },
             { in: "body", key: "scope" },
             { in: "body", key: "goal" },
+            { in: "body", key: "executionPolicy" },
+            { in: "body", key: "executionPolicyCoordinate" },
             { in: "body", key: "policy" },
             { in: "body", key: "brief" },
             { in: "body", key: "requires" },
@@ -7183,6 +7188,7 @@ export class ProContract extends HeyApiClient {
     parameters: {
       contractID: string
       revision?: number
+      specHash?: string
       subjectHash?: string
       evidenceHash?: string
       disclosure?: "executor" | "sealed"
@@ -7197,6 +7203,7 @@ export class ProContract extends HeyApiClient {
           args: [
             { in: "path", key: "contractID" },
             { in: "body", key: "revision" },
+            { in: "body", key: "specHash" },
             { in: "body", key: "subjectHash" },
             { in: "body", key: "evidenceHash" },
             { in: "body", key: "disclosure" },
@@ -7227,6 +7234,8 @@ export class ProContract extends HeyApiClient {
   public decideRevision<ThrowOnError extends boolean = false>(
     parameters: {
       contractID: string
+      revision?: number
+      specHash?: string
       accept?: boolean
     },
     options?: Options<never, ThrowOnError>,
@@ -7237,6 +7246,8 @@ export class ProContract extends HeyApiClient {
         {
           args: [
             { in: "path", key: "contractID" },
+            { in: "body", key: "revision" },
+            { in: "body", key: "specHash" },
             { in: "body", key: "accept" },
           ],
         },
@@ -7264,6 +7275,8 @@ export class ProContract extends HeyApiClient {
   public release<ThrowOnError extends boolean = false>(
     parameters: {
       contractID: string
+      revision?: number
+      specHash?: string
       reason?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -7274,6 +7287,8 @@ export class ProContract extends HeyApiClient {
         {
           args: [
             { in: "path", key: "contractID" },
+            { in: "body", key: "revision" },
+            { in: "body", key: "specHash" },
             { in: "body", key: "reason" },
           ],
         },
@@ -7301,15 +7316,33 @@ export class ProContract extends HeyApiClient {
   public resume<ThrowOnError extends boolean = false>(
     parameters: {
       contractID: string
+      revision?: number
+      specHash?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "contractID" }] }])
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "contractID" },
+            { in: "body", key: "revision" },
+            { in: "body", key: "specHash" },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).post<V2ProContractResumeResponses, V2ProContractResumeErrors, ThrowOnError>(
       {
         url: "/api/contract/{contractID}/resume",
         ...options,
         ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
       },
     )
   }

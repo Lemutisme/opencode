@@ -151,6 +151,8 @@ describe("ProContract kernel", () => {
         type: "release",
         actor: upstreamDraft.issuer,
         contractID: upstreamID,
+        revision: 1,
+        specHash: upstreamDraft.specHash,
         reason: "replace upstream",
       }).decision,
     ).toEqual({ type: "rejected", reason: `contract is required by outstanding contract: ${contractID}` })
@@ -166,6 +168,8 @@ describe("ProContract kernel", () => {
       type: "resume",
       actor: upstreamDraft.issuer,
       contractID: upstreamID,
+      revision: 1,
+      specHash: upstreamDraft.specHash,
     })
     expect(resumed.decision).toEqual({ type: "accepted" })
     expect(resumed.state.contracts[upstreamID]).toMatchObject({ status: "dormant", revision: 1 })
@@ -183,6 +187,8 @@ describe("ProContract kernel", () => {
         type: "decide-revision",
         actor: upstreamDraft.issuer,
         contractID: upstreamID,
+        revision: 1,
+        specHash: ProContract.hashSpec(upstreamRevision),
         accept: true,
       }).decision,
     ).toEqual({ type: "rejected", reason: `contract is required by outstanding contract: ${contractID}` })
@@ -201,6 +207,8 @@ describe("ProContract kernel", () => {
       type: "release",
       actor: upstreamDraft.issuer,
       contractID: upstreamID,
+      revision: 1,
+      specHash: upstreamDraft.specHash,
       reason: "cancel upstream",
     })
     expect(
@@ -358,10 +366,22 @@ describe("ProContract kernel", () => {
         time: 0,
       }).decision,
     ).toEqual({ type: "rejected", reason: "contract has a pending revision" })
+    const stale = ProContract.transition(petitioned.state, {
+      type: "decide-revision",
+      actor: draft.issuer,
+      contractID,
+      revision: 1,
+      specHash: draft.specHash,
+      accept: true,
+    })
+    expect(stale.decision).toEqual({ type: "rejected", reason: "revision decision coordinate does not match" })
+    expect(stale.state).toBe(petitioned.state)
     const revised = ProContract.transition(petitioned.state, {
       type: "decide-revision",
       actor: draft.issuer,
       contractID,
+      revision: 1,
+      specHash: ProContract.hashSpec(nextSpec),
       accept: true,
     })
 
@@ -425,10 +445,21 @@ describe("ProContract kernel", () => {
         time: 1,
       }).decision,
     ).toEqual({ type: "rejected", reason: "contract is not active" })
+    const staleResume = ProContract.transition(escalated.state, {
+      type: "resume",
+      actor: draft.issuer,
+      contractID,
+      revision: 2,
+      specHash: draft.specHash,
+    })
+    expect(staleResume.decision).toEqual({ type: "rejected", reason: "resume coordinate does not match" })
+    expect(staleResume.state).toBe(escalated.state)
     const resumed = ProContract.transition(escalated.state, {
       type: "resume",
       actor: draft.issuer,
       contractID,
+      revision: 1,
+      specHash: draft.specHash,
     })
     const reactivated = ProContract.transition(resumed.state, {
       type: "activate",
@@ -468,9 +499,21 @@ describe("ProContract kernel", () => {
       type: "release",
       actor: draft.issuer,
       contractID,
+      revision: 1,
+      specHash: draft.specHash,
       reason: "no longer needed",
     })
     expect(released.state.contracts[contractID]).toMatchObject({ status: "released", escalation: undefined })
+    const staleRelease = ProContract.transition(escalated.state, {
+      type: "release",
+      actor: draft.issuer,
+      contractID,
+      revision: 1,
+      specHash: "stale-spec",
+      reason: "no longer needed",
+    })
+    expect(staleRelease.decision).toEqual({ type: "rejected", reason: "release coordinate does not match" })
+    expect(staleRelease.state).toBe(escalated.state)
   })
 
   test("carries blocked work into the next institutional attempt", () => {
@@ -548,6 +591,7 @@ describe("ProContract kernel", () => {
       contractID,
       challenge: {
         revision: 1,
+        specHash: draft.specHash,
         subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
@@ -561,6 +605,12 @@ describe("ProContract kernel", () => {
         challenge: { ...challenge.challenge, revision: 2 },
       }).decision,
     ).toEqual({ type: "rejected", reason: "challenge revision does not match" })
+    expect(
+      ProContract.transition(discharged.state, {
+        ...challenge,
+        challenge: { ...challenge.challenge, specHash: "different-spec" },
+      }).decision,
+    ).toEqual({ type: "rejected", reason: "challenge specification does not match" })
     expect(
       ProContract.transition(discharged.state, {
         ...challenge,
@@ -720,6 +770,7 @@ describe("ProContract kernel", () => {
       contractID: upstreamID,
       challenge: {
         revision: 1,
+        specHash: upstream.specHash,
         subjectHash: upstream.handoff.subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
@@ -748,7 +799,13 @@ describe("ProContract kernel", () => {
     const repair = (current: ProContract.State, id: ProContract.ID, nextSubject: string) => {
       const dormant =
         current.contracts[id]?.status === "escalated"
-          ? ProContract.transition(current, { type: "resume", actor: draft.issuer, contractID: id }).state
+          ? ProContract.transition(current, {
+              type: "resume",
+              actor: draft.issuer,
+              contractID: id,
+              revision: current.contracts[id].revision,
+              specHash: current.contracts[id].specHash,
+            }).state
           : current
       const contract = dormant.contracts[id]!
       const active = ProContract.transition(dormant, {
@@ -815,7 +872,14 @@ describe("ProContract kernel", () => {
       type: "challenge",
       actor: draft.issuer,
       contractID,
-      challenge: { revision: 1, subjectHash, evidenceHash: "sealed-witness", disclosure: "sealed", time: 2 },
+      challenge: {
+        revision: 1,
+        specHash: draft.specHash,
+        subjectHash,
+        evidenceHash: "sealed-witness",
+        disclosure: "sealed",
+        time: 2,
+      },
     })
     const activation = ProContract.transition(challenged.state, {
       type: "activate",
@@ -903,6 +967,11 @@ describe("ProContract kernel", () => {
         attestation: { ...discharge.attestation, evidenceHash: "replay-pass" },
       }).decision,
     ).toEqual({ type: "rejected", reason: "principal evidence must be independent of replay" })
+    expect(ready(true).state.contracts[contractID]?.handoff?.subject).toEqual({
+      hash: subjectHash,
+      specHash: replayDraft.specHash,
+      artifacts: [],
+    })
     expect(ProContract.transition(ready(true).state, discharge).state.contracts[contractID]?.status).toBe("discharged")
   })
 })
@@ -928,8 +997,18 @@ describe("ProContract ledger", () => {
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
-      yield* contracts.release({ contractID, reason: "no longer needed" })
-      const rejected = yield* contracts.release({ contractID, reason: "release twice" })
+      yield* contracts.release({
+        contractID,
+        revision: issued.contract!.revision,
+        specHash: issued.contract!.specHash,
+        reason: "no longer needed",
+      })
+      const rejected = yield* contracts.release({
+        contractID,
+        revision: issued.contract!.revision,
+        specHash: issued.contract!.specHash,
+        reason: "release twice",
+      })
       const history = yield* contracts.history({ contractID })
 
       expect(issued.frontier).toBe(0)
@@ -1005,8 +1084,10 @@ describe("ProContract ledger", () => {
           deliveryContractID: contractID,
           deliveryRevision: 1,
           subjectHash,
+          claimHash: ProContract.claimHash(spec),
           evaluatorHash: "evaluator-v1",
           passed: true,
+          defeatsClaim: false,
           disclosure: "sealed",
           summary: "secret score",
         },
@@ -1050,8 +1131,10 @@ describe("ProContract ledger", () => {
           deliveryContractID: contractID,
           deliveryRevision: 1,
           subjectHash,
+          claimHash: ProContract.claimHash(spec),
           evaluatorHash: "evaluator-v1",
           passed: false,
+          defeatsClaim: false,
           disclosure: "executor",
           summary: "behavior rejected",
         },
@@ -1065,6 +1148,68 @@ describe("ProContract ledger", () => {
       expect(delivery?.status).toBe("discharged")
       expect(delivery?.challenge).toBeUndefined()
       expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: true, outstanding: [] })
+    }),
+  )
+
+  it.effect("atomically restores responsibility when evaluation defeats the exact claim", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      const evaluation = yield* contracts.issueEvaluation({
+        deliveryContractID: contractID,
+        evaluatorHash: "evaluator-v1",
+        deadline: 100,
+      })
+      const evaluationID = ProContract.evaluationID(contractID, 1, "evaluator-v1")
+      expect(evaluation.contract?.spec.requires).toEqual([
+        { contractID, revision: 1, relation: "subject" },
+      ])
+      yield* contracts.activate(contractID, 1, 0)
+      yield* contracts.reportReady({
+        contractID,
+        revision: 1,
+        summary: "candidate complete",
+        uncertainties: [],
+        subjectHash,
+        time: 1,
+      })
+      yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
+
+      const settled = yield* contracts.settleEvaluation({
+        contractID: evaluationID,
+        evidenceHash: "claim-defeater",
+        time: 2,
+        report: {
+          deliveryContractID: contractID,
+          deliveryRevision: 1,
+          subjectHash,
+          claimHash: ProContract.claimHash(spec),
+          evaluatorHash: "evaluator-v1",
+          passed: false,
+          defeatsClaim: true,
+          disclosure: "executor",
+          summary: "Independent evidence defeats the settlement claim",
+        },
+      })
+
+      expect(settled.state.contracts[evaluationID]).toMatchObject({ status: "discharged" })
+      expect(settled.state.contracts[contractID]).toMatchObject({
+        status: "dormant",
+        challenge: {
+          specHash: ProContract.hashSpec(ProContract.normalizeSpec(spec)),
+          evidenceHash: "claim-defeater",
+        },
+      })
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({
+        quiet: false,
+        outstanding: [contractID],
+      })
+      const evaluationHistory = yield* contracts.history({ contractID: evaluationID })
+      const deliveryHistory = yield* contracts.history({ contractID })
+      expect(evaluationHistory.at(-1)?.seq).toBe(settled.frontier - 1)
+      expect(deliveryHistory.at(-1)?.command.type).toBe("challenge")
+      expect(deliveryHistory.at(-1)?.seq).toBe(settled.frontier)
+      expect(deliveryHistory.at(-1)?.previous_hash).toBe(evaluationHistory.at(-1)?.hash)
     }),
   )
 
@@ -1085,6 +1230,7 @@ describe("ProContract ledger", () => {
       const challenged = yield* contracts.challenge({
         contractID,
         revision: 1,
+        specHash: ProContract.hashSpec(ProContract.normalizeSpec(spec)),
         subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
@@ -1135,6 +1281,7 @@ describe("ProContract ledger", () => {
       const challenged = yield* contracts.challenge({
         contractID: upstreamID,
         revision: 1,
+        specHash: ProContract.hashSpec(ProContract.normalizeSpec(spec)),
         subjectHash: "upstream-subject",
         evidenceHash: "negative-witness",
         disclosure: "executor",
@@ -1496,6 +1643,9 @@ describe("OpenCode Contract binding", () => {
         executionPolicy: "Probe boundaries before changing the implementation.",
         nextActionAt: 0,
       })
+      expect(binding.executionPolicyCoordinate).toEqual(
+        ProContractOpenCode.policyCoordinate("Probe boundaries before changing the implementation."),
+      )
       yield* contracts.issue({
         id: contractID,
         scope: draft.scope,
@@ -1518,7 +1668,7 @@ describe("OpenCode Contract binding", () => {
           .pipe(Effect.orDie),
       ).toMatchObject({
         prompt: {
-          text: "Implement the exact approved task.\n\nExecution policy:\n\nProbe boundaries before changing the implementation.\n\nWhen the task is ready for independent verification, call contract_report_ready. If work is blocked, call contract_report_blocked. If the approved terms must change, call contract_propose_revision.",
+          text: "Implement the exact approved task.\n\nWhen the task is ready for independent verification, call contract_report_ready. If work is blocked, call contract_report_blocked. If the approved terms must change, call contract_propose_revision.",
         },
       })
       expect(wakeCalls).toEqual([binding.sessionID])
@@ -1603,6 +1753,7 @@ describe("OpenCode Contract binding", () => {
       yield* contracts.challenge({
         contractID,
         revision: 1,
+        specHash: issued.contract!.specHash,
         subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
@@ -1768,7 +1919,13 @@ describe("OpenCode Contract binding", () => {
       expect(paused).toMatchObject({ sessionID: attempt!.sessionID, attempts: 1, dispatched: false, nextActionAt: 1 })
       expect(paused?.promptID).not.toBe(attempt?.promptID)
 
-      yield* contracts.decideRevision({ contractID, accept: false })
+      const contract = yield* contracts.get(contractID)
+      yield* contracts.decideRevision({
+        contractID,
+        revision: contract!.revision,
+        specHash: contract!.pendingRevision!.specHash,
+        accept: false,
+      })
       const resumed = yield* bindings.claim(contractID, 1)
       expect(resumed).toMatchObject({ sessionID: attempt!.sessionID, attempts: 1, promptID: paused?.promptID })
     }),
@@ -2029,7 +2186,7 @@ describe("OpenCode Contract binding", () => {
       yield* bindings.reserveTurn(binding.sessionID, 1)
       yield* bindings.reserveAction(binding.sessionID, 1)
       yield* contracts.escalate({ contractID, revision: 1, reason: "manual review", time: 1 })
-      yield* contracts.resume(contractID)
+      yield* contracts.resume({ contractID, revision: 1, specHash: issued.contract!.specHash })
       yield* contracts.activate(contractID, 1, 2)
       const second = yield* bindings.claim(contractID, 2)
 

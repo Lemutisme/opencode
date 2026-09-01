@@ -304,9 +304,8 @@ The human-facing document is:
 ```text
 trigger          future condition that should restore attention
 goal             optimization objective shown to the executor
-policy           optional exact execution policy offered to future Contracts
 brief            issuer-authored context and stopping rule
-requires         exact upstream Contract revisions that must be evidenced first; one may be the execution policy
+requires         exact upstream Contract revisions and relation that must be evidenced first
 delegation       authority granted after activation
 budget           risk, cost, retry, and time bounds
 evidence.claim   exact proposition the evidence may settle
@@ -331,19 +330,15 @@ transaction that changes status. Upstream replacement cannot invalidate a live
 edge, and an unresolved wait becomes a visible escalation rather than silent
 quiescence.
 
-One `requires` edge may set `policy: true`. Its source must already be
-discharged with an attestation when the dependent is issued. The source
-Contract's exact `policy` is then rendered as the dependent executor's ratified
-policy together with its specification, subject, evidence, and attestation
-identities. The dependent `specHash` freezes that reference, revision cannot
-rewire it, and a later challenge follows the ordinary dependency closure. The
-policy guides how work is attempted; it cannot alter the dependent's goal,
-claim, authority, budget, or settlement rules.
-
-The source Contract's current `goal` remains distinct: it governs production,
-verification, or ratification of the policy candidate. This prevents the
-Policy Contract executor from being required to perform the future policy that
-it is only establishing for later dependents.
+Execution policy is not a Contract term or dependency kind. The OpenCode
+execution binding may carry advisory policy together with an independent
+`ExecutionPolicyCoordinate(policyHash, lineage, selectorHash,
+approvalReceipt)`. Its hash is captured from the exact projected text, Session
+rotation preserves it, and a retry with different policy provenance conflicts
+with the existing binding without changing Contract revision. The runner
+projects it as a separate system/developer policy fragment, never by appending
+it to the issuer's user message. Policy may change how an executor searches;
+it cannot alter goal, claim, authority, budget, evidence, or settlement.
 
 The kernel commits to the complete document by hash. The goal is necessarily
 informal; the verifier is its executable projection. Their gap is construct
@@ -377,16 +372,21 @@ principal intent
 ```
 
 When delivery evidence does not establish the optimization goal, compile two
-ordinary obligations. Issue a dependent Evaluation Contract immediately after
-the Delivery Contract, before execution completes. Its deterministic identity
-binds the delivery revision and evaluator hash. Delivery may discharge on exact
-artifact evidence, but the shared scope remains non-quiet until an external
-report accepts the same subject hash. A failed report challenges Delivery while
-Evaluation remains outstanding. This composition adds no lifecycle state:
+ordinary obligations. Issue an Evaluation Contract immediately after the
+Delivery Contract. Its deterministic identity binds the delivery revision and
+evaluator hash; its `subject` relation waits for an evidenced handoff without
+claiming that the truth of the report depends on continuing Delivery support.
+Every report binds the exact subject and `claimHash`. Producing an authentic
+failing score may discharge Evaluation without contradicting Delivery. Only a
+report that explicitly sets `defeatsClaim` may challenge that exact claim. The
+Evaluation discharge and challenge then commit atomically, leaving the report
+settled and the defeated duty outstanding. This composition adds no lifecycle
+state:
 
 ```text
-Delivery: artifact exists and reproduces
-Evaluation: exact artifact satisfies the behavioral claim
+Delivery: exact artifact exists and reproduces
+Evaluation: authentic report about the exact subject and claim exists
+Acceptance: optional separate duty whose claim states the required quality floor
 ```
 
 Compilation is an intentional compression boundary. The Contract cannot retain
@@ -806,10 +806,9 @@ the declared tolerance.
 `packages/opencode/script/pro-contract-rsi.ts` performs only this adjudication.
 It neither generates candidates nor runs benchmarks. External runners own task
 execution and utility normalization; an ordinary Evaluation Contract binds the
-resulting run-record hash and report hash. A Selection Contract may then expose
-the accepted candidate as `spec.policy`, with the candidate and Evaluation
-Contracts as requirements. Existing dependency invalidation retracts that
-selection if its evidence later loses support.
+resulting run-record hash and report hash. The output is a petition or
+certificate, not authoritative adoption. Current OpenCode has no incumbent
+register, `Adopt`, or `Rollback` transition.
 
 This is the smallest useful RSI boundary: arbitrary intelligence at candidate
 generation, deterministic comparison at promotion. It proves that one frozen
@@ -832,27 +831,13 @@ capability candidate must depend on a signed private Evaluation Contract from
 its training cohort; confirmation and OOD outcomes remain sealed until the
 candidate is frozen.
 
-A discharged policy becomes usable by a future Contract only through an
-explicit `requires` edge marked `policy: true`. This first retention boundary
-does not select the newest candidate or maintain a mutable global policy
-pointer. Principal selection remains explicit, failed candidates remain inert,
-and support loss automatically enters the existing dependency-remediation
-path.
-
-OpenCode may retain that explicit selection in location configuration as
-`contract_policy`. A new natural-language proposal inherits the configured
-edge unless its exact draft already names another policy. The inherited edge is
-shown at the ordinary permission boundary and becomes part of the new
-`specHash`; configuration never bypasses principal approval or kernel evidence
-checks. Removing or replacing the setting affects only future proposals. A
-challenged configured policy remains selected but fails new issuance closed
-until the principal clears or replaces it.
-
-The local `opencode contract policy` command is the principal promotion effect.
-It refuses candidates without a current handoff and attestation, writes only
-the exact Contract ID and revision to location configuration, and reports the
-bound specification, subject, evidence, and attestation identities. It does not
-evaluate candidates or infer a winner.
+A candidate policy may be supplied to one future execution binding only as
+advisory text with an exact `ExecutionPolicyCoordinate`; doing so is not
+promotion. Canonical retention requires a separate succession institution with
+one generation-numbered incumbent per scope and role, comparative evidence,
+compare-and-swap adoption, and defeat-driven rollback. Until that institution
+exists, failed candidates remain inert and every policy selection remains an
+explicit edge decision rather than inherited Contract truth.
 
 ## OpenCode design
 
