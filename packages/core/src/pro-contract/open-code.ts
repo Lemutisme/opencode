@@ -28,6 +28,10 @@ export type Binding = {
   readonly leaseOwner?: string
   readonly leaseExpiresAt?: number
   readonly attemptKey?: string
+  readonly lastFailure?: {
+    readonly kind: "authentication" | "quota" | "transient"
+    readonly fingerprint: string
+  }
 }
 
 export interface Interface {
@@ -61,6 +65,8 @@ export interface Interface {
     readonly reason: string
     readonly now: number
     readonly attempt: "same" | "new"
+    readonly delay?: number
+    readonly failure?: Binding["lastFailure"]
   }) => Effect.Effect<void>
   readonly reserveTurn: (sessionID: SessionSchema.ID, now: number) => Effect.Effect<boolean>
   readonly reserveAction: (sessionID: SessionSchema.ID, now: number) => Effect.Effect<boolean>
@@ -297,6 +303,7 @@ const layer = Layer.effect(
                   leaseOwner: owner,
                   leaseExpiresAt,
                   attemptKey: key,
+                  lastFailure: undefined,
                 }
                 yield* tx
                   .update(ProContractOpenCodeTable)
@@ -434,10 +441,11 @@ const layer = Layer.effect(
                       ...row.binding,
                       promptID: input.attempt === "same" ? SessionMessage.ID.create() : row.binding.promptID,
                       dispatched: false,
-                      nextActionAt: input.now + row.contract.spec.resolution.retryDelay,
+                      nextActionAt: input.now + Math.max(row.contract.spec.resolution.retryDelay, input.delay ?? 0),
                       leaseOwner: undefined,
                       leaseExpiresAt: undefined,
                       attemptKey: input.attempt === "new" ? "" : row.binding.attemptKey,
+                      lastFailure: input.failure,
                     },
                   })
                   .where(eq(ProContractOpenCodeTable.contract_id, input.contractID))

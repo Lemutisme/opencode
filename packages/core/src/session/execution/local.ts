@@ -10,6 +10,7 @@ import { ContextSnapshotDecodeError, MessageDecodeError } from "../error"
 import { SessionExecution } from "../execution"
 import { ProContractOpenCode } from "../../pro-contract/open-code"
 import { ProContract } from "../../pro-contract"
+import { Hash } from "../../util/hash"
 
 /** Current-process routing for implicit-local Locations. Future remote placement belongs here. */
 const layer = Layer.effect(
@@ -41,10 +42,16 @@ const layer = Layer.effect(
           Effect.exit,
         )
         const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
-        const terminalProviderError = error instanceof LLMError && !error.retryable
-        const lastAssistant = attempt && Exit.isSuccess(exit)
-          ? (yield* store.context(sessionID)).findLast((message) => message.type === "assistant")
-          : undefined
+        const recoverableProviderError =
+          error instanceof LLMError &&
+          ["Authentication", "QuotaExceeded", "Transport", "UnknownProvider", "InvalidProviderOutput"].includes(
+            error.reason._tag,
+          )
+        const terminalProviderError = error instanceof LLMError && !error.retryable && !recoverableProviderError
+        const lastAssistant =
+          attempt && Exit.isSuccess(exit)
+            ? (yield* store.context(sessionID)).findLast((message) => message.type === "assistant")
+            : undefined
         const unclassifiedProviderError = lastAssistant?.finish === "error"
         const replaceSession =
           (Exit.isSuccess(exit) && !unclassifiedProviderError) ||
@@ -57,15 +64,41 @@ const layer = Layer.effect(
             reason: "OpenCode provider returned a terminal error",
             time: yield* Clock.currentTimeMillis,
           })
-        else if (attempt)
+        else if (attempt) {
+          const now = yield* Clock.currentTimeMillis
+          const delay = recoverableProviderError
+            ? 60_000
+            : error instanceof LLMError && error.retryable
+              ? (error.retryAfterMs ?? 1_000)
+              : undefined
           yield* bindings.reschedule({
             contractID: attempt.contractID,
             revision: attempt.revision,
             promptID: attempt.promptID,
             reason: Exit.isSuccess(exit) ? "OpenCode execution ended without settlement" : "OpenCode execution failed",
-            now: yield* Clock.currentTimeMillis,
+            now,
             attempt: replaceSession ? "new" : "same",
+            delay,
+            failure:
+              error instanceof LLMError
+                ? {
+                    kind:
+                      error.reason._tag === "Authentication"
+                        ? "authentication"
+                        : error.reason._tag === "QuotaExceeded"
+                          ? "quota"
+                          : "transient",
+                    fingerprint: Hash.sha256(
+                      JSON.stringify([
+                        error.reason._tag,
+                        "status" in error.reason ? error.reason.status : undefined,
+                        "http" in error.reason ? error.reason.http?.response?.status : undefined,
+                      ]),
+                    ),
+                  }
+                : undefined,
           })
+        }
         if (Exit.isFailure(exit)) return yield* exit
         return undefined
       }),

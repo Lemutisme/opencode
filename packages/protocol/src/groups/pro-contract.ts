@@ -34,6 +34,10 @@ export const OpenCodeExecution = Schema.Struct({
   actionsUsed: NonNegativeInt,
   leaseOwner: Schema.NonEmptyString.pipe(optional),
   leaseExpiresAt: NonNegativeInt.pipe(optional),
+  lastFailure: Schema.Struct({
+    kind: Schema.Literals(["authentication", "quota", "transient"]),
+    fingerprint: Schema.NonEmptyString,
+  }).pipe(optional),
 }).annotate({ identifier: "ProContract.OpenCodeExecution" })
 
 export const ProContractGroup = HttpApiGroup.make("server.proContract")
