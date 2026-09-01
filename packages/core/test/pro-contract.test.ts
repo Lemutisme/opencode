@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { AuthenticationReason, LLMError, RateLimitReason } from "@opencode-ai/llm"
+import { AuthenticationReason, InvalidRequestReason, LLMError, RateLimitReason } from "@opencode-ai/llm"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ProContract } from "@opencode-ai/core/pro-contract"
@@ -1437,9 +1437,15 @@ const retryableFailure = new LLMError({
   method: "stream",
   reason: new RateLimitReason({ message: "Try later", retryAfterMs: 1_000 }),
 })
+const invalidRequestFailure = new LLMError({
+  module: "test",
+  method: "stream",
+  reason: new InvalidRequestReason({ message: "Unsupported parameter" }),
+})
 const terminalExecutionIt = makeTerminalExecutionIt(() => Effect.void)
 const terminalFailureExecutionIt = makeTerminalExecutionIt(() => Effect.fail(terminalFailure))
 const retryableFailureExecutionIt = makeTerminalExecutionIt(() => Effect.fail(retryableFailure))
+const invalidRequestExecutionIt = makeTerminalExecutionIt(() => Effect.fail(invalidRequestFailure))
 
 function makeTerminalExecutionIt(run: SessionRunner.Interface["run"]) {
   return testEffect(
@@ -1497,7 +1503,7 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
-  terminalFailureExecutionIt.effect("escalates a persisted terminal provider failure without rescheduling", () =>
+  terminalFailureExecutionIt.effect("preserves a credential failure for delayed recovery in the same attempt", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
@@ -1514,15 +1520,39 @@ describe("OpenCode Contract binding", () => {
       const attempt = yield* bindings.claim(contractID, 0)
 
       expect(yield* execution.resume(attempt!.sessionID).pipe(Effect.flip)).toBe(terminalFailure)
+      expect(yield* contracts.get(contractID)).toMatchObject({ status: "active" })
+      expect((yield* contracts.get(contractID))?.escalation).toBeUndefined()
+      expect(yield* bindings.get(contractID)).toMatchObject({
+        attempts: 1,
+        dispatched: false,
+        nextActionAt: 60_000,
+        turnsUsed: 0,
+        actionsUsed: 0,
+      })
+      expect((yield* bindings.get(contractID))?.promptID).not.toBe(attempt!.promptID)
+    }),
+  )
+
+  invalidRequestExecutionIt.effect("escalates a deterministic provider request failure", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const execution = yield* SessionExecution.Service
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const attempt = yield* bindings.claim(contractID, 0)
+
+      expect(yield* execution.resume(attempt!.sessionID).pipe(Effect.flip)).toBe(invalidRequestFailure)
       expect(yield* contracts.get(contractID)).toMatchObject({
         status: "escalated",
         escalation: { reason: "OpenCode provider returned a terminal error", time: 0 },
-      })
-      expect(yield* bindings.get(contractID)).toMatchObject({
-        attempts: 1,
-        turnsUsed: 0,
-        actionsUsed: 0,
-        promptID: attempt!.promptID,
       })
     }),
   )

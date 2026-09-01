@@ -3387,6 +3387,7 @@ export type ServerProContractIssueOutput = {
     readonly actionsUsed: number
     readonly leaseOwner?: string
     readonly leaseExpiresAt?: number
+    readonly lastFailure?: { readonly kind: "authentication" | "quota" | "transient"; readonly fingerprint: string }
   }
   readonly evaluation?: {
     readonly id: string
@@ -3708,6 +3709,7 @@ export type ServerProContractExecutionOutput = {
   readonly actionsUsed: number
   readonly leaseOwner?: string
   readonly leaseExpiresAt?: number
+  readonly lastFailure?: { readonly kind: "authentication" | "quota" | "transient"; readonly fingerprint: string }
 }
 
 export type ServerProContractAttestInput = {
