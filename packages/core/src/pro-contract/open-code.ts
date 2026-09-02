@@ -10,6 +10,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { ProContract } from "../pro-contract"
+import { formationFaultBarrier } from "./formation-fault"
 import { ProContractOpenCodeSessionTable, ProContractOpenCodeTable, ProContractTable } from "./sql"
 
 export type Binding = {
@@ -242,6 +243,7 @@ const layer = Layer.effect(
     return Service.of({
       owner,
       issue: Effect.fn("ProContractOpenCode.issue")(function* (input) {
+        yield* formationFaultBarrier("before_commit")
         const receipt = yield* contracts.issue({
           id: input.id,
           scope: input.scope,
@@ -249,6 +251,7 @@ const layer = Layer.effect(
           executor: "opencode",
         })
         if (receipt.decision.type === "rejected" || !receipt.contract) return receipt
+        yield* formationFaultBarrier("after_commit_before_binding")
         const execution = yield* create({
           contractID: receipt.contract.id,
           revision: receipt.contract.revision,
