@@ -1605,6 +1605,81 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
+  schedulerIt.effect("conserves duty and budgets across prompt and Session replacement", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const limited = {
+        ...spec,
+        budget: { turns: 3, actions: 3, deadline: 120_000 },
+        resolution: { maxAttempts: 1, retryDelay: 0 },
+      }
+      const issued = yield* contracts.issue({ id: contractID, scope: draft.scope, spec: limited, executor: "opencode" })
+      yield* bindings.create({
+        contractID,
+        revision: issued.contract!.revision,
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        nextActionAt: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      const history = yield* contracts.history({ contractID })
+      const first = yield* bindings.claim(contractID, 0)
+      if (!first) return yield* Effect.die("Initial binding was not claimed")
+      expect(yield* bindings.reserveTurn(first.sessionID, 1)).toBe(true)
+      expect(yield* bindings.reserveAction(first.sessionID, 1)).toBe(true)
+
+      yield* bindings.reschedule({
+        contractID,
+        revision: first.revision,
+        promptID: first.promptID,
+        reason: "Continue unfinished work",
+        now: 2,
+        attempt: "same",
+      })
+      expect(yield* bindings.reserveTurn(first.sessionID, 2)).toBe(false)
+      const continued = yield* bindings.claim(contractID, 2)
+      if (!continued) return yield* Effect.die("Continuation was not claimed")
+      expect(continued.promptID).not.toBe(first.promptID)
+      expect(continued).toMatchObject({ sessionID: first.sessionID, attempts: 1, turnsUsed: 1, actionsUsed: 1 })
+
+      yield* bindings.reschedule({
+        contractID,
+        revision: first.revision,
+        promptID: first.promptID,
+        reason: "Stale dispatch must not consume an attempt",
+        now: 3,
+        attempt: "new",
+      })
+      expect(yield* bindings.get(contractID)).toEqual(continued)
+      expect(yield* bindings.reserveTurn(continued.sessionID, 3)).toBe(true)
+      expect(yield* bindings.reserveAction(continued.sessionID, 3)).toBe(true)
+
+      const recovered = yield* bindings.claim(contractID, 30_002)
+      if (!recovered) return yield* Effect.die("Expired lease was not recovered")
+      expect(recovered.sessionID).not.toBe(continued.sessionID)
+      expect(recovered.promptID).not.toBe(continued.promptID)
+      expect(recovered).toMatchObject({ attempts: 1, turnsUsed: 2, actionsUsed: 2 })
+      expect(yield* bindings.reserveTurn(continued.sessionID, 30_003)).toBe(false)
+      expect(yield* bindings.reserveAction(continued.sessionID, 30_003)).toBe(false)
+      expect(yield* contracts.history({ contractID })).toEqual(history)
+      expect(yield* contracts.get(contractID)).toMatchObject({
+        status: "active",
+        revision: 1,
+        specHash: issued.contract!.specHash,
+        spec: limited,
+      })
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: false, outstanding: [contractID] })
+
+      expect(yield* bindings.reserveTurn(recovered.sessionID, 30_003)).toBe(true)
+      expect(yield* bindings.reserveAction(recovered.sessionID, 30_003)).toBe(true)
+      expect(yield* bindings.reserveTurn(recovered.sessionID, 30_004)).toBe(false)
+      expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, turnsUsed: 3, actionsUsed: 3 })
+      expect(yield* contracts.get(contractID)).toMatchObject({ status: "escalated" })
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({ quiet: false, outstanding: [contractID] })
+    }),
+  )
+
   schedulerIt.effect("escalates a due OpenCode contract with no execution binding", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service
