@@ -7039,6 +7039,7 @@ export class ProContract extends HeyApiClient {
       id?: string
       scope?: string
       goal?: string
+      executionPolicy?: string
       policy?: string
       brief?: string
       requires?: Array<ProContractRequirement>
@@ -7060,6 +7061,7 @@ export class ProContract extends HeyApiClient {
             { in: "body", key: "id" },
             { in: "body", key: "scope" },
             { in: "body", key: "goal" },
+            { in: "body", key: "executionPolicy" },
             { in: "body", key: "policy" },
             { in: "body", key: "brief" },
             { in: "body", key: "requires" },

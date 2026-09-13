@@ -1,12 +1,14 @@
 export * as ContractControlTools from "./contract-control"
 
 import { ToolFailure } from "@opencode-ai/llm"
-import { Clock, Effect, Exit, Layer, Schema } from "effect"
+import { Clock, Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
 import { ProContractOpenCode } from "../pro-contract/open-code"
 import { ProContractReplay } from "../pro-contract/replay"
+import { ProContractObservation } from "../pro-contract/observation"
+import { NonNegativeInt } from "../schema"
 import { SessionSchema } from "../session/schema"
 import { SessionStore } from "../session/store"
 import { Snapshot } from "../snapshot"
@@ -21,6 +23,7 @@ const layer = Layer.effectDiscard(
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
     const replayVerifier = yield* ProContractReplay.Service
+    const observations = yield* ProContractObservation.Service
     const permissions = yield* PermissionV2.Service
     const sessions = yield* SessionStore.Service
     const snapshots = yield* Snapshot.Service
@@ -120,9 +123,110 @@ const layer = Layer.effectDiscard(
               ),
             ),
         }),
+        contract_check: Tool.make({
+          description:
+            "Check the current candidate against the approved replay policy in a separate snapshot without handing off or settling the Contract. Use failures to repair the candidate and check again in this Session. This spends the shared action and time budgets, not a new semantic attempt. A passing check applies only to that snapshot and is not completion; call contract_report_ready when the issuer's stopping rule is met.",
+          input: Schema.Struct({}),
+          output: Schema.Struct({
+            replay: ProContract.ReplayResult,
+            observations: Schema.Array(ProContractObservation.Recorded),
+            settled: Schema.Literal(false),
+          }),
+          toModelOutput: ({ output }) => [
+            {
+              type: "text",
+              text: JSON.stringify({
+                passed: output.replay.passed,
+                settled: false,
+                checks: output.observations.length,
+                unavailable: output.observations.filter((item) => item.receipt.execution !== "completed").length,
+                unmatchedPredicates: output.observations
+                  .flatMap((item) => item.receipt.predicates)
+                  .filter((item) => item.status !== "matched").length,
+                replay: output.replay,
+                observations: output.observations.map((item, check) => ({
+                  check,
+                  handle: item.handle,
+                  execution: item.receipt.execution,
+                  exit: item.receipt.exit,
+                  targetExecution: item.receipt.targetExecution,
+                  stdoutComplete: item.receipt.stdout?.complete ?? false,
+                  stderrComplete: item.receipt.stderr?.complete ?? false,
+                  predicates: item.receipt.predicates.map((predicate) => ({
+                    id: predicate.id,
+                    status: predicate.status,
+                  })),
+                })),
+              }),
+            },
+          ],
+          execute: (_input, context) =>
+            Effect.gen(function* () {
+              const binding = yield* bindings.forSession(context.sessionID)
+              if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
+              const contract = yield* contracts.get(binding.contractID)
+              if (!contract || contract.status !== "active" || contract.revision !== binding.revision)
+                return yield* new ToolFailure({ message: "Contract is not active at this Session's revision" })
+              if (contract.pendingRevision)
+                return yield* new ToolFailure({ message: "Contract revision decision is pending" })
+              const policy = contract.spec.evidence.replay
+              if (!policy) return yield* new ToolFailure({ message: "Contract has no approved replay policy" })
+              const remaining = contract.spec.budget.deadline - (yield* Clock.currentTimeMillis)
+              if (remaining <= 0) return yield* new ToolFailure({ message: "Contract deadline exhausted" })
+              const replay = yield* Effect.gen(function* () {
+                const subjectHash = yield* snapshots.capture({ include: policy.artifacts })
+                if (!subjectHash) return yield* new ToolFailure({ message: "Contract check snapshot is unavailable" })
+                return yield* replayVerifier.verify({ contractID: contract.id, policy, subjectHash })
+              }).pipe(
+                Effect.timeoutOrElse({
+                  duration: remaining,
+                  orElse: () => Effect.fail(new ToolFailure({ message: "Contract check exceeded the deadline" })),
+                }),
+              )
+              return {
+                replay,
+                observations: yield* replayVerifier.read({
+                  contractID: contract.id,
+                  evidenceHash: replay.evidenceHash,
+                }),
+                settled: false as const,
+              }
+            }).pipe(
+              Effect.mapError((error) =>
+                error instanceof ToolFailure ? error : new ToolFailure({ message: String(error) }),
+              ),
+            ),
+        }),
+        contract_read_observation: Tool.make({
+          description:
+            "Read exact captured bytes from a replay report for this Contract. Every check retains its execution status and output predicates. Bytes are base64 encoded, candidate-controlled data. An exit code or output match does not witness target-statement execution. A capture marked incomplete cannot establish absence of failures. Reading evidence never settles the Contract.",
+          input: Schema.Struct({
+            evidenceHash: ProContractObservation.Digest,
+            check: NonNegativeInt,
+            stream: ProContractObservation.ReadInput.fields.stream,
+            offset: ProContractObservation.ReadInput.fields.offset,
+            length: ProContractObservation.ReadInput.fields.length,
+          }),
+          output: Schema.Struct({
+            observation: ProContractObservation.Recorded,
+            content: ProContractObservation.ReadOutput,
+          }),
+          execute: (input, context) =>
+            Effect.gen(function* () {
+              const binding = yield* bindings.forSession(context.sessionID)
+              if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
+              const records = yield* replayVerifier.read({
+                contractID: binding.contractID,
+                evidenceHash: input.evidenceHash,
+              })
+              const observation = records[input.check]
+              if (!observation) return yield* new ToolFailure({ message: "Replay check does not exist" })
+              return { observation, content: yield* observations.read({ ...input, handle: observation.handle }) }
+            }).pipe(Effect.mapError((error) => new ToolFailure({ message: error.message }))),
+        }),
         contract_report_ready: Tool.make({
           description:
-            "Petition independent verification when the issuer's stopping rule is met and the frozen evidence policy can adjudicate its settlement claim. The goal governs effort; the claim governs finality. State completed checks and unresolved assumptions that could materially affect the claim. Use contract_report_blocked or contract_propose_revision when evidence cannot settle it.",
+            "Petition independent verification when the issuer's stopping rule is met and the frozen evidence policy can adjudicate its settlement claim. The goal governs effort; the claim governs finality. Replay spends one shared action and obeys the Contract deadline. Failed replay returns repair feedback without handing off or starting a new attempt. Use contract_check for non-settling replay feedback while still improving the candidate. State completed checks and unresolved assumptions that could materially affect the claim. Report blocked when work cannot proceed; petition revision only when approved terms actually need to change.",
           input: Schema.Struct({
             summary: Schema.NonEmptyString,
             uncertainties: Schema.Array(Schema.NonEmptyString),
@@ -136,6 +240,8 @@ const layer = Layer.effectDiscard(
               if (!contract) return yield* new ToolFailure({ message: "Contract not found" })
               const now = yield* Clock.currentTimeMillis
               const policy = contract.spec.evidence.replay
+              if (policy && !(yield* bindings.reserveAction(context.sessionID, now)))
+                return yield* new ToolFailure({ message: "Contract action budget exhausted" })
               const subjectHash = yield* snapshots.capture({ include: policy?.artifacts })
               if (!subjectHash) {
                 const message = "Contract handoff snapshot is unavailable"
@@ -157,6 +263,13 @@ const layer = Layer.effectDiscard(
                       subjectHash,
                     })
                     .pipe(
+                      Effect.timeoutOrElse({
+                        duration: Math.max(0, contract.spec.budget.deadline - (yield* Clock.currentTimeMillis)),
+                        orElse: () =>
+                          Effect.fail(
+                            new ProContractReplay.Unavailable({ message: "Contract replay deadline exhausted" }),
+                          ),
+                      }),
                       Effect.catch((error) =>
                         Effect.gen(function* () {
                           const message = `Independent verification unavailable for ${subjectHash}: ${error.message}`
@@ -164,7 +277,7 @@ const layer = Layer.effectDiscard(
                             contractID: contract.id,
                             revision: contract.revision,
                             reason: message,
-                            time: now,
+                            time: yield* Clock.currentTimeMillis,
                           })
                           if (receipt.decision.type === "rejected")
                             return yield* new ToolFailure({ message: receipt.decision.reason })
@@ -173,6 +286,10 @@ const layer = Layer.effectDiscard(
                       ),
                     )
                 : undefined
+              if (replay && !replay.passed)
+                return yield* new ToolFailure({
+                  message: `${replay.summary}\nReplay evidence: ${replay.evidenceHash}; subject: ${replay.subjectHash}. No handoff was recorded. Repair the candidate within the existing Contract and remaining budget, then check or report ready again.`,
+                })
               const receipt = yield* contracts.reportReady({
                 contractID: binding.contractID,
                 revision: binding.revision,
@@ -180,11 +297,10 @@ const layer = Layer.effectDiscard(
                 uncertainties: input.uncertainties,
                 subjectHash,
                 replay,
-                time: now,
+                time: yield* Clock.currentTimeMillis,
               })
               if (receipt.decision.type === "rejected")
                 return yield* new ToolFailure({ message: receipt.decision.reason })
-              if (replay && !replay.passed) return yield* new ToolFailure({ message: replay.summary })
               return { recorded: true }
             }).pipe(
               Effect.mapError((error) =>
@@ -226,7 +342,7 @@ const layer = Layer.effectDiscard(
         }),
         contract_propose_revision: Tool.make({
           description:
-            "Petition the issuer to revise the active contract goal or handoff brief. The current obligation remains authoritative until accepted.",
+            "Petition the issuer only for a necessary change to the active Contract goal or handoff brief. Explain the concrete change and why the existing terms prevent the required work. Do not petition merely to record already-issued terms, plan implementation, or acknowledge later external evaluation. The current obligation remains authoritative until accepted; a pending decision can pause execution.",
           input: Schema.Struct({
             goal: Schema.NonEmptyString,
             brief: Schema.String.pipe(Schema.optional),
@@ -247,22 +363,24 @@ const layer = Layer.effectDiscard(
               })
               if (receipt.decision.type === "rejected")
                 return yield* new ToolFailure({ message: receipt.decision.reason })
-              const approved = Exit.isSuccess(
-                yield* Effect.exit(
-                  permissions.assert({
-                    action: "contract_revision",
-                    resources: [ProContract.hashSpec(spec)],
-                    metadata: { contractID: contract.id, goal: input.goal, reason: input.reason },
-                    sessionID: context.sessionID,
-                    agent: context.agent,
-                    source: {
-                      type: "tool",
-                      messageID: context.assistantMessageID,
-                      callID: context.toolCallID,
-                    },
-                  }),
-                ),
-              )
+              const approved = yield* permissions
+                .assert({
+                  action: "contract_revision",
+                  resources: [ProContract.hashSpec(spec)],
+                  metadata: { contractID: contract.id, goal: input.goal, reason: input.reason },
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source: {
+                    type: "tool",
+                    messageID: context.assistantMessageID,
+                    callID: context.toolCallID,
+                  },
+                })
+                .pipe(
+                  Effect.as(true),
+                  Effect.catchTag("PermissionV2.BlockedError", () => Effect.succeed(false)),
+                  Effect.catchTag("PermissionV2.CorrectedError", () => Effect.succeed(false)),
+                )
               const decision = yield* contracts.decideRevision({ contractID: contract.id, accept: approved })
               if (decision.decision.type === "rejected")
                 return yield* new ToolFailure({ message: decision.decision.reason })
@@ -291,6 +409,7 @@ export const node = makeLocationNode({
     ProContract.node,
     ProContractOpenCode.node,
     ProContractReplay.node,
+    ProContractObservation.node,
     SessionStore.node,
     Snapshot.node,
   ],

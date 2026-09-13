@@ -80,7 +80,18 @@ precondition without adding task or benchmark concepts to the kernel.
 
 ### Handoff and replay
 
-`contract_report_ready` captures a content-addressed Snapshot before replay.
+`contract_check` exposes replay as a non-settling search operation when a replay
+policy is configured. It captures a subject and stores the replay report, but
+the replay result does not invoke a kernel transition or replace the Session. Failed
+checks are repair feedback, not a consumed semantic attempt. Successful checks
+are observations, not completion or authority to attest. The ordinary tool
+action reservation and Contract deadline bound these checks; no additional
+budget is granted.
+
+`contract_report_ready` reserves one shared action when replay is configured,
+then captures a content-addressed Snapshot before replay. Its replay is bounded
+by the remaining Contract deadline. Reporting blocked or requesting a genuine
+revision remains a control operation; it is not a substitute for a free replay.
 Replay materializes that exact subject in a fresh temporary tree, rejects paths
 that escape the candidate root, runs checks serially with timeouts and bounded
 output capture, and inspects protected files and artifacts after execution.
@@ -91,14 +102,26 @@ Replay report version 1 commits:
 - pass or fail;
 - argv, relative cwd, expected and actual exit;
 - stdout and stderr hashes plus truncation flags;
+- bounded, escaped, candidate-controlled output excerpts for failed checks;
 - protected-file existence, observed hash, and expected hash;
 - required-artifact existence and file hash when applicable.
 
 The JSON report is hashed and stored under
-`<data>/pro-contract/replay/<evidenceHash>.json`. A failed completed replay is
-negative evidence. Failure to materialize the Snapshot or start a check is an
-institutional availability failure and escalates instead of fabricating an
-executor failure.
+`<data>/pro-contract/replay/<evidenceHash>.json`. At `contract_report_ready`, a
+failed completed replay returns its evidence and subject hashes as repair feedback
+without invoking kernel `report-ready`, creating a handoff, or rotating the
+semantic attempt. The Contract stays active only while its existing budget and
+other lifecycle conditions permit execution. Explicit kernel negative replay
+and principal challenges retain their existing semantics. Failure to materialize
+the Snapshot or start a check is an institutional availability failure and
+escalates instead of fabricating an executor failure. At `contract_check`,
+these outcomes return diagnostic feedback without adjudication. Handoff always
+replays its own captured subject rather than trusting an earlier check.
+
+Diagnostic excerpts redact values of sensitive-looking environment variables
+before bounding the text. They are non-authoritative candidate output, not
+verifier instructions. This is not a confidentiality boundary: unknown secrets
+printed from files or arbitrary external sources cannot be reliably recognized.
 
 The identifier hashes compact `JSON.stringify(report)` bytes. `writeJson`
 stores an equivalent pretty JSON value, so the raw stored-file hash need not
@@ -142,17 +165,17 @@ responsibility instead of erasing history.
 
 ## Trusted inputs and open semantics
 
-| Input or boundary | Current owner | Institution checks | Institution does not check |
-| --- | --- | --- | --- |
-| Goal, claim, replay policy, protected hashes | Principal at proposal/issue | Canonical `specHash`, shape, finite replay structure, immutable revision rules | Whether the claim is useful, the policy is sufficient, protected bytes are a sound oracle, or the stopping rule is valid |
-| `subjectHash` at executor handoff | Location Snapshot service | Replay and attestation must name it exactly | That the configured Location contains every real-world object relevant to the claim |
-| Replay process and report | In-process replay service plus host | Frozen policy/subject, path containment, exits, file observations, content hash | Network isolation, clean environment, credential isolation, image/toolchain identity, verifier executable identity, signatures, or task-level adequacy |
-| Principal `evidenceHash` | Authenticated HTTP caller or local CLI | Nonempty, exact attestation coordinates, issuer role, distinct from replay hash | Report availability, bytes matching the hash, report schema, pass rule, verifier origin, signature, independence beyond hash inequality, or whether it settles `evidence.claim` |
-| Challenge `evidenceHash`, disclosure, summary | Authenticated HTTP caller or local CLI | Current revision/subject, issuer role, disclosure/summary consistency | Report availability, evaluator authenticity, or truth of the negative result |
-| `evaluatorHash` and `EvaluationReport` | External evaluation adapter | Evaluation ID/dependency/executor coordinates and delivery revision/subject | That the hash names the running evaluator, the report came from it, or its `passed` value follows a frozen rule |
-| HTTP principal identity | Principal mutation middleware plus server-wide Basic auth | Mutation is denied when auth is absent; one configured username/password is checked when enabled | Per-verifier roles, distinct principal credentials, report signatures, or separation among authenticated callers |
-| Local CLI principal identity | Process and filesystem boundary | Local service constructs fixed `local-owner` role | OS-level separation from an executor that can reach the same control process or state |
-| Database ledger | Local institution process | Transactional state/event/head consistency while writing | External checkpoint, signature, remote witness, or tamper detection after a trusted database rewrite |
+| Input or boundary                             | Current owner                                             | Institution checks                                                                               | Institution does not check                                                                                                                                                      |
+| --------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal, claim, replay policy, protected hashes  | Principal at proposal/issue                               | Canonical `specHash`, shape, finite replay structure, immutable revision rules                   | Whether the claim is useful, the policy is sufficient, protected bytes are a sound oracle, or the stopping rule is valid                                                        |
+| `subjectHash` at executor handoff             | Location Snapshot service                                 | Replay and attestation must name it exactly                                                      | That the configured Location contains every real-world object relevant to the claim                                                                                             |
+| Replay process and report                     | In-process replay service plus host                       | Frozen policy/subject, path containment, exits, file observations, content hash                  | Network isolation, clean environment, credential isolation, image/toolchain identity, verifier executable identity, signatures, or task-level adequacy                          |
+| Principal `evidenceHash`                      | Authenticated HTTP caller or local CLI                    | Nonempty, exact attestation coordinates, issuer role, distinct from replay hash                  | Report availability, bytes matching the hash, report schema, pass rule, verifier origin, signature, independence beyond hash inequality, or whether it settles `evidence.claim` |
+| Challenge `evidenceHash`, disclosure, summary | Authenticated HTTP caller or local CLI                    | Current revision/subject, issuer role, disclosure/summary consistency                            | Report availability, evaluator authenticity, or truth of the negative result                                                                                                    |
+| `evaluatorHash` and `EvaluationReport`        | External evaluation adapter                               | Evaluation ID/dependency/executor coordinates and delivery revision/subject                      | That the hash names the running evaluator, the report came from it, or its `passed` value follows a frozen rule                                                                 |
+| HTTP principal identity                       | Principal mutation middleware plus server-wide Basic auth | Mutation is denied when auth is absent; one configured username/password is checked when enabled | Per-verifier roles, distinct principal credentials, report signatures, or separation among authenticated callers                                                                |
+| Local CLI principal identity                  | Process and filesystem boundary                           | Local service constructs fixed `local-owner` role                                                | OS-level separation from an executor that can reach the same control process or state                                                                                           |
+| Database ledger                               | Local institution process                                 | Transactional state/event/head consistency while writing                                         | External checkpoint, signature, remote witness, or tamper detection after a trusted database rewrite                                                                            |
 
 An explicitly unsecured server permits read-only Contract observation but
 denies principal mutations. Embedded routes are likewise unable to mutate

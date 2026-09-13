@@ -4,11 +4,13 @@ import { makeLocationNode } from "../effect/app-node"
 import { Layer } from "effect"
 import { BashTool } from "./bash"
 import { ApplyPatchTool } from "./apply-patch"
+import { ActionFusionTool } from "./action-fusion"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { QuestionTool } from "./question"
 import { ReadTool } from "./read"
+import { SessionObservationTools } from "./observation"
 import { SkillTool } from "./skill"
 import { TodoWriteTool } from "./todowrite"
 import { WebFetchTool } from "./webfetch"
@@ -33,12 +35,14 @@ export const node = makeLocationNode({
   layer: Layer.empty,
   deps: [
     ApplyPatchTool.node,
+    ActionFusionTool.configuredNode,
     BashTool.node,
     EditTool.node,
     GlobTool.node,
     GrepTool.node,
     QuestionTool.node,
     ReadTool.node,
+    SessionObservationTools.configuredNode,
     SkillTool.node,
     TodoWriteTool.node,
     WebFetchTool.node,

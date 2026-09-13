@@ -1994,11 +1994,6 @@ export type Config = {
             }
       }
   instructions?: Array<string>
-  contract_policy?: {
-    contractID: string
-    revision: number
-    policy: true
-  }
   layout?: LayoutConfig
   permission?: PermissionConfig
   tools?: {
@@ -6161,7 +6156,6 @@ export type ProjectCopyCopy = {
 export type ProContractRequirement = {
   contractID: string
   revision: number
-  policy?: true
 }
 
 export type ProContractTrigger =
@@ -6193,6 +6187,12 @@ export type ProContractBudget = {
 export type ProContractReplayCheck = {
   argv: Array<string>
   cwd?: string
+  stdin?: string
+  observations?: Array<{
+    id: string
+    stream: "stdout" | "stderr"
+    hash: string
+  }>
   /**
    * Timeout in milliseconds (1,000 to 600,000).
    */
@@ -6223,7 +6223,6 @@ export type ProContractResolution = {
 export type ProContractSpec = {
   trigger: ProContractTrigger
   goal: string
-  policy?: string
   /**
    * Self-contained handoff brief. Preserve user-stated quality criteria. For open-ended optimization, state the evaluation protocol, required exploration, known quality floor, stopping rule, and assumptions; expose missing criteria instead of inventing them.
    */
@@ -6296,6 +6295,7 @@ export type ProContractOpenCodeExecution = {
   revision: number
   location: LocationRef
   model: ModelRef
+  executionPolicy?: string
   sessionID: string
   promptID: string
   dispatched: boolean
@@ -13784,6 +13784,7 @@ export type V2ProContractIssueData = {
     id?: string
     scope: string
     goal: string
+    executionPolicy?: string
     policy?: string
     brief?: string
     requires?: Array<ProContractRequirement>

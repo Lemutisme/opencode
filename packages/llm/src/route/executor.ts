@@ -309,6 +309,7 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
     readonly message: string
     readonly kind?: string | undefined
     readonly request?: HttpClientRequest.HttpClientRequest | undefined
+    readonly cause?: unknown
   }) =>
     new LLMError({
       module: "RequestExecutor",
@@ -316,6 +317,7 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
       reason: new TransportReason({
         message: input.message,
         kind: input.kind,
+        ...transportCause(input.cause),
         url: input.request ? redactUrl(input.request.url) : undefined,
         http: input.request ? new HttpContext({ request: requestDetails(input.request, redactedNames) }) : undefined,
       }),
@@ -325,7 +327,7 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
     return transportError({ message: error.message, kind: "Timeout" })
   }
   if (!HttpClientError.isHttpClientError(error)) {
-    return transportError({ message: "HTTP transport failed" })
+    return transportError({ message: "HTTP transport failed", cause: error })
   }
   const request = "request" in error ? error.request : undefined
   if (error.reason._tag === "TransportError") {
@@ -333,6 +335,7 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
       message: error.reason.description ?? "HTTP transport failed",
       kind: error.reason._tag,
       request,
+      cause: error.reason.cause,
     })
   }
   return transportError({
@@ -340,6 +343,18 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
     kind: error.reason._tag,
     request,
   })
+}
+
+// Preserve useful transport identity without copying arbitrary secret-bearing
+// exception messages, URLs, headers, or stacks into the durable transcript.
+const transportCause = (cause: unknown) => {
+  if (typeof cause !== "object" || cause === null) return {}
+  const safe = (value: unknown) =>
+    typeof value === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value) ? value : undefined
+  return {
+    causeName: safe("name" in cause ? cause.name : undefined),
+    causeCode: safe("code" in cause ? cause.code : undefined),
+  }
 }
 
 const retryDelay = (error: LLMError, attempt: number) => {
@@ -356,7 +371,14 @@ const retryStatusFailures = <A, R>(
   attempt = 0,
 ): Effect.Effect<A, LLMError, R> =>
   Effect.catchTag(effect, "LLM.Error", (error): Effect.Effect<A, LLMError, R> => {
-    if (!error.retryable || retries <= 0) return Effect.fail(error)
+    // A transport failure may already have reached the provider. Let the
+    // caller account for that attempt and decide how to continue durably.
+    if (
+      !error.retryable ||
+      (error.reason._tag !== "RateLimit" && error.reason._tag !== "ProviderInternal") ||
+      retries <= 0
+    )
+      return Effect.fail(error)
     return retryDelay(error, attempt).pipe(
       Effect.flatMap((delay) => Effect.sleep(delay)),
       Effect.flatMap(() => retryStatusFailures(effect, retries - 1, attempt + 1)),

@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Fiber, Layer, Random, Ref } from "effect"
 import * as TestClock from "effect/testing/TestClock"
-import { Headers, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { Headers, HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { LLM, LLMError } from "../src"
 import { LLMClient, RequestExecutor } from "../src/route"
 import * as OpenAIChat from "../src/protocols/openai-chat"
@@ -73,6 +73,41 @@ const expectLLMError = (error: unknown) => {
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
 
 describe("RequestExecutor", () => {
+  it.effect("returns recoverable transport cause without replaying an ambiguous wire attempt", () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const error = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(
+          RequestExecutor.layer.pipe(
+            Layer.provide(
+              Layer.succeed(
+                HttpClient.HttpClient,
+                HttpClient.make(() =>
+                  Ref.update(attempts, (count) => count + 1).pipe(
+                    Effect.andThen(
+                      Effect.fail(
+                        new HttpClientError.HttpClientError({
+                          reason: new HttpClientError.TransportError({
+                            request,
+                            cause: Object.assign(new Error("Bearer secret"), { code: "ECONNRESET" }),
+                          }),
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Effect.flip,
+      )
+      expect(yield* Ref.get(attempts)).toBe(1)
+      expect(error.retryable).toBe(true)
+      expect(error.reason).toMatchObject({ _tag: "Transport", causeName: "Error", causeCode: "ECONNRESET" })
+      expect(JSON.stringify(error)).not.toContain("Bearer secret")
+    }),
+  )
   it.effect("classifies context overflow responses", () =>
     Effect.gen(function* () {
       const executor = yield* RequestExecutor.Service

@@ -123,11 +123,13 @@ export class TransportReason extends Schema.Class<TransportReason>("LLM.Error.Tr
   _tag: Schema.tag("Transport"),
   message: Schema.String,
   kind: Schema.optional(Schema.String),
+  causeName: Schema.optional(Schema.String),
+  causeCode: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),
   http: Schema.optional(HttpContext),
 }) {
   get retryable() {
-    return false
+    return true
   }
 }
 
@@ -141,7 +143,7 @@ export class InvalidProviderOutputReason extends Schema.Class<InvalidProviderOut
   providerMetadata: Schema.optional(ProviderMetadata),
 }) {
   get retryable() {
-    return false
+    return true
   }
 }
 
