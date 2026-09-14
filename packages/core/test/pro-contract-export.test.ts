@@ -15,12 +15,171 @@ import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Snapshot } from "@opencode-ai/core/snapshot"
+import { Hash } from "@opencode-ai/core/util/hash"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(Layer.empty)
 
 describe("ProContract export", () => {
+  it.live("exports the frozen subject even when the candidate no longer has Git metadata", () =>
+    fixture((input) =>
+      Effect.gen(function* () {
+        const exports = yield* ProContractExport.Service
+        yield* Effect.promise(async () => {
+          await fs.rm(path.join(input.project, ".git"), { recursive: true })
+          await Bun.write(path.join(input.project, "artifact.txt"), "live replacement\n")
+        })
+        expect(yield* exports.materialize(input)).toMatchObject({ subjectHash: input.subjectHash })
+        expect(yield* Effect.promise(() => Bun.file(path.join(input.directory, "artifact.txt")).text())).toBe(
+          "frozen\n",
+        )
+      }),
+    ),
+  )
+
+  it.live("does not replace an invalid retained snapshot reference with a live tree", () =>
+    fixture((input) =>
+      Effect.gen(function* () {
+        const exports = yield* ProContractExport.Service
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(
+              input.root,
+              "snapshot",
+              "references",
+              Hash.fast(input.project),
+              `${Hash.fast(input.subjectHash)}.json`,
+            ),
+            '{"version":1,"snapshot":"different-subject"}',
+          ),
+        )
+        const result = yield* exports.materialize(input).pipe(Effect.flip)
+        expect(result).toBeInstanceOf(Snapshot.Error)
+        expect(yield* Effect.promise(() => Bun.file(path.join(input.directory, "artifact.txt")).exists())).toBe(false)
+      }),
+    ),
+  )
+
+  for (const field of ["snapshot", "directory"] as const) {
+    it.live(`rejects a complete retained reference with a different ${field}`, () =>
+      fixture((input) =>
+        Effect.gen(function* () {
+          const exports = yield* ProContractExport.Service
+          yield* Effect.promise(async () => {
+            const target = path.join(
+              input.root,
+              "snapshot",
+              "references",
+              Hash.fast(input.project),
+              `${Hash.fast(input.subjectHash)}.json`,
+            )
+            const reference: Record<string, unknown> = await Bun.file(target).json()
+            await Bun.write(
+              target,
+              JSON.stringify({ ...reference, [field]: field === "snapshot" ? "a".repeat(40) : input.root }),
+            )
+          })
+          const result = yield* exports.materialize(input).pipe(Effect.flip)
+          expect(result).toBeInstanceOf(Snapshot.Error)
+          expect(result.message).toContain("identity does not match")
+          expect(yield* Effect.promise(() => Bun.file(path.join(input.directory, "artifact.txt")).exists())).toBe(false)
+        }),
+      ),
+    )
+  }
+
+  it.live("rejects a retained repository symlink escaping native storage", () =>
+    fixture((input) =>
+      Effect.gen(function* () {
+        const exports = yield* ProContractExport.Service
+        yield* Effect.promise(async () => {
+          const reference: { repository: { gitDirectory: string } } = await Bun.file(
+            path.join(
+              input.root,
+              "snapshot",
+              "references",
+              Hash.fast(input.project),
+              `${Hash.fast(input.subjectHash)}.json`,
+            ),
+          ).json()
+          const outside = path.join(input.root, "outside-storage")
+          await fs.rename(reference.repository.gitDirectory, outside)
+          await fs.symlink(outside, reference.repository.gitDirectory)
+        })
+        const result = yield* exports.materialize(input).pipe(Effect.flip)
+        expect(result).toBeInstanceOf(Snapshot.Error)
+        expect(result.message).toContain("escapes native storage")
+        expect(yield* Effect.promise(() => Bun.file(path.join(input.directory, "artifact.txt")).exists())).toBe(false)
+      }),
+    ),
+  )
+
+  it.live("does not publish a repeated capture over a damaged existing reference", () =>
+    fixture((input) =>
+      Effect.gen(function* () {
+        const snapshots = yield* Snapshot.Service
+        const target = path.join(
+          input.root,
+          "snapshot",
+          "references",
+          Hash.fast(input.project),
+          `${Hash.fast(input.subjectHash)}.json`,
+        )
+        const original = yield* Effect.promise(() => Bun.file(target).text())
+        yield* Effect.promise(() => Bun.write(target, "damaged reference"))
+        expect(yield* snapshots.capture()).toBeUndefined()
+        expect(yield* Effect.promise(() => Bun.file(target).text())).toBe("damaged reference")
+        yield* Effect.promise(() => Bun.write(target, original))
+        expect(yield* snapshots.capture()).toBe(input.subjectHash)
+      }),
+    ),
+  )
+
+  it.live("exports the original handoff after the candidate Git repository is recreated", () =>
+    fixture((input) =>
+      Effect.gen(function* () {
+        const exports = yield* ProContractExport.Service
+        const contracts = yield* ProContract.Service
+        const history = yield* contracts.history({ contractID: input.contractID })
+        yield* Effect.promise(async () => {
+          const original = (await $`git rev-list --max-parents=0 HEAD`.cwd(input.project).quiet()).stdout
+            .toString()
+            .trim()
+          const storage = path.join(input.root, "snapshot", original, `${Hash.fast(input.project)}.owned`)
+          // Isolate namespace loss from borrowed objects: this seed is already self-contained.
+          await $`git --git-dir ${storage} --work-tree ${input.project} repack -a`.cwd(input.project).quiet()
+          await fs.rm(path.join(storage, "objects", "info", "alternates"), { force: true })
+          expect(
+            (await $`git --git-dir ${storage} cat-file -t ${input.subjectHash}`.cwd(input.project).quiet()).stdout
+              .toString()
+              .trim(),
+          ).toBe("tree")
+          await fs.rm(path.join(input.project, ".git"), { recursive: true })
+          await Bun.write(path.join(input.project, "artifact.txt"), "replacement repository\n")
+          await $`git init`.cwd(input.project).quiet()
+          await $`git -c user.name=Recreated -c user.email=new@opencode.test add .`.cwd(input.project).quiet()
+          await $`git -c user.name=Recreated -c user.email=new@opencode.test -c commit.gpgsign=false commit -m recreated`
+            .cwd(input.project)
+            .quiet()
+          expect(
+            (await $`git rev-list --max-parents=0 HEAD`.cwd(input.project).quiet()).stdout.toString().trim(),
+          ).not.toBe(original)
+          expect(
+            (await $`git --git-dir ${storage} cat-file -t ${input.subjectHash}`.cwd(input.project).quiet()).stdout
+              .toString()
+              .trim(),
+          ).toBe("tree")
+        })
+        expect(yield* exports.materialize(input)).toMatchObject({ subjectHash: input.subjectHash })
+        expect(yield* Effect.promise(() => Bun.file(path.join(input.directory, "artifact.txt")).text())).toBe(
+          "frozen\n",
+        )
+        expect(yield* contracts.history({ contractID: input.contractID })).toEqual(history)
+      }),
+    ),
+  )
+
   it.live("exports the frozen subject without an executor or a valid model catalog", () =>
     fixture((input) =>
       Effect.gen(function* () {
@@ -193,7 +352,11 @@ function fixture(
     contractID: ProContract.ID
     directory: AbsolutePath
     subjectHash: Snapshot.ID
-  }) => Effect.Effect<void, unknown, ProContractExport.Service | ProContract.Service | ProContractOpenCode.Service>,
+  }) => Effect.Effect<
+    void,
+    unknown,
+    ProContractExport.Service | ProContract.Service | ProContractOpenCode.Service | Snapshot.Service
+  >,
 ) {
   return Effect.acquireUseRelease(
     Effect.promise(() => tmpdir()),
