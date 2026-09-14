@@ -6170,14 +6170,8 @@ export type ProContractTrigger =
 export type ProContractCapability = string
 
 export type ProContractBudget = {
-  /**
-   * Exact provider-turn ceiling shared by every attempt.
-   */
-  turns: number
-  /**
-   * Exact tool-action ceiling shared by every attempt.
-   */
-  actions: number
+  turns?: number
+  actions?: number
   /**
    * Absolute Unix timestamp in milliseconds.
    */

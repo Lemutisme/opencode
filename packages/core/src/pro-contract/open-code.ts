@@ -163,7 +163,7 @@ const layer = Layer.effect(
                 }
               const used = kind === "turn" ? row.binding.turnsUsed : row.binding.actionsUsed
               const limit = kind === "turn" ? row.contract.spec.budget.turns : row.contract.spec.budget.actions
-              if (used >= limit)
+              if (limit !== undefined && used >= limit)
                 return {
                   allowed: false,
                   escalation: {

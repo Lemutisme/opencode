@@ -1808,6 +1808,65 @@ describe("OpenCode Contract binding", () => {
     }),
   )
 
+  schedulerIt.effect(
+    "meters deadline-only work beyond historical ceilings and preserves its deadline on recovery",
+    () =>
+      Effect.gen(function* () {
+        activeSessions.clear()
+        const contracts = yield* ProContract.Service
+        const bindings = yield* ProContractOpenCode.Service
+        const scheduler = yield* ProContractScheduler.Service
+        const deadline = 21_600_000
+        yield* bindings.issue({
+          id: contractID,
+          scope: draft.scope,
+          spec: { ...spec, budget: { deadline } },
+          location: { directory: AbsolutePath.make("/project") },
+          model: executionModel,
+          now: 0,
+        })
+        yield* contracts.activate(contractID, 1, 0)
+        const first = yield* bindings.claim(contractID, 0)
+        if (!first) return yield* Effect.die("Initial binding was not claimed")
+        const reservations = yield* Effect.forEach(
+          Array.from({ length: 4_001 }, (_, index) => index),
+          (index) =>
+            Effect.gen(function* () {
+              const action = yield* bindings.reserveAction(first.sessionID, 1)
+              const turn = index < 1_001 ? yield* bindings.reserveTurn(first.sessionID, 1) : true
+              return action && turn
+            }),
+        )
+        expect(reservations.every(Boolean)).toBe(true)
+        expect(yield* bindings.get(contractID)).toMatchObject({ turnsUsed: 1_001, actionsUsed: 4_001 })
+        expect((yield* contracts.get(contractID))?.spec.budget).toEqual({ deadline })
+
+        const recovered = yield* bindings.claim(contractID, 30_001)
+        if (!recovered) return yield* Effect.die("Expired lease was not recovered")
+        expect(recovered.sessionID).not.toBe(first.sessionID)
+        expect(recovered).toMatchObject({ turnsUsed: 1_001, actionsUsed: 4_001, attempts: 1 })
+        expect(yield* bindings.reserveTurn(first.sessionID, 30_002)).toBe(false)
+        expect(yield* bindings.reserveAction(first.sessionID, 30_002)).toBe(false)
+        expect(yield* bindings.reserveTurn(recovered.sessionID, 30_002)).toBe(true)
+        expect(yield* bindings.reserveAction(recovered.sessionID, 30_002)).toBe(true)
+        activeSessions.add(recovered.sessionID)
+        yield* bindings.heartbeat(activeSessions, deadline - 1)
+        expect(yield* bindings.reserveTurn(recovered.sessionID, deadline - 1)).toBe(true)
+        expect(yield* bindings.reserveAction(recovered.sessionID, deadline - 1)).toBe(true)
+        expect(yield* bindings.reserveTurn(recovered.sessionID, deadline)).toBe(false)
+        expect(yield* bindings.reserveAction(recovered.sessionID, deadline)).toBe(false)
+        yield* TestClock.setTime(deadline)
+        yield* scheduler.runOnce()
+        expect(yield* bindings.get(contractID)).toMatchObject({ turnsUsed: 1_003, actionsUsed: 4_003 })
+        expect(yield* contracts.get(contractID)).toMatchObject({
+          status: "escalated",
+          spec: { budget: { deadline } },
+          escalation: { reason: "OpenCode deadline exhausted", time: deadline },
+        })
+        expect(yield* bindings.claim(contractID, deadline)).toBeUndefined()
+      }),
+  )
+
   schedulerIt.effect("enforces turn and action budgets atomically", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service

@@ -358,6 +358,48 @@ const providerUnavailable = () =>
     reason: new TransportReason({ message: "Provider unavailable" }),
   })
 
+const setupContractSession = Effect.fn(function* (budget: ProContract.Spec["budget"]) {
+  yield* setup
+  const contracts = yield* ProContract.Service
+  const bindings = yield* ProContractOpenCode.Service
+  const session = yield* SessionV2.Service
+  const registry = yield* ToolRegistry.Service
+  yield* registry.register({
+    read: Tool.make({
+      description: "Read deterministic fixture input",
+      input: Schema.Struct({ text: Schema.String }),
+      output: Schema.Struct({ text: Schema.String }),
+      execute: (input) =>
+        Effect.gen(function* () {
+          executions.push(input.text)
+          activeToolExecutions++
+          if (toolExecutionGate) yield* Deferred.await(toolExecutionGate)
+          return input
+        }).pipe(Effect.ensuring(Effect.sync(() => activeToolExecutions--))),
+    }),
+  })
+  const contractID = ProContract.ID.create()
+  yield* bindings.issue({
+    id: contractID,
+    scope: "runner",
+    spec: {
+      ...ProContract.defaultSpec("Exercise the approved Contract budget", 0),
+      budget,
+      authority: ["filesystem.read"],
+    },
+    location: { directory: AbsolutePath.make("/project") },
+    model: ModelV2.Ref.make({ id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") }),
+    now: 0,
+  })
+  yield* contracts.activate(contractID, 1, 0)
+  const binding = yield* bindings.claim(contractID, 0)
+  if (!binding) return yield* Effect.die("Contract binding was not claimed")
+  yield* session.create({ id: binding.sessionID, location: binding.location, model: binding.model })
+  requests.length = 0
+  executions.length = 0
+  return binding
+})
+
 const setupOverflowRecovery = Effect.gen(function* () {
   yield* setup
   const session = yield* SessionV2.Service
@@ -3293,6 +3335,122 @@ describe("SessionRunnerLLM", () => {
           ],
         },
       ])
+    }),
+  )
+
+  it.effect("keeps deadline-only Contract tools available beyond generic agent steps", () =>
+    Effect.gen(function* () {
+      const binding = yield* setupContractSession({ deadline: 21_600_000 })
+      const session = yield* SessionV2.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((editor) =>
+        editor.update(AgentV2.ID.make("build"), (agent) => {
+          agent.steps = 2
+        }),
+      )
+      yield* session.prompt({
+        sessionID: binding.sessionID,
+        prompt: Prompt.make({ text: "Continue until the approved task is complete" }),
+        resume: false,
+      })
+      responses = [
+        ...["first", "second"].map((text) => [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: `call-${text}`, name: "read", input: { text } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ]),
+        fragmentFixture("text", "contract-done", ["Complete"]).completeEvents,
+      ]
+      const runner = yield* SessionRunner.Service
+      yield* runner.run({ sessionID: binding.sessionID, force: true })
+      expect(requests).toHaveLength(3)
+      expect(executions).toEqual(["first", "second"])
+      expect(requests.every((request) => request.toolChoice === undefined)).toBe(true)
+      expect(requests.every((request) => request.tools.some((tool) => tool.name === "read"))).toBe(true)
+      expect(requests.flatMap(systemTexts).join("\n")).not.toContain("Settlement window active")
+      expect(yield* bindings.get(binding.contractID)).toMatchObject({ turnsUsed: 3, actionsUsed: 2 })
+    }),
+  )
+
+  it.effect("interrupts a deadline-only provider stream at the original Contract deadline", () =>
+    Effect.gen(function* () {
+      const binding = yield* setupContractSession({ deadline: 1_000 })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({
+        sessionID: binding.sessionID,
+        prompt: Prompt.make({ text: "Bound the provider by the approved deadline" }),
+        resume: false,
+      })
+      responseStream = Stream.never
+      const runner = yield* SessionRunner.Service
+      const run = yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.forkChild)
+      while (requests.length === 0) yield* Effect.yieldNow
+      yield* TestClock.adjust(1_000)
+      const exit = yield* Fiber.await(run)
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      yield* runner.run({ sessionID: binding.sessionID, force: true })
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect("interrupts in-flight tools at the original Contract deadline after the provider finishes", () =>
+    Effect.gen(function* () {
+      const binding = yield* setupContractSession({ deadline: 1_000 })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({
+        sessionID: binding.sessionID,
+        prompt: Prompt.make({ text: "Bound tool settlement by the same deadline" }),
+        resume: false,
+      })
+      toolExecutionGate = yield* Deferred.make<void>()
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "call-deadline", name: "read", input: { text: "blocked" } }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      const runner = yield* SessionRunner.Service
+      const run = yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.forkChild)
+      while (executions.length === 0) yield* Effect.yieldNow
+      yield* TestClock.adjust(1_000)
+      const exit = yield* Fiber.await(run)
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(activeToolExecutions).toBe(0)
+      expect(requests).toHaveLength(1)
+      expect(yield* session.context(binding.sessionID)).toMatchObject([
+        { type: "user" },
+        {
+          type: "assistant",
+          content: [{ type: "tool", id: "call-deadline", state: { status: "error" } }],
+        },
+      ])
+    }),
+  )
+
+  it.effect("interrupts Contract compaction at the original deadline before another provider turn", () =>
+    Effect.gen(function* () {
+      const binding = yield* setupContractSession({ deadline: 1_000 })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({
+        sessionID: binding.sessionID,
+        prompt: Prompt.make({ text: "Detailed contract context ".repeat(250) }),
+        resume: false,
+      })
+      currentModel = compactModel
+      responseStream = Stream.never
+      const runner = yield* SessionRunner.Service
+      const run = yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.forkChild)
+      while (requests.length === 0) yield* Effect.yieldNow
+      expect(userTexts(requests[0]!)[0]).toContain("Create a new anchored summary")
+      yield* TestClock.adjust(1_000)
+      const exit = yield* Fiber.await(run)
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.context(binding.sessionID)).some((message) => message.type === "compaction")).toBe(false)
+      yield* runner.run({ sessionID: binding.sessionID, force: true })
+      expect(requests).toHaveLength(1)
     }),
   )
 

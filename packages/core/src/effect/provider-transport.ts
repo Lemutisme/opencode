@@ -62,8 +62,23 @@ export function providerFetch(socket: string): typeof fetch {
           response.rawHeaders.forEach((value, index) => {
             if (index % 2 === 0) headers.append(value, response.rawHeaders[index + 1])
           })
+          const reader = response.statusCode === 204 || response.statusCode === 304
+            ? undefined
+            : Readable.toWeb(response).getReader()
+          // Bridge Node and DOM stream declarations without buffering the response or losing cancellation.
+          const stream = reader
+            ? new ReadableStream<Uint8Array>({
+                async pull(controller) {
+                  const chunk = await reader.read()
+                  if (chunk.done) return controller.close()
+                  if (!(chunk.value instanceof Uint8Array)) throw new TypeError("Provider transport requires byte chunks")
+                  controller.enqueue(chunk.value)
+                },
+                cancel: (reason) => reader.cancel(reason),
+              })
+            : null
           resolve(
-            new Response(response.statusCode === 204 || response.statusCode === 304 ? null : Readable.toWeb(response), {
+            new Response(stream, {
               status: response.statusCode,
               statusText: response.statusMessage,
               headers,

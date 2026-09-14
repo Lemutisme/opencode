@@ -2,7 +2,17 @@
 
 用户于 2026-09-13 指示：“最好以后也不要设置1000 turn的限制，只有6小时的限制”。
 
-状态：已确认为后续实验要求；尚未实现为 runner/runtime 可执行配置。本次只记录要求与检查结果，不修改任何在跑实验。
+状态：2026-09-14 已在独立 `deadline-only` 工作树移植并验证预算支持；不修改历史冻结实验。
+
+## 本次实现
+
+OpenCode 基于 `7a1142404`（其运行时修改文件与 Luna/Terra 冻结修复版本相同），只移植可选 turns/actions、计量预约、Session step/settlement window 和期限中止相关改动，并修复 Node/DOM 字节流类型桥接。没有引入质量门槛、差分工具、参考工具增强或新的搜索 policy。
+
+配套 runner 为 `/home/duozhou/ProgramBench-deadline-only`，基于同样已核对的 `985ad9e`。YAML 中 `provider_turns: null`、`procontract_actions: null` 明确表示无累计上限，Contract payload 省略这两个字段。可信网关绑定原始 issue 的绝对 deadline，重启不得重新获得期限。旧有限预算继续受限。
+
+已完成 Schema、Core、runner 机制测试，包括 3001 次网关请求、3001 条消息计量与重载、跨旧 turn/action 边界、到期拒绝与在途请求中止。客户端和 legacy SDK 由生成脚本更新。构建、小样本与启动证据在 `/home/duozhou/run-artifacts/programbench-sol-xhigh-6h-20260914`。
+
+这不是所有历史故障均已修复的声明：大验证 JSON、评测结果尺寸和测试未运行等问题仍可能发生。没有改写既有统计口径或历史失败。
 
 ## 默认条件
 

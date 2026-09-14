@@ -1,7 +1,7 @@
 export * as SessionCompaction from "./compaction"
 
 import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@opencode-ai/llm"
-import { DateTime, Effect, Stream } from "effect"
+import { Clock, DateTime, Effect, Stream } from "effect"
 import type { Config } from "../config"
 import type { EventV2 } from "../event"
 import { SessionEvent } from "./event"
@@ -13,6 +13,7 @@ const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const SUMMARY_OUTPUT_TOKENS = 4_096
+const MAX_SUMMARY_REQUEST_MS = 15 * 60 * 1_000
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Objective
@@ -69,6 +70,7 @@ type Input = {
   readonly entries: readonly Entry[]
   readonly model: Model
   readonly request: LLMRequest
+  readonly deadline?: number
 }
 
 const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
@@ -190,6 +192,9 @@ export const make = (dependencies: Dependencies) => {
       reason: "auto",
     })
 
+    const remaining =
+      input.deadline === undefined ? MAX_SUMMARY_REQUEST_MS : input.deadline - (yield* Clock.currentTimeMillis)
+    if (remaining <= 0) return yield* Effect.interrupt
     const chunks: string[] = []
     let failed = false
     const summarized = yield* dependencies.llm
@@ -202,10 +207,15 @@ export const make = (dependencies: Dependencies) => {
         }),
       )
       .pipe(
+        Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
         Stream.runForEach((event) => {
           if (LLMEvent.is.providerError(event)) failed = true
           if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
           return Effect.void
+        }),
+        Effect.timeoutOrElse({
+          duration: Math.min(MAX_SUMMARY_REQUEST_MS, remaining),
+          orElse: () => Effect.interrupt,
         }),
         Effect.as(true),
         Effect.catchTag("LLM.Error", () => Effect.succeed(false)),

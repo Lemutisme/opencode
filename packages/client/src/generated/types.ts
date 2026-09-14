@@ -2827,7 +2827,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -2862,7 +2862,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -2897,7 +2897,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -2932,7 +2932,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -2967,7 +2967,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3002,7 +3002,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3037,7 +3037,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3072,7 +3072,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3107,7 +3107,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3142,7 +3142,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3177,7 +3177,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3212,7 +3212,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3247,7 +3247,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3282,7 +3282,7 @@ export type ServerProContractIssueInput = {
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
     readonly authority?: ReadonlyArray<string> | null
-    readonly budget?: { readonly turns: number; readonly actions: number; readonly deadline: number } | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
     readonly evidence?: {
       readonly type: "principal"
       readonly claim?: string
@@ -3317,7 +3317,7 @@ export type ServerProContractIssueOutput = {
       readonly brief: string
       readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
       readonly authority: ReadonlyArray<string>
-      readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+      readonly budget: { readonly turns?: number; readonly actions?: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
         readonly claim?: string
@@ -3375,7 +3375,7 @@ export type ServerProContractIssueOutput = {
         readonly brief: string
         readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
         readonly authority: ReadonlyArray<string>
-        readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+        readonly budget: { readonly turns?: number; readonly actions?: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
           readonly claim?: string
@@ -3434,7 +3434,7 @@ export type ServerProContractListOutput = {
       readonly brief: string
       readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
       readonly authority: ReadonlyArray<string>
-      readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+      readonly budget: { readonly turns?: number; readonly actions?: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
         readonly claim?: string
@@ -3492,7 +3492,7 @@ export type ServerProContractListOutput = {
         readonly brief: string
         readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
         readonly authority: ReadonlyArray<string>
-        readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+        readonly budget: { readonly turns?: number; readonly actions?: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
           readonly claim?: string
@@ -3545,7 +3545,7 @@ export type ServerProContractGetOutput = {
       readonly brief: string
       readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
       readonly authority: ReadonlyArray<string>
-      readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+      readonly budget: { readonly turns?: number; readonly actions?: number; readonly deadline: number }
       readonly evidence: {
         readonly type: "principal"
         readonly claim?: string
@@ -3603,7 +3603,7 @@ export type ServerProContractGetOutput = {
         readonly brief: string
         readonly requires: ReadonlyArray<{ readonly contractID: string; readonly revision: number }>
         readonly authority: ReadonlyArray<string>
-        readonly budget: { readonly turns: number; readonly actions: number; readonly deadline: number }
+        readonly budget: { readonly turns?: number; readonly actions?: number; readonly deadline: number }
         readonly evidence: {
           readonly type: "principal"
           readonly claim?: string

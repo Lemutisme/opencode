@@ -36,11 +36,11 @@ export const Capability = Schema.NonEmptyString.annotate({
 export type Capability = typeof Capability.Type
 
 export const Budget = Schema.Struct({
-  turns: PositiveInt.annotate({
-    description: "Exact provider-turn ceiling shared by every attempt.",
+  turns: PositiveInt.pipe(optional).annotate({
+    description: "Exact provider-turn ceiling shared by every attempt. Omit for no cumulative turn limit.",
   }),
-  actions: PositiveInt.annotate({
-    description: "Exact tool-action ceiling shared by every attempt.",
+  actions: PositiveInt.pipe(optional).annotate({
+    description: "Exact tool-action ceiling shared by every attempt. Omit for no cumulative action limit.",
   }),
   deadline: NonNegativeInt.annotate({ description: "Absolute Unix timestamp in milliseconds." }),
 }).annotate({ identifier: "ProContract.Budget" })

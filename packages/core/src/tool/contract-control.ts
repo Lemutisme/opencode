@@ -85,7 +85,7 @@ const layer = Layer.effectDiscard(
                     executionPolicy ? `Execution policy: ${executionPolicy}` : undefined,
                     `Trigger: ${JSON.stringify(spec.trigger)}`,
                     `Authority: ${spec.authority.join(", ")}`,
-                    `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
+                    `Budget: ${spec.budget.turns ?? "unbounded"} turns, ${spec.budget.actions ?? "unbounded"} actions, deadline ${spec.budget.deadline}`,
                     `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
                     `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                     `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,

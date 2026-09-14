@@ -8,7 +8,7 @@
 
 - User preference (2026-09-13): future experiments have a six-hour per-instance wall-clock budget only, with no cumulative provider-turn, tool-action, request-count, or monetary budget cap unless the user explicitly requests one. A six-hour ceiling is not a requirement to keep a completed task busy.
 - Do not change budgets, source, or configuration of a running/frozen cohort. The existing Terra Max run retains its original six-hour / 1000-turn coordinates.
-- The current frozen runner/runtime does not yet implement deadline-only execution. Before launching a future cohort, remove the count ceilings across configuration, Contract/Session admission, gateway, and usage/reporting; do not simulate unlimited execution with a large finite sentinel. Verify continuation beyond the former limits and termination at the original deadline. See `specs/programbench-deadline-only.md`.
+- This worktree implements optional Contract count ceilings for deadline-only execution. Before launching a future cohort, verify matching support across configuration, Contract/Session admission, gateway, and usage/reporting; do not simulate unlimited execution with a large finite sentinel. Verify continuation beyond the former limits and termination at the original deadline. See `specs/programbench-deadline-only.md`.
 - Preserve network/credential isolation, explicit cancellation, bounded individual operations, infrastructure fault guards, complete accounting, and all historical experiment artifacts. Label deadline-only cohorts separately from historical six-hour / 1000-turn cohorts.
 
 ## Branch Names
