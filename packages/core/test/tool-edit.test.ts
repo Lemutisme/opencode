@@ -381,6 +381,89 @@ describe("EditTool", () => {
     ),
   )
 
+  for (const replaceAll of [false, true]) {
+    for (const replacement of ["$$", "$&", "$`", "$'", "$1", "$<name>"]) {
+      it.live(`inserts literal ${replacement} with replaceAll=${replaceAll}`, () =>
+        Effect.acquireUseRelease(
+          Effect.promise(() => tmpdir()),
+          (tmp) => {
+            reset()
+            const target = path.join(tmp.path, "literal.txt")
+            const before = replaceAll ? "prefix\nbefore\nmiddle\nbefore\nsuffix\n" : "prefix\nbefore\nsuffix\n"
+            const expected = replaceAll
+              ? `prefix\n${replacement}\nmiddle\n${replacement}\nsuffix\n`
+              : `prefix\n${replacement}\nsuffix\n`
+            return Effect.promise(() => fs.writeFile(target, before)).pipe(
+              Effect.andThen(
+                withTool(tmp.path, (registry) =>
+                  settleTool(
+                    registry,
+                    call({ path: "literal.txt", oldString: "before", newString: replacement, replaceAll }),
+                  ),
+                ),
+              ),
+              Effect.andThen((settled) =>
+                Effect.gen(function* () {
+                  expect(settled.result).toEqual({
+                    type: "text",
+                    value: `Edited file successfully: literal.txt\nReplacements: ${replaceAll ? 2 : 1}\n\`\`\`diff\n-before\n+${replacement}\n\`\`\``,
+                  })
+                  expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe(expected)
+                  expect(settled.output?.structured).toMatchObject({
+                    replacements: replaceAll ? 2 : 1,
+                    files: [{ patch: expect.stringContaining(`+${replacement}\n`) }],
+                  })
+                  expect(writes).toHaveLength(1)
+                }),
+              ),
+            )
+          },
+          (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+        ),
+      )
+    }
+
+    it.live(`preserves literal shell text, BOM and CRLF with replaceAll=${replaceAll}`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          const target = path.join(tmp.path, "validate.sh")
+          const before = replaceAll ? "\uFEFFbefore\r\nrest\r\nbefore\r\nrest\r\n" : "\uFEFFbefore\r\nrest\r\n"
+          const block = "printf '%s' $'literal\\n'\r\nrest\r\n"
+          return Effect.promise(() => fs.writeFile(target, before)).pipe(
+            Effect.andThen(
+              withTool(tmp.path, (registry) =>
+                settleTool(
+                  registry,
+                  call({
+                    path: "validate.sh",
+                    oldString: "before\nrest",
+                    newString: "printf '%s' $'literal\\n'\nrest",
+                    replaceAll,
+                  }),
+                ),
+              ),
+            ),
+            Effect.andThen((settled) =>
+              Effect.gen(function* () {
+                expect(settled.result).toEqual({
+                  type: "text",
+                  value: `Edited file successfully: validate.sh\nReplacements: ${replaceAll ? 2 : 1}\n\`\`\`diff\n-before\n-rest\n+printf '%s' $'literal\\n'\n+rest\n\`\`\``,
+                })
+                expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe(
+                  replaceAll ? `\uFEFF${block}${block}` : `\uFEFF${block}`,
+                )
+                expect(writes).toHaveLength(1)
+              }),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+  }
+
   it.live("rejects an in-place content change after matching but before conditional commit", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
