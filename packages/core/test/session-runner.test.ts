@@ -2675,6 +2675,13 @@ describe("SessionRunnerLLM", () => {
         callID: "call-pending-interrupted",
         name: "echo",
       })
+      yield* events.publish(SessionEvent.Tool.Input.Ended, {
+        sessionID,
+        timestamp: yield* DateTime.now,
+        assistantMessageID,
+        callID: "call-pending-interrupted",
+        text: '{"text":"unfinished',
+      })
       requests.length = 0
       response = []
       yield* session.resume(sessionID)
@@ -2685,6 +2692,9 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Recover interrupted tool input" },
         { type: "assistant", content: [{ type: "tool", id: "call-pending-interrupted", state: { status: "error" } }] },
       ])
+      expect(JSON.stringify(requests[0]?.messages)).toContain("Previous provider turn is no longer active")
+      expect(JSON.stringify(requests[0]?.messages)).toContain("This tool was not executed locally")
+      expect(JSON.stringify(requests[0]?.messages)).toContain("19 UTF-8 bytes")
     }),
   )
 
@@ -3754,6 +3764,177 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Fail hosted tool at EOF" },
         { type: "assistant", content: [{ type: "tool", id: "call-hosted-eof", state: { status: "error" } }] },
       ])
+    }),
+  )
+
+  for (const scenario of [
+    { name: "repeated incomplete arguments", text: '{"text":"' + "雪".repeat(8192), complete: false },
+    { name: "nonrepeated partial arguments", text: '{"text":"unfinished content', complete: false },
+    { name: "malformed arguments", text: '{"text": invalid}', complete: false },
+    { name: "complete JSON without a tool call", text: '{"text":"complete content"}', complete: true },
+  ]) {
+    it.effect(`retains actionable ${scenario.name} after provider EOF and replay`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        const database = yield* Database.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Recover failed input" }), resume: false })
+        const executionCount = executions.length
+        response = [
+          LLMEvent.toolInputStart({ id: "call-unfinished", name: "echo" }),
+          LLMEvent.toolInputDelta({ id: "call-unfinished", name: "echo", text: scenario.text }),
+          ...(scenario.complete ? [LLMEvent.toolInputEnd({ id: "call-unfinished", name: "echo" })] : []),
+        ]
+
+        yield* session.resume(sessionID)
+        expect(executions).toHaveLength(executionCount)
+        const retained = yield* database.db
+          .select({ data: EventTable.data })
+          .from(EventTable)
+          .where(eq(EventTable.type, "session.next.tool.input.ended.1"))
+          .all()
+          .pipe(Effect.orDie)
+        expect(retained).toMatchObject([{ data: { callID: "call-unfinished", text: scenario.text } }])
+        const beforeReplay = yield* session.context(sessionID)
+        yield* replaySessionProjection(sessionID)
+        expect(yield* session.context(sessionID)).toEqual(beforeReplay)
+        const tool = beforeReplay
+          .flatMap((message) => (message.type === "assistant" ? message.content : []))
+          .find((part) => part.type === "tool" && part.id === "call-unfinished")
+        if (!tool || tool.type !== "tool" || tool.state.status !== "error")
+          return yield* Effect.die("Missing failed pending tool")
+        expect(tool.state.input).toEqual({})
+        expect(tool.state.error.message).toContain("This tool was not executed")
+        expect(tool.state.error.message).toContain(`${Buffer.byteLength(scenario.text, "utf8")} UTF-8 bytes`)
+        expect(tool.state.error.message).toContain(
+          scenario.complete ? "The text parses as complete JSON" : "The text does not parse as complete JSON",
+        )
+        if (scenario.complete) expect(tool.state.error.message).not.toContain("incomplete")
+        if (scenario.name === "repeated incomplete arguments") {
+          expect(tool.state.error.message).toContain("Longest identical-character run: 8192 characters")
+          expect(tool.state.error.message).toContain("generate it with code")
+        }
+        if (scenario.name !== "repeated incomplete arguments")
+          expect(tool.state.error.message).not.toContain("Longest identical-character run")
+        expect(tool.state.error.message.length).toBeLessThan(650)
+        response = []
+        yield* session.resume(sessionID)
+        expect(JSON.stringify(requests.at(-1)?.messages)).toContain(tool.state.error.message)
+        expect(executions).toHaveLength(executionCount)
+      }),
+    )
+  }
+
+  it.effect("keeps complete calls and their outputs unchanged despite repetitive arguments", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Run a complete call" }), resume: false })
+      const value = "x".repeat(4096)
+      const executionCount = executions.length
+      responses = [
+        [
+          LLMEvent.toolInputStart({ id: "call-complete-repeated", name: "echo" }),
+          LLMEvent.toolInputDelta({
+            id: "call-complete-repeated",
+            name: "echo",
+            text: JSON.stringify({ text: value }),
+          }),
+          LLMEvent.toolInputEnd({ id: "call-complete-repeated", name: "echo" }),
+          LLMEvent.toolCall({ id: "call-complete-repeated", name: "echo", input: { text: value } }),
+        ],
+        [],
+      ]
+
+      yield* session.resume(sessionID)
+      expect(executions.slice(executionCount)).toEqual([value])
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user" },
+        {
+          type: "assistant",
+          content: [
+            {
+              type: "tool",
+              state: {
+                status: "completed",
+                input: { text: value },
+                structured: { text: value },
+                content: [{ type: "text", text: value }],
+              },
+            },
+          ],
+        },
+      ])
+      expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain("This tool was not executed")
+      expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain("Longest identical-character run")
+    }),
+  )
+
+  for (const boundary of ["provider-error", "raw-failure"] as const) {
+    it.effect(`preserves uncalled input diagnostics on ${boundary}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Recover stream failure" }), resume: false })
+        const failure = providerUnavailable()
+        const input = [
+          LLMEvent.toolInputStart({ id: "call-failed-input", name: "echo" }),
+          LLMEvent.toolInputDelta({ id: "call-failed-input", name: "echo", text: '{"text":"partial' }),
+        ]
+        if (boundary === "provider-error") {
+          response = [...input, LLMEvent.providerError({ message: "Provider unavailable" })]
+          yield* session.resume(sessionID)
+        }
+        if (boundary === "raw-failure") {
+          responseStream = Stream.concat(Stream.fromIterable(input), Stream.fail(failure))
+          expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBe(failure)
+        }
+        const context = yield* session.context(sessionID)
+        expect(JSON.stringify(context)).toContain("This tool was not executed")
+        expect(JSON.stringify(context)).toContain("16 UTF-8 bytes")
+        yield* replaySessionProjection(sessionID)
+        expect(yield* session.context(sessionID)).toEqual(context)
+      }),
+    )
+  }
+
+  it.effect("diagnoses retained arguments only after the original fifteen-minute turn timeout", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const runner = yield* SessionRunner.Service
+      const streamed = yield* Deferred.make<void>()
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Bound streaming input" }), resume: false })
+      const text = '{"text":"' + "0".repeat(4096)
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.toolInputStart({ id: "call-timeout-input", name: "echo" }),
+          LLMEvent.toolInputDelta({ id: "call-timeout-input", name: "echo", text }),
+        ]),
+        Stream.fromEffect(Deferred.succeed(streamed, undefined)).pipe(
+          Stream.flatMap(() =>
+            Stream.fromIterable([0, 1]).pipe(
+              Stream.mapEffect(() =>
+                Effect.sleep("9 minutes").pipe(
+                  Effect.as(LLMEvent.toolInputDelta({ id: "call-timeout-input", name: "echo", text: "0" })),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )
+      const run = yield* runner.run({ sessionID, force: true }).pipe(Effect.forkChild)
+      yield* Deferred.await(streamed)
+      yield* TestClock.adjust("9 minutes")
+      expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("This tool was not executed")
+      yield* TestClock.adjust("6 minutes")
+      const exit = yield* Fiber.await(run)
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
+      const context = yield* session.context(sessionID)
+      expect(JSON.stringify(context)).toContain("This tool was not executed")
+      expect(JSON.stringify(context)).toContain("Longest identical-character run: 4097 characters")
+      yield* replaySessionProjection(sessionID)
+      expect(yield* session.context(sessionID)).toEqual(context)
     }),
   )
 

@@ -40,6 +40,7 @@ import { SessionRunnerModel } from "./model"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
+import { InterruptedToolInput } from "./interrupted-tool-input"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
@@ -138,7 +139,13 @@ const layer = Layer.effect(
             timestamp: yield* DateTime.now,
             assistantMessageID: message.id,
             callID: tool.id,
-            error: { type: "unknown", message: "Tool execution interrupted" },
+            error: {
+              type: "unknown",
+              message:
+                tool.state.status === "pending"
+                  ? InterruptedToolInput.describe(tool.state.input, "Previous provider turn is no longer active")
+                  : "Tool execution interrupted",
+            },
             provider: {
               executed: tool.provider?.executed === true,
               ...(tool.provider?.metadata === undefined ? {} : { metadata: tool.provider.metadata }),
@@ -457,7 +464,9 @@ const layer = Layer.effect(
           ).pipe(Effect.exit)
           if (settled._tag === "Failure" && isUserDeclined(settled.cause)) {
             yield* FiberSet.clear(toolFibers)
-            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            yield* withPublication(
+              publisher.failUnsettledTools("Tool execution interrupted", { inputStreamEnded: true }),
+            )
             return yield* Effect.interrupt
           }
           if (
@@ -465,20 +474,26 @@ const layer = Layer.effect(
             (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
           ) {
             yield* FiberSet.clear(toolFibers)
-            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            yield* withPublication(
+              publisher.failUnsettledTools("Tool execution interrupted", { inputStreamEnded: true }),
+            )
             if (publisher.hasActiveAssistant())
               yield* withPublication(publisher.failAssistant("Provider turn interrupted"))
           }
           if (settled._tag === "Failure" && !Cause.hasInterrupts(settled.cause)) {
             const failure = Cause.squash(settled.cause)
             const message = failure instanceof Error ? failure.message : String(failure)
-            yield* withPublication(publisher.failUnsettledTools(`Tool execution failed: ${message}`))
+            yield* withPublication(
+              publisher.failUnsettledTools(`Tool execution failed: ${message}`, { inputStreamEnded: true }),
+            )
           }
           if (stream._tag === "Success" && !publisher.hasProviderError() && publisher.hasUncalledTools())
             yield* publish(LLMEvent.providerError({ message: "Provider ended with unexecuted tool arguments" }))
           if (llmFailure)
             yield* withPublication(
-              publisher.failUnsettledTools("Provider failed before completing tool input or result"),
+              publisher.failUnsettledTools("Provider failed before completing tool input or result", {
+                inputStreamEnded: true,
+              }),
             )
           const stepSettlement = publisher.stepSettlement()
           if (stepSettlement) {
@@ -503,9 +518,13 @@ const layer = Layer.effect(
             )
           }
           if (publisher.hasProviderError())
-            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            yield* withPublication(
+              publisher.failUnsettledTools("Tool execution interrupted", { inputStreamEnded: true }),
+            )
           if (stream._tag === "Success" && !publisher.hasProviderError())
-            yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
+            yield* withPublication(
+              publisher.failUnsettledTools("Provider did not return a tool result", { hostedOnly: true }),
+            )
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)

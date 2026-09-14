@@ -5,6 +5,7 @@ import { ModelV2 } from "../../model"
 import { SessionEvent } from "../event"
 import { SessionMessage } from "../message"
 import { SessionSchema } from "../schema"
+import { InterruptedToolInput } from "./interrupted-tool-input"
 
 type Input = {
   readonly sessionID: SessionSchema.ID
@@ -58,6 +59,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       readonly assistantMessageID: SessionMessage.ID
       readonly name: string
       inputEnded: boolean
+      inputText: string
       called: boolean
       settled: boolean
       providerExecuted: boolean
@@ -153,6 +155,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         text: value,
       })
       tool.inputEnded = true
+      tool.inputText = value
     }),
   )
 
@@ -169,6 +172,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       assistantMessageID,
       name: event.name,
       inputEnded: false,
+      inputText: "",
       called: false,
       settled: false,
       providerExecuted: false,
@@ -212,17 +216,21 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
 
   const failUnsettledTools = Effect.fn("SessionRunner.failUnsettledTools")(function* (
     message: string,
-    hostedOnly = false,
+    options: { readonly hostedOnly?: boolean; readonly inputStreamEnded?: boolean } = {},
   ) {
     for (const [callID, tool] of tools) {
-      if (tool.settled || (hostedOnly && !tool.providerExecuted)) continue
+      if (tool.settled || (options.hostedOnly && !tool.providerExecuted)) continue
       tool.settled = true
       yield* events.publish(SessionEvent.Tool.Failed, {
         sessionID: input.sessionID,
         timestamp: yield* timestamp,
         assistantMessageID: tool.assistantMessageID,
         callID,
-        error: { type: "unknown", message },
+        error: {
+          type: "unknown",
+          message:
+            options.inputStreamEnded && !tool.called ? InterruptedToolInput.describe(tool.inputText, message) : message,
+        },
         provider: {
           executed: tool.providerExecuted,
           ...(tool.providerMetadata === undefined ? {} : { metadata: tool.providerMetadata }),
@@ -318,6 +326,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
           return yield* Effect.die(`Tool call name changed for ${event.id}: ${tool.name} -> ${event.name}`)
         if (tool.called) return yield* Effect.die(`Duplicate tool call: ${event.id}`)
         tool.called = true
+        tool.inputText = ""
         tool.providerExecuted = event.providerExecuted === true
         tool.providerMetadata = event.providerMetadata
         yield* events.publish(SessionEvent.Tool.Called, {
