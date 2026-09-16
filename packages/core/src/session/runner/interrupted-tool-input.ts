@@ -1,6 +1,19 @@
 import { Option, Schema } from "effect"
+import { SessionMessage } from "../message"
 
 const decode = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+
+/** Native Tool.Called sets ran durably before local execution; unknown imported provenance is left alone. */
+export function isUncalledFailure(
+  part: SessionMessage.AssistantContent,
+): part is SessionMessage.AssistantTool & { state: SessionMessage.ToolStateError } {
+  return (
+    part.type === "tool" &&
+    part.state.status === "error" &&
+    part.time.ran === undefined &&
+    part.provider?.executed === false
+  )
+}
 
 /** Describe retained arguments only after their provider turn has ended without a tool call. */
 export function describe(text: string, reason: string) {

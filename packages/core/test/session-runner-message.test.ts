@@ -1,19 +1,192 @@
 import { describe, expect, test } from "bun:test"
-import { Message, Model } from "@opencode-ai/llm"
-import * as OpenAIChat from "@opencode-ai/llm/protocols/openai-chat"
+import { LLM, Message, Model } from "@opencode-ai/llm"
+import { OpenAIChat } from "@opencode-ai/llm/protocols/openai-chat"
+import { OpenAIResponses } from "@opencode-ai/llm/protocols/openai-responses"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { AgentAttachment, FileAttachment } from "@opencode-ai/core/session/prompt"
 import { toLLMMessages } from "@opencode-ai/core/session/runner/to-llm-message"
 import { SessionV2 } from "@opencode-ai/core/session"
-import { DateTime } from "effect"
+import { DateTime, Effect } from "effect"
 
 const created = DateTime.makeUnsafe(0)
 const id = (value: string) => SessionMessage.ID.make(`msg_${value}`)
 const model = Model.make({ id: "model", provider: "provider", route: OpenAIChat.route })
 
 describe("toLLMMessages", () => {
+  describe("uncalled tool input failures", () => {
+    const failure = () =>
+      SessionMessage.AssistantTool.make({
+        type: "tool",
+        id: "uncalled-input",
+        name: "write",
+        provider: { executed: false },
+        state: SessionMessage.ToolStateError.make({
+          status: "error",
+          input: {},
+          content: [],
+          structured: {},
+          error: { type: "unknown", message: "Provider stream ended without a complete call." },
+        }),
+        time: { created, completed: created },
+      })
+    const turn = (tools: SessionMessage.AssistantTool[], terminal = true) =>
+      SessionMessage.Assistant.make({
+        id: id("failed-input"),
+        type: "assistant",
+        agent: "build",
+        model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
+        content: [
+          SessionMessage.AssistantReasoning.make({
+            type: "reasoning",
+            id: "failed-reasoning",
+            text: "Failed-input reasoning sentinel",
+            providerMetadata: { openai: { itemId: "rs_failed", reasoningEncryptedContent: "failed-state" } },
+          }),
+          SessionMessage.AssistantText.make({
+            type: "text",
+            id: "visible-context",
+            text: "Preserved visible context",
+          }),
+          ...tools,
+        ],
+        finish: terminal ? "error" : undefined,
+        error: terminal ? { type: "unknown", message: "Provider turn interrupted" } : undefined,
+        time: { created, completed: terminal ? created : undefined },
+      })
+
+    for (const target of [model, Model.make({ id: "new-model", provider: "provider", route: OpenAIChat.route })]) {
+      test(`projects uncalled failures as facts without replaying failed reasoning to ${target.id}`, async () => {
+        const source = turn([failure()])
+        const original = JSON.stringify(source)
+        const messages = toLLMMessages([source], target)
+
+        expect(messages.map((message) => message.role)).toEqual(["assistant"])
+        expect(messages[0]?.content).toEqual([
+          { type: "text", text: "Preserved visible context" },
+          {
+            type: "text",
+            text: "Tool input failed before local execution (write, uncalled-input): Provider stream ended without a complete call.",
+          },
+        ])
+        expect(JSON.stringify(source)).toBe(original)
+        const bodies = await Promise.all([
+          Effect.runPromise(OpenAIChat.route.body.from(LLM.request({ model: target, messages }))),
+          Effect.runPromise(OpenAIResponses.route.body.from(LLM.request({ model: target, messages }))),
+        ])
+        for (const body of bodies) {
+          expect(JSON.stringify(body)).not.toContain("tool_calls")
+          expect(JSON.stringify(body)).not.toContain("tool_call_id")
+          expect(JSON.stringify(body)).not.toContain("function_call")
+          expect(JSON.stringify(body)).not.toContain("Failed-input reasoning sentinel")
+          expect(JSON.stringify(body)).not.toContain("failed-state")
+          expect(JSON.stringify(body)).toContain("Provider stream ended without a complete call.")
+        }
+      })
+    }
+
+    test("isolates recovered pending inputs without requiring an assistant-level failure", () => {
+      const source = turn([failure()], false)
+      const original = JSON.stringify(source)
+      const messages = toLLMMessages([source], model)
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]?.content.map((part) => part.type)).toEqual(["text", "text"])
+      expect(JSON.stringify(messages)).not.toContain("Failed-input reasoning sentinel")
+      expect(JSON.stringify(source)).toBe(original)
+    })
+
+    for (const status of ["completed", "error"] as const) {
+      test(`preserves reasoning and actual ${status} calls in a mixed turn`, () => {
+        const called = SessionMessage.AssistantTool.make({
+          type: "tool",
+          id: "called-input",
+          name: "bash",
+          provider: { executed: false },
+          state:
+            status === "completed"
+              ? SessionMessage.ToolStateCompleted.make({
+                  status,
+                  input: {},
+                  content: [{ type: "text", text: "Verified existing file" }],
+                  structured: {},
+                })
+              : SessionMessage.ToolStateError.make({
+                  status,
+                  input: {},
+                  content: [],
+                  structured: {},
+                  error: { type: "unknown", message: "Provider stream ended without a complete call." },
+                }),
+          // The epoch is a present call timestamp, even when input is {} and result is absent.
+          time: { created, ran: created, completed: created },
+        })
+        const source = turn([called, failure()])
+        const original = JSON.stringify(source)
+        const messages = toLLMMessages([source], model)
+
+        expect(messages.map((message) => message.role)).toEqual(["assistant", "tool"])
+        expect(messages[0]?.content[0]).toEqual({
+          type: "reasoning",
+          text: "Failed-input reasoning sentinel",
+          providerMetadata: undefined,
+        })
+        expect(messages[0]?.content.filter((part) => part.type === "tool-call")).toMatchObject([
+          { id: "called-input", name: "bash", input: {} },
+        ])
+        expect(messages[1]?.content).toMatchObject([
+          {
+            type: "tool-result",
+            id: "called-input",
+            result:
+              status === "completed"
+                ? { type: "text", value: "Verified existing file" }
+                : { type: "error", value: { error: called.state.status === "error" ? called.state.error : undefined } },
+          },
+        ])
+        expect(JSON.stringify(source)).toBe(original)
+      })
+    }
+
+    test("preserves hosted failures and reasoning when another input was never called", () => {
+      const hosted = SessionMessage.AssistantTool.make({
+        ...failure(),
+        id: "hosted-input",
+        name: "web_search",
+        provider: { executed: true },
+      })
+      const messages = toLLMMessages([turn([failure(), hosted])], model)
+
+      expect(messages.map((message) => message.role)).toEqual(["assistant"])
+      expect(messages[0]?.content[0]).toMatchObject({ type: "reasoning", text: "Failed-input reasoning sentinel" })
+      expect(messages[0]?.content.filter((part) => part.type === "tool-call")).toMatchObject([
+        { id: "hosted-input", providerExecuted: true },
+      ])
+      expect(messages[0]?.content.filter((part) => part.type === "tool-result")).toMatchObject([
+        { id: "hosted-input", providerExecuted: true, result: { type: "error" } },
+      ])
+    })
+
+    test("does not infer an uncalled failure from an older record without a local provider marker", () => {
+      const unconfirmed = SessionMessage.AssistantTool.make({ ...failure(), provider: undefined })
+      const messages = toLLMMessages([turn([unconfirmed])], model)
+
+      expect(messages.map((message) => message.role)).toEqual(["assistant", "tool"])
+      expect(messages[0]?.content[0]).toMatchObject({ type: "reasoning", text: "Failed-input reasoning sentinel" })
+      expect(messages[0]?.content.filter((part) => part.type === "tool-call")).toMatchObject([
+        { id: "uncalled-input", input: {} },
+      ])
+      expect(messages[1]?.content).toMatchObject([{ type: "tool-result", id: "uncalled-input" }])
+    })
+
+    test("does not drop reasoning from a failed turn without tools", () => {
+      const messages = toLLMMessages([turn([])], model)
+
+      expect(messages[0]?.content[0]).toMatchObject({ type: "reasoning", text: "Failed-input reasoning sentinel" })
+    })
+  })
+
   test("omits empty assistant turns", () => {
     const assistant = (value: string, content: SessionMessage.Assistant["content"]) =>
       SessionMessage.Assistant.make({

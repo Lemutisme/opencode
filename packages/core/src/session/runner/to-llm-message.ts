@@ -9,6 +9,7 @@ import {
 } from "@opencode-ai/llm"
 import { SessionMessage } from "../message"
 import type { FileAttachment } from "../prompt"
+import { InterruptedToolInput } from "./interrupted-tool-input"
 
 const media = (file: FileAttachment): ContentPart => ({
   type: "media",
@@ -71,9 +72,15 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
   const sameModel =
     String(message.model.providerID) === String(model.provider) && String(message.model.id) === String(model.id)
   const reuseProviderMetadata = sameModel && message.error === undefined
+  // A failed input has no completed call to replay. Isolate its reasoning only
+  // when this turn contains no other tool work whose context must be retained.
+  const onlyFailedInputs =
+    message.content.some(InterruptedToolInput.isUncalledFailure) &&
+    message.content.every((item) => item.type !== "tool" || InterruptedToolInput.isUncalledFailure(item))
   const content = message.content.flatMap((item): ContentPart[] => {
     if (item.type === "text") return [{ type: "text", text: item.text }]
-    if (item.type === "reasoning")
+    if (item.type === "reasoning") {
+      if (onlyFailedInputs) return []
       return sameModel
         ? [
             {
@@ -85,6 +92,14 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
         : item.text.length > 0
           ? [{ type: "text", text: item.text }]
           : []
+    }
+    if (InterruptedToolInput.isUncalledFailure(item))
+      return [
+        {
+          type: "text",
+          text: `Tool input failed before local execution (${item.name}, ${item.id}): ${item.state.error.message}`,
+        },
+      ]
     const call = toolCall(item, reuseProviderMetadata ? item.provider?.metadata : undefined)
     if (item.provider?.executed !== true) return [call]
     const result = toolResult(
@@ -99,7 +114,10 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
     return part.text !== "" || (part.providerMetadata !== undefined && Object.keys(part.providerMetadata).length > 0)
   })
   const results = message.content
-    .filter((item): item is SessionMessage.AssistantTool => item.type === "tool" && item.provider?.executed !== true)
+    .filter(
+      (item): item is SessionMessage.AssistantTool =>
+        item.type === "tool" && item.provider?.executed !== true && !InterruptedToolInput.isUncalledFailure(item),
+    )
     .map((item) =>
       toolResult(item, reuseProviderMetadata ? (item.provider?.resultMetadata ?? item.provider?.metadata) : undefined),
     )
