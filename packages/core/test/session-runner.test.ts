@@ -3938,6 +3938,197 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("escapes recurrent input repetition without cancelling a valid same-turn tool", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const runner = yield* SessionRunner.Service
+      const database = yield* Database.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Recover input generation" }), resume: false })
+      response = [
+        LLMEvent.toolInputStart({ id: "call-first-incomplete", name: "echo" }),
+        LLMEvent.toolInputDelta({ id: "call-first-incomplete", name: "echo", text: '{"text":"0' }),
+      ]
+      yield* session.resume(sessionID)
+      const executionCount = executions.length
+      const requestCount = requests.length
+      const streamed = yield* Deferred.make<void>()
+      toolExecutionGate = yield* Deferred.make<void>()
+      const text = '{"text":"' + "0".repeat(65_536)
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.toolCall({ id: "call-valid-during-recovery", name: "echo", input: { text: "keep this result" } }),
+          LLMEvent.toolCall({
+            id: "call-hosted-during-recovery",
+            name: "web_search",
+            input: { query: "already called" },
+            providerExecuted: true,
+          }),
+          LLMEvent.toolInputStart({ id: "call-recurrent-input", name: "echo" }),
+          LLMEvent.toolInputDelta({ id: "call-recurrent-input", name: "echo", text }),
+        ]),
+        Stream.fromEffect(Deferred.succeed(streamed, undefined)).pipe(
+          Stream.flatMap(() =>
+            Stream.fromEffect(
+              Effect.sleep("1 minute").pipe(
+                Effect.as(LLMEvent.toolInputDelta({ id: "call-recurrent-input", name: "echo", text: "0" })),
+              ),
+            ),
+          ),
+          Stream.concat(Stream.never),
+        ),
+      )
+      const run = yield* runner.run({ sessionID, force: true }).pipe(Effect.forkChild)
+      yield* Deferred.await(streamed)
+      yield* TestClock.adjust("1 minute")
+      expect(activeToolExecutions).toBe(1)
+      const retained = yield* database.db
+        .select({ data: EventTable.data })
+        .from(EventTable)
+        .where(eq(EventTable.type, "session.next.tool.input.ended.1"))
+        .all()
+        .pipe(Effect.orDie)
+      expect(retained).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            callID: "call-recurrent-input",
+            text: text + "0",
+          }),
+        }),
+      )
+      yield* Deferred.succeed(toolExecutionGate, undefined)
+      yield* Fiber.join(run)
+      expect(requests.length - requestCount).toBe(1)
+      expect(executions.slice(executionCount)).toEqual(["keep this result"])
+      const context = yield* session.context(sessionID)
+      const assistant = context.at(-1)
+      expect(assistant).toMatchObject({
+        type: "assistant",
+        finish: "error",
+        error: { message: expect.stringContaining("Local recovery guard") },
+      })
+      if (assistant?.type !== "assistant") return yield* Effect.die("Missing recovery assistant")
+      expect(assistant.content).toMatchObject([
+        {
+          type: "tool",
+          id: "call-valid-during-recovery",
+          state: { status: "completed", structured: { text: "keep this result" } },
+        },
+        {
+          type: "tool",
+          id: "call-hosted-during-recovery",
+          state: {
+            status: "error",
+            error: { message: "Provider stream closed after a local tool-input recovery guard fired" },
+          },
+          provider: { executed: true },
+        },
+        { type: "tool", id: "call-recurrent-input", state: { status: "error", input: {} } },
+      ])
+      yield* replaySessionProjection(sessionID)
+      expect(yield* session.context(sessionID)).toEqual(context)
+      toolExecutionGate = undefined
+      responses = [
+        [LLMEvent.toolCall({ id: "call-short-recovery", name: "echo", input: { text: "short valid input" } })],
+        [],
+      ]
+      yield* session.resume(sessionID)
+      expect(executions.slice(executionCount)).toEqual(["keep this result", "short valid input"])
+      const messages = JSON.stringify(requests.at(-2)?.messages)
+      expect(messages).toContain("Local recovery guard")
+      expect(messages).not.toContain("0".repeat(1024))
+    }),
+  )
+
+  it.effect("does not apply the recovery guard to a healthy first large repetitive call", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const runner = yield* SessionRunner.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Write intended repeated data" }), resume: false })
+      const streamed = yield* Deferred.make<void>()
+      const text = "0".repeat(65_536)
+      const executionCount = executions.length
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.toolInputStart({ id: "call-healthy-large", name: "echo" }),
+          LLMEvent.toolInputDelta({ id: "call-healthy-large", name: "echo", text: '{"text":"' + text }),
+        ]),
+        Stream.fromEffect(Deferred.succeed(streamed, undefined)).pipe(
+          Stream.flatMap(() =>
+            Stream.fromEffect(Effect.sleep("1 minute")).pipe(
+              Stream.flatMap(() =>
+                Stream.fromIterable([
+                  LLMEvent.toolInputDelta({ id: "call-healthy-large", name: "echo", text: "0" }),
+                  LLMEvent.toolInputDelta({ id: "call-healthy-large", name: "echo", text: '"}' }),
+                  LLMEvent.toolInputEnd({ id: "call-healthy-large", name: "echo" }),
+                  LLMEvent.toolCall({ id: "call-healthy-large", name: "echo", input: { text: text + "0" } }),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      )
+      const run = yield* runner.run({ sessionID, force: true }).pipe(Effect.forkChild)
+      yield* Deferred.await(streamed)
+      yield* TestClock.adjust("1 minute")
+      yield* Fiber.join(run)
+      expect(executions.slice(executionCount)).toEqual([text + "0"])
+      expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("Local recovery guard")
+    }),
+  )
+
+  for (const boundary of ["deadline", "cancellation"] as const) {
+    it.effect(`preserves ${boundary} while recovering an incomplete tool input`, () =>
+      Effect.gen(function* () {
+        const binding = yield* setupContractSession({ deadline: 30_000 })
+        const session = yield* SessionV2.Service
+        const runner = yield* SessionRunner.Service
+        const bindings = yield* ProContractOpenCode.Service
+        const contracts = yield* ProContract.Service
+        yield* session.prompt({
+          sessionID: binding.sessionID,
+          prompt: Prompt.make({ text: "Keep the original recovery boundary" }),
+          resume: false,
+        })
+        response = [
+          LLMEvent.toolInputStart({ id: "call-seed-failure", name: "read" }),
+          LLMEvent.toolInputDelta({ id: "call-seed-failure", name: "read", text: '{"text":"0' }),
+        ]
+        yield* runner.run({ sessionID: binding.sessionID, force: true })
+        const streamed = yield* Deferred.make<void>()
+        responseStream = Stream.concat(
+          Stream.fromIterable([
+            LLMEvent.toolInputStart({ id: "call-boundary-recovery", name: "read" }),
+            LLMEvent.toolInputDelta({
+              id: "call-boundary-recovery",
+              name: "read",
+              text: '{"text":"' + "0".repeat(65_536),
+            }),
+          ]),
+          Stream.fromEffect(Deferred.succeed(streamed, undefined)).pipe(Stream.flatMap(() => Stream.never)),
+        )
+        const run = yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.forkChild)
+        yield* Deferred.await(streamed)
+        if (boundary === "deadline") yield* TestClock.adjust(30_000)
+        if (boundary === "cancellation") yield* Fiber.interrupt(run)
+        const exit = yield* Fiber.await(run)
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect(executions).toEqual([])
+        expect(requests).toHaveLength(2)
+        expect(yield* bindings.get(binding.contractID)).toMatchObject({ turnsUsed: 2, actionsUsed: 0 })
+        expect(yield* contracts.get(binding.contractID)).toMatchObject({ spec: { budget: { deadline: 30_000 } } })
+        const context = yield* session.context(binding.sessionID)
+        expect(JSON.stringify(context)).toContain("This tool was not executed locally")
+        expect(JSON.stringify(context)).not.toContain("Local recovery guard")
+        if (boundary === "deadline") {
+          yield* runner.run({ sessionID: binding.sessionID, force: true })
+          expect(requests).toHaveLength(2)
+        }
+      }),
+    )
+  }
+
   it.effect("durably fails a hosted tool left unresolved by a raw provider stream failure", () =>
     Effect.gen(function* () {
       yield* setup

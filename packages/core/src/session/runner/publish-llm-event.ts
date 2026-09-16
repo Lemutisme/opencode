@@ -216,11 +216,16 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
 
   const failUnsettledTools = Effect.fn("SessionRunner.failUnsettledTools")(function* (
     message: string,
-    options: { readonly hostedOnly?: boolean; readonly inputStreamEnded?: boolean } = {},
+    options: {
+      readonly hostedOnly?: boolean
+      readonly inputStreamEnded?: boolean
+      readonly inputFailure?: { readonly callID: string; readonly message: string }
+    } = {},
   ) {
     for (const [callID, tool] of tools) {
       if (tool.settled || (options.hostedOnly && !tool.providerExecuted)) continue
       tool.settled = true
+      const reason = options.inputFailure?.callID === callID ? options.inputFailure.message : message
       yield* events.publish(SessionEvent.Tool.Failed, {
         sessionID: input.sessionID,
         timestamp: yield* timestamp,
@@ -229,7 +234,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         error: {
           type: "unknown",
           message:
-            options.inputStreamEnded && !tool.called ? InterruptedToolInput.describe(tool.inputText, message) : message,
+            options.inputStreamEnded && !tool.called ? InterruptedToolInput.describe(tool.inputText, reason) : reason,
         },
         provider: {
           executed: tool.providerExecuted,

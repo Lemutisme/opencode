@@ -41,6 +41,7 @@ import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
 import { InterruptedToolInput } from "./interrupted-tool-input"
+import { RepeatedToolInput } from "./repeated-tool-input"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
@@ -254,6 +255,11 @@ const layer = Layer.effect(
       const model = yield* models.resolve(session)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
+      const previous = context.at(-1)
+      const inputRecovery =
+        previous?.type === "assistant" && previous.content.some(InterruptedToolInput.isUncalledFailure)
+          ? RepeatedToolInput.make()
+          : undefined
       // An issued Contract without a turn ceiling must not inherit a generic agent step ceiling.
       const isLastStep =
         !(contract && contract.spec.budget.turns === undefined) &&
@@ -386,6 +392,9 @@ const layer = Layer.effect(
               }
             }
             yield* publish(event)
+            // Publish the triggering prefix first; the stream finalizer flushes Input.Ended durably.
+            const repeatedInput = inputRecovery?.observe(event, yield* Clock.currentTimeMillis)
+            if (repeatedInput) return yield* Effect.fail(repeatedInput)
             if (event.type !== "tool-call" || event.providerExecuted) return
             if (!toolMaterialization) {
               yield* withPublication(publisher.failUnsettledTools("Tools are disabled after the maximum agent steps"))
@@ -434,7 +443,11 @@ const layer = Layer.effect(
 
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const stream = yield* restore(boundedProviderStream).pipe(Effect.exit)
+          const stream = yield* restore(boundedProviderStream).pipe(
+            Effect.as(undefined),
+            Effect.catchTag("RepeatedToolInput", Effect.succeed),
+            Effect.exit,
+          )
           const failure =
             stream._tag === "Failure" ? Option.getOrUndefined(Cause.findErrorOption(stream.cause)) : undefined
           if (
@@ -446,6 +459,8 @@ const layer = Layer.effect(
             return yield* Effect.die(continueAfterOverflowCompaction(currentStep))
           if (overflowFailure) yield* publish(overflowFailure)
           const llmFailure = failure instanceof LLMError ? failure : undefined
+          const inputFailure = stream._tag === "Success" ? stream.value : undefined
+          if (inputFailure) yield* withPublication(publisher.failAssistant(inputFailure.message))
           if (llmFailure && !publisher.hasProviderError()) {
             yield* withPublication(publisher.failAssistant(llmFailure.reason.message))
           }
@@ -487,12 +502,24 @@ const layer = Layer.effect(
               publisher.failUnsettledTools(`Tool execution failed: ${message}`, { inputStreamEnded: true }),
             )
           }
-          if (stream._tag === "Success" && !publisher.hasProviderError() && publisher.hasUncalledTools())
+          if (
+            stream._tag === "Success" &&
+            !inputFailure &&
+            !publisher.hasProviderError() &&
+            publisher.hasUncalledTools()
+          )
             yield* publish(LLMEvent.providerError({ message: "Provider ended with unexecuted tool arguments" }))
           if (llmFailure)
             yield* withPublication(
               publisher.failUnsettledTools("Provider failed before completing tool input or result", {
                 inputStreamEnded: true,
+              }),
+            )
+          if (inputFailure)
+            yield* withPublication(
+              publisher.failUnsettledTools("Provider stream closed after a local tool-input recovery guard fired", {
+                inputStreamEnded: true,
+                inputFailure,
               }),
             )
           const stepSettlement = publisher.stepSettlement()
@@ -509,7 +536,10 @@ const layer = Layer.effect(
                 sessionID: session.id,
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
-                finish: publisher.hasProviderError() || stream._tag === "Failure" ? "error" : stepSettlement.finish,
+                finish:
+                  publisher.hasProviderError() || inputFailure || stream._tag === "Failure"
+                    ? "error"
+                    : stepSettlement.finish,
                 cost: yield* models.cost(session, stepSettlement.tokens),
                 tokens: stepSettlement.tokens,
                 snapshot: endSnapshot,
@@ -528,6 +558,8 @@ const layer = Layer.effect(
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)
+          // The existing durable Contract recovery reschedules the same Session after finish=error.
+          if (inputFailure) return { needsContinuation: false, step: currentStep }
           return { needsContinuation: !publisher.hasProviderError() && needsContinuation, step: currentStep }
         }),
       )
