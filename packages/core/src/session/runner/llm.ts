@@ -255,7 +255,10 @@ const layer = Layer.effect(
       const model = yield* models.resolve(session)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
-      const previous = context.at(-1)
+      const latest = context.at(-1)
+      // A same-Session Contract retry queues a durable scheduler prompt. Its binding ID, not text, identifies it.
+      const previous =
+        latest?.type === "user" && latest.id === contractBinding?.promptID ? context.at(-2) : latest
       const inputRecovery =
         previous?.type === "assistant" && previous.content.some(InterruptedToolInput.isUncalledFailure)
           ? RepeatedToolInput.make()

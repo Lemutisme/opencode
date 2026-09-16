@@ -4040,6 +4040,114 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  for (const origin of ["contract-retry", "new-user"] as const) {
+    it.effect(`recognizes ${origin} by durable prompt identity after input failure`, () =>
+      Effect.gen(function* () {
+        const binding = yield* setupContractSession({ deadline: 21_600_000 })
+        const session = yield* SessionV2.Service
+        const runner = yield* SessionRunner.Service
+        const bindings = yield* ProContractOpenCode.Service
+        const contracts = yield* ProContract.Service
+        yield* session.prompt({
+          id: binding.promptID,
+          sessionID: binding.sessionID,
+          prompt: Prompt.make({ text: "Recover through the Contract's durable input queue" }),
+          delivery: "queue",
+          resume: false,
+        })
+        response = [
+          LLMEvent.toolInputStart({ id: "call-before-queued-recovery", name: "read" }),
+          LLMEvent.toolInputDelta({ id: "call-before-queued-recovery", name: "read", text: '{"text":"0' }),
+        ]
+        yield* runner.run({ sessionID: binding.sessionID, force: false })
+        yield* bindings.reschedule({
+          contractID: binding.contractID,
+          revision: binding.revision,
+          promptID: binding.promptID,
+          reason: "OpenCode execution ended without settlement",
+          now: 0,
+          attempt: "same",
+        })
+        yield* TestClock.adjust("1 minute")
+        const retry = yield* bindings.claim(binding.contractID, 60_000)
+        if (!retry) return yield* Effect.die("Contract retry was not claimed")
+        expect(retry.sessionID).toBe(binding.sessionID)
+        expect(retry.promptID).not.toBe(binding.promptID)
+        const promptID = origin === "contract-retry" ? retry.promptID : SessionMessage.ID.create()
+        yield* session.prompt({
+          id: promptID,
+          sessionID: retry.sessionID,
+          // Identical text with a different identity must remain an ordinary user input.
+          prompt: Prompt.make({ text: "Continue the approved task after a transient execution interruption." }),
+          delivery: "queue",
+          resume: false,
+        })
+        const streamed = yield* Deferred.make<void>()
+        const text = "0".repeat(65_536)
+        responseStream = Stream.concat(
+          Stream.fromIterable([
+            LLMEvent.toolInputStart({ id: "call-after-queued-recovery", name: "read" }),
+            LLMEvent.toolInputDelta({ id: "call-after-queued-recovery", name: "read", text: '{"text":"' + text }),
+          ]),
+          Stream.fromEffect(Deferred.succeed(streamed, undefined)).pipe(
+            Stream.flatMap(() =>
+              Stream.fromEffect(Effect.sleep("1 minute")).pipe(
+                Stream.flatMap(() =>
+                  Stream.fromIterable([
+                    LLMEvent.toolInputDelta({ id: "call-after-queued-recovery", name: "read", text: "0" }),
+                    LLMEvent.toolInputDelta({ id: "call-after-queued-recovery", name: "read", text: '"}' }),
+                    LLMEvent.toolInputEnd({ id: "call-after-queued-recovery", name: "read" }),
+                    LLMEvent.toolCall({ id: "call-after-queued-recovery", name: "read", input: { text: text + "0" } }),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+        )
+        responses = [fragmentFixture("text", "queued-recovery-done", ["Complete"]).completeEvents]
+        const run = yield* runner.run({ sessionID: retry.sessionID, force: false }).pipe(Effect.forkChild)
+        yield* Deferred.await(streamed)
+        yield* Effect.forEach(
+          [80_000, 100_000, 120_000],
+          (now) =>
+            TestClock.adjust("20 seconds").pipe(
+              Effect.andThen(bindings.heartbeat(new Set([retry.sessionID]), now)),
+            ),
+          { discard: true },
+        )
+        yield* Fiber.join(run)
+        const context = yield* session.context(retry.sessionID)
+        expect(context).toContainEqual(expect.objectContaining({ id: promptID, type: "user" }))
+        expect(yield* bindings.get(binding.contractID)).toMatchObject({
+          sessionID: binding.sessionID,
+          revision: 1,
+          attempts: 1,
+          turnsUsed: origin === "contract-retry" ? 2 : 3,
+          actionsUsed: origin === "contract-retry" ? 0 : 1,
+        })
+        expect(yield* contracts.get(binding.contractID)).toMatchObject({
+          status: "active",
+          revision: 1,
+          spec: { budget: { deadline: 21_600_000 } },
+        })
+        if (origin === "contract-retry") {
+          expect(executions).toEqual([])
+          expect(requests).toHaveLength(2)
+          expect(context.at(-1)).toMatchObject({
+            type: "assistant",
+            finish: "error",
+            error: { message: expect.stringContaining("Local recovery guard") },
+          })
+        }
+        if (origin === "new-user") {
+          expect(executions).toEqual([text + "0"])
+          expect(requests).toHaveLength(3)
+          expect(JSON.stringify(context)).not.toContain("Local recovery guard")
+        }
+      }),
+    )
+  }
+
   it.effect("does not apply the recovery guard to a healthy first large repetitive call", () =>
     Effect.gen(function* () {
       yield* setup
