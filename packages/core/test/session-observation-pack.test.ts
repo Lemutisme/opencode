@@ -26,7 +26,7 @@ import { settleTool, toolIdentity } from "./lib/tool"
 
 function assistant(
   id: string,
-  structured = { exit: 0, truncated: false },
+  structured: Record<string, unknown> = { exit: 0, truncated: false },
   text = "first\n" + "中🙂\n".repeat(3000) + "last",
 ) {
   return Schema.decodeUnknownSync(SessionMessage.Assistant)({
@@ -90,6 +90,42 @@ describe("Session observation packing", () => {
         messages[2]!,
       ]),
     ).toEqual([messages[0]!, { ...messages[1]!, time: { created: DateTime.makeUnsafe(1) } }, messages[2]!])
+  })
+
+  test("packs oversized structured-only results with an exact structured recall source", () => {
+    const structuredOnly = (message: SessionMessage.Message) => {
+      if (message.type !== "assistant") throw new Error("Expected assistant")
+      const tool = message.content[0]
+      if (tool?.type !== "tool" || tool.state.status !== "completed") throw new Error("Expected completed tool")
+      return {
+        ...message,
+        content: [{ ...tool, state: { ...tool.state, content: [] } }],
+      }
+    }
+    const structured = { exit: 0, truncated: false, payload: "x".repeat(20_000) }
+    const durable = structuredOnly(assistant("msg_structured", structured, ""))
+    const projected = SessionObservationPack.project([durable, assistant("msg_structured_2"), assistant("msg_structured_3")])
+    const input = placeholder(projected[0]!)
+    const serialized = JSON.stringify(structured, null, 2)
+    expect(input.source).toBe("structured")
+    expect(input.block).toBe(0)
+
+    const first = SessionObservationPack.read(durable, { ...input, length: 16_384 })
+    if (!first) throw new Error("Missing structured observation page")
+    const firstBytes = Buffer.from(first.data, first.encoding === "utf8" ? "utf8" : "base64")
+    const second = SessionObservationPack.read(durable, {
+      ...input,
+      offset: first.nextOffset,
+      length: 16_384,
+    })
+    if (!second) throw new Error("Missing structured observation tail")
+    const secondBytes = Buffer.from(second.data, second.encoding === "utf8" ? "utf8" : "base64")
+    expect(Buffer.concat([firstBytes, secondBytes]).equals(Buffer.from(serialized))).toBe(true)
+
+    const small = structuredOnly(assistant("msg_structured_small", { exit: 0, truncated: false, payload: "short" }, ""))
+    expect(
+      SessionObservationPack.project([small, assistant("msg_structured_small_2"), assistant("msg_structured_small_3")])[0],
+    ).toEqual(small)
   })
 
   test("recalls exact UTF-8 bytes including split characters, hidden failure lines and EOF", () => {

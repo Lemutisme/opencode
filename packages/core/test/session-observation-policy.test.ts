@@ -38,8 +38,14 @@ describe("ObservationPack promotion policy", () => {
     {
       setting: "0",
       contract: true,
+      enabled: true,
+      name: "keeps Contract packing available in the native build",
+    },
+    {
+      setting: "0",
+      contract: false,
       enabled: false,
-      name: "rolls back Contract packing even with explicit registration",
+      name: "keeps ordinary Sessions unchanged under the Contract policy",
     },
     { setting: "1", contract: false, enabled: true, name: "preserves explicit opt-in for ordinary Sessions" },
     { setting: "invalid", contract: true, enabled: false, name: "does not enable an unrecognized host setting" },
