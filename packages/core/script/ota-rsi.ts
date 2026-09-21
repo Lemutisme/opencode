@@ -4,9 +4,13 @@ import { ProContract } from "@opencode-ai/schema/pro-contract"
 import { ProContractKernel } from "../src/pro-contract/kernel"
 
 export type Slot = "s" | "h"
+// H denotes a complete worker-harness release, not just a prompt or one module.
+// These are artifact identities; the application driver must materialize the
+// complete release and isolate its mutable instance state from the authority.
 export type Pair = { s: string; h: string }
 export type Protocol = {
-  // Pin the entire trusted driver/runtime/evaluator closure, not just its entrypoint.
+  // Pin the external issuer/containment/evaluator closure, NOT the mutable
+  // OpenCode worker runtime. That runtime belongs to H and changes with H.
   trusted: string
   scope: "mechanics" | "performance"
   minimumMeanGainBps: number

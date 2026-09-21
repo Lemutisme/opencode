@@ -1,10 +1,70 @@
 # Fixed-Kernel, cross-partition OTA RSI
 
 Branch: `ota-rsi`, isolated checkout `/home/duozhou/opencode-ota-rsi`.
-Base: the already qualified deadline-only issuer `c814157f1`. The normative
-Kernel, Schema, runtime, evaluator and running Sol R3–R5 cohorts are unchanged.
+Base: the already qualified deadline-only issuer `c814157f1`. This implementation
+has not modified the normative Kernel or the running Sol R3–R5 cohorts.
 The main checkout still has the historical count-required Schema: do not copy
 these scripts there and pretend it supports deadline-only model execution.
+
+## H means the complete OpenCode harness
+
+The user clarified that **all OpenCode execution components belong to H**, not
+merely a policy renderer or a plugin. The earlier blanket description of the
+OpenCode runtime and Schema as fixed was too broad. The distinction is between
+the **external trusted control plane** and the **mutable worker implementation**,
+not between arbitrarily frozen and mutable directories inside OpenCode.
+
+| Component                                                                                                                                                           | Surface                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Persistent strategy/heuristics, selected approach and strategy revisions                                                                                            | S                                                          |
+| Context-window allocation, history selection, compaction, summaries and retrieval                                                                                   | H                                                          |
+| Memory representation, read/write/retrieval policy, storage implementation and internal schemas                                                                     | H                                                          |
+| Tool definitions, registry, implementations, output processing and agent-side tool selection                                                                        | H                                                          |
+| Session/provider loop, planning, internal scheduling, retry/recovery implementation                                                                                 | H                                                          |
+| Prompt assembly, agent configuration, plugins, internal protocols and provider request construction                                                                 | H                                                          |
+| Other OpenCode components, dependencies and build configuration                                                                                                     | H, unless part of the separately pinned external authority |
+| Canonical promotion/withdrawal, independent grader, actual sandbox/capability enforcement, credential gateway, accounting/deadline enforcement and watchdog/fencing | Fixed outside S and H                                      |
+
+This is **not a mutable-path allowlist**: listing memory, tools or context does
+not exclude the rest of OpenCode. Nor does it authorize an evolved worker to
+change its external permissions, provider credentials, original deadline, assigned
+experiment model or hidden grader. Agent-side permission/routing code may change;
+the external admission and capability ceiling still apply. Managing a context
+window is evolvable; changing the model's underlying supported limit is not a
+software capability the harness can invent.
+
+Source examples in this checkout include `src/system-context`,
+`src/session/history.ts`, `src/session/compaction.ts`, `src/session/runner`,
+`src/tool`, `src/tool-output-store.ts`, config/plugin modules and `packages/llm`.
+These are examples, not the extent of H. Candidate source/build scripts execute
+only inside the isolated build/worker environment, never as host imports.
+
+The full implementation must bind **source tree + build inputs + runnable
+release/image digest** as H and actually start that release for both generation
+and evaluation. Keeping the old OpenCode binary and merely reading a new policy
+file does **not** implement this definition. A release manifest may be a small
+artifact; the complete source/image closure it names must be verified by the
+trusted materializer. The current generic artifact store and offline fixture do
+not yet provide that materializer or a full OpenCode build/deployment profile.
+
+### Memory and state are part of the rollout problem
+
+Rolling back code alone is insufficient when H can change memory/storage schemas.
+Before enabling full H mutation, the production driver must additionally:
+
+- Fence the old worker and checkpoint its derived memory/workspace state.
+- Boot the trial in a private, copy-on-write state namespace. A trial may not
+  destructively migrate the fallback's database or files.
+- Bind migration/compatibility checks and the checkpoint identity to the boot
+  receipt. On failure restore both the exact release pair and its compatible state.
+- Keep authoritative task inputs, evidence, external side-effect receipts and
+  original deadlines outside the rollback. Reverting derived memory must not
+  erase facts or cause an already performed action to be replayed as new work.
+
+These full-release and persistent-memory properties are **not covered by the
+91-test offline qualification at `f47982a2e`**. That qualification proves the
+controller's pair switch, health fencing and exact artifact rollback with a small
+stateless fixture. It must not be reported as full OpenCode harness RSI.
 
 ## The small invariant
 
@@ -144,10 +204,12 @@ of model self-improvement.
 ## Remaining live-experiment boundary
 
 The generic `Driver` is trusted application wiring. A **production Sol profile
-is not included yet**. It must execute mutable harness code inside the native
-credential-isolated runner, keep the grader/gateway/admission/Kernel outside that
-code, pin the complete trusted dependency/runtime closure, and report real host-
-observed progress and native accounting. `evaluate` must independently recompute
+is not included yet**. It must build and execute the complete mutable OpenCode
+release inside the credential-isolated worker boundary, keep the
+grader/gateway/admission/Kernel outside that code, pin the external trusted
+closure (not the evolvable worker binary), implement the memory/checkpoint
+boundary above, and report real host-observed progress and native accounting.
+`evaluate` must independently recompute
 scores rather than accepting a candidate-written report. An exit code or hash
 alone does not authenticate a model's claim.
 

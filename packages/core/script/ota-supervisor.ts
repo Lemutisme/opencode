@@ -23,7 +23,8 @@ export type Worker = {
   stop(): Promise<Accounting>
 }
 export type Driver = {
-  // Pin runtime, Kernel, evaluator, supervisor and transitive adapter source.
+  // Pin the external Kernel, evaluator, supervisor and containment adapter.
+  // OpenCode's context/memory/tools/runner implementation is H, not this driver.
   fingerprint(): Promise<string>
   // Recover/fence all processes owned by THIS campaign, including after a crash.
   fence(): Promise<void>
