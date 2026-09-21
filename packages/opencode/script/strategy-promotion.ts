@@ -2,16 +2,18 @@
 
 import { Option, Schema } from "effect"
 
-const NonNegative = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
+const NonNegative = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
+const NonNegativeInt = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }))
+const PositiveInt = NonNegativeInt.check(Schema.isGreaterThan(0))
+const Identity = Schema.NonEmptyString.check(Schema.isPattern(/^[^\0]+$/))
+const Hash = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 
 const Strategy = Schema.Struct({
   version: Schema.Literal(1),
   mechanismClass: Schema.Literal("execution-policy-text-v1"),
   generation: NonNegativeInt,
-  policyHash: Schema.String,
-  parentPolicyHash: Schema.optional(Schema.String),
+  policyHash: Hash,
+  parentPolicyHash: Schema.optional(Hash),
   text: Schema.String,
 })
 
@@ -19,23 +21,24 @@ const Manifest = Schema.Struct({
   version: Schema.Literal(1),
   incumbent: Strategy,
   candidate: Strategy,
-  tasks: Schema.Array(Schema.String),
+  tasks: Schema.Array(Identity),
   replicates: PositiveInt,
-  evaluatorHash: Schema.String,
-  budgetHash: Schema.String,
+  evaluatorHash: Hash,
+  budgetHash: Hash,
 })
 
 const Run = Schema.Struct({
-  task: Schema.String,
+  task: Identity,
   replicate: NonNegativeInt,
-  policyHash: Schema.String,
-  evaluatorHash: Schema.String,
-  budgetHash: Schema.String,
+  policyHash: Hash,
+  evaluatorHash: Hash,
+  budgetHash: Hash,
   budgetCompliant: Schema.Boolean,
   complete: Schema.Boolean,
+  delivered: Schema.Boolean,
   passed: NonNegativeInt,
   total: PositiveInt,
-  cost: NonNegative,
+  cost: Schema.NullOr(NonNegative),
   manualInterventions: NonNegativeInt,
   violations: Schema.Array(Schema.String),
 })
@@ -53,8 +56,12 @@ if (Option.isNone(manifestResult) || Option.isNone(runsResult)) {
   process.exit(1)
 }
 
-const manifest = manifestResult.value
-const runs = runsResult.value
+const manifest = { ...manifestResult.value, tasks: [...manifestResult.value.tasks].sort() }
+const runs = [...runsResult.value].sort((left, right) => {
+  const a = recordKey(left.task, left.replicate, left.policyHash)
+  const b = recordKey(right.task, right.replicate, right.policyHash)
+  return a < b ? -1 : a > b ? 1 : 0
+})
 const reasons: string[] = []
 const records = new Map<string, (typeof runs)[number]>()
 const policies = [manifest.incumbent.policyHash, manifest.candidate.policyHash]
@@ -69,7 +76,8 @@ if (manifest.candidate.generation !== manifest.incumbent.generation + 1)
   reasons.push("candidate generation does not immediately follow the incumbent")
 
 for (const strategy of [manifest.incumbent, manifest.candidate]) {
-  if (!strategy.text.trim() || strategy.text.includes("\0")) reasons.push(`policy ${strategy.policyHash} has invalid text`)
+  if (!strategy.text.trim() || strategy.text.includes("\0"))
+    reasons.push(`policy ${strategy.policyHash} has invalid text`)
   if (new Bun.CryptoHasher("sha256").update(strategy.text).digest("hex") !== strategy.policyHash)
     reasons.push(`policy ${strategy.policyHash} does not match its exact text`)
 }
@@ -78,7 +86,8 @@ for (const run of runs) {
   if (!manifest.tasks.includes(run.task)) reasons.push(`run references unknown task ${run.task}`)
   if (!policies.includes(run.policyHash)) reasons.push(`run ${run.task}/${run.replicate} has an unknown policy hash`)
   if (run.replicate >= manifest.replicates) reasons.push(`run ${run.task}/${run.replicate} was not preregistered`)
-  if (run.evaluatorHash !== manifest.evaluatorHash) reasons.push(`run ${run.task}/${run.replicate} has the wrong evaluator hash`)
+  if (run.evaluatorHash !== manifest.evaluatorHash)
+    reasons.push(`run ${run.task}/${run.replicate} has the wrong evaluator hash`)
   if (run.budgetHash !== manifest.budgetHash) reasons.push(`run ${run.task}/${run.replicate} has the wrong budget hash`)
   if (!run.budgetCompliant) reasons.push(`run ${run.task}/${run.replicate} exceeded its frozen budget`)
   if (!run.complete) reasons.push(`run ${run.task}/${run.replicate}/${run.policyHash} is incomplete`)
@@ -93,14 +102,18 @@ for (const run of runs) {
   records.set(key, run)
 }
 
-const expectedKeys = manifest.tasks.flatMap((task) =>
-  Array.from({ length: manifest.replicates }).flatMap((_, replicate) =>
-    policies.map((policyHash) => recordKey(task, replicate, policyHash)),
-  ),
-)
-for (const key of expectedKeys) {
-  if (!records.has(key)) reasons.push(`missing run ${key.replaceAll("\0", "/")}`)
-}
+// Unique admitted slots form a subset of the frozen Cartesian product. Equal
+// cardinality proves completeness without allocating attacker-sized replicate arrays.
+const expectedRuns = BigInt(manifest.tasks.length) * BigInt(manifest.replicates)
+if (BigInt(records.size) !== expectedRuns * 2n)
+  reasons.push(`missing or extra runs: expected ${expectedRuns * 2n}, received ${records.size}`)
+runs
+  .filter((run) => run.policyHash === manifest.incumbent.policyHash)
+  .forEach((baseline) => {
+    const successor = records.get(recordKey(baseline.task, baseline.replicate, manifest.candidate.policyHash))
+    if (successor && baseline.total !== successor.total)
+      reasons.push(`run ${baseline.task}/${baseline.replicate} changed the evaluation denominator`)
+  })
 
 const incumbent = summarize(manifest.incumbent.policyHash)
 const candidate = summarize(manifest.candidate.policyHash)
@@ -108,20 +121,18 @@ const lostFullPasses = incumbent.fullPasses.filter((task) => !candidate.fullPass
 const gainedFullPasses = candidate.fullPasses.filter((task) => !incumbent.fullPasses.includes(task))
 if (lostFullPasses.length > 0) reasons.push(`candidate lost full passes: ${lostFullPasses.join(", ")}`)
 
-const objective = compare()
+// Incomplete or conflicting records cannot define a winner, even provisionally.
+const objective = reasons.length > 0 ? { decision: "reject", metric: null, reason: "invalid evidence" } : compare()
 if (objective.decision === "reject") reasons.push(objective.reason)
 
-const canonicalRuns = [...runs].sort((left, right) =>
-  recordKey(left.task, left.replicate, left.policyHash).localeCompare(
-    recordKey(right.task, right.replicate, right.policyHash),
-  ),
-)
 const manifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(manifest)).digest("hex")
-const runsHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(canonicalRuns)).digest("hex")
+const runsHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(runs)).digest("hex")
 const body = {
   version: 1,
   decision: reasons.length === 0 ? "accept" : "reject",
-  reasons,
+  reasons: [...new Set(reasons)].sort(),
+  promotion: false,
+  evidenceScope: "Caller-supplied records only; acceptance neither authenticates evidence nor authorizes deployment.",
   objective: "retain-full-passes, then full-pass-count, mean-pass-rate, cost",
   incumbent,
   candidate,
@@ -143,33 +154,32 @@ function recordKey(task: string, replicate: number, policyHash: string) {
 }
 
 function summarize(policyHash: string) {
-  const selected = expectedKeys.flatMap((key) => {
-    const parts = key.split("\0")
-    if (parts[2] !== policyHash) return []
-    const run = records.get(key)
-    return run ? [run] : []
-  })
-  const fullPasses = manifest.tasks.filter((task) =>
-    Array.from({ length: manifest.replicates }).every((_, replicate) => {
-      const run = records.get(recordKey(task, replicate, policyHash))
-      return run?.complete === true && run.passed === run.total
-    }),
+  const selected = [...records.values()].filter(
+    (run) => run.policyHash === policyHash && manifest.tasks.includes(run.task) && run.replicate < manifest.replicates,
   )
+  const fullPasses = manifest.tasks.filter((task) => {
+    const trials = selected.filter((run) => run.task === task)
+    return (
+      trials.length === manifest.replicates &&
+      trials.every((run) => run.complete && run.delivered && run.passed === run.total)
+    )
+  })
   const mean = selected.reduce(
-    (total, run) => add(total, { numerator: BigInt(run.passed), denominator: BigInt(run.total) }),
+    (total, run) => add(total, { numerator: BigInt(run.delivered ? run.passed : 0), denominator: BigInt(run.total) }),
     { numerator: 0n, denominator: 1n },
   )
-  const divisor = BigInt(selected.length || 1)
+  const complete =
+    expectedRuns > 0n && BigInt(selected.length) === expectedRuns && selected.every((run) => run.complete)
+  const cost = selected.reduce((total, run) => total + (run.cost ?? 0), 0)
   return {
-    expectedRuns: manifest.tasks.length * manifest.replicates,
+    expectedRuns: expectedRuns.toString(),
     runs: selected.length,
     fullPasses,
     fullPassCount: fullPasses.length,
-    meanPassRate:
-      selected.length === 0 ? null : Number(mean.numerator) / Number(mean.denominator * divisor),
-    meanPassRateExact:
-      selected.length === 0 ? null : `${mean.numerator}/${mean.denominator * divisor}`,
-    cost: selected.reduce((total, run) => total + run.cost, 0),
+    // Divide before converting large exact sums: Number(bigint)/Number(bigint) can become Infinity/Infinity.
+    meanPassRate: complete ? Number((mean.numerator * 10n ** 15n) / (mean.denominator * expectedRuns)) / 1e15 : null,
+    meanPassRateExact: complete ? `${mean.numerator}/${mean.denominator * expectedRuns}` : null,
+    cost: complete && selected.every((run) => run.cost !== null) && Number.isFinite(cost) ? cost : null,
   }
 }
 
@@ -183,6 +193,8 @@ function compare() {
     return mean > 0
       ? { decision: "accept", metric: "mean-pass-rate", reason: "" }
       : { decision: "reject", metric: "mean-pass-rate", reason: "candidate mean pass rate is lower" }
+  if (candidate.cost === null || incumbent.cost === null)
+    return { decision: "reject", metric: "cost", reason: "cost tie-break requires complete accounting" }
   if (candidate.cost < incumbent.cost) return { decision: "accept", metric: "cost", reason: "" }
   return {
     decision: "reject",
@@ -191,10 +203,7 @@ function compare() {
   }
 }
 
-function add(
-  left: { numerator: bigint; denominator: bigint },
-  right: { numerator: bigint; denominator: bigint },
-) {
+function add(left: { numerator: bigint; denominator: bigint }, right: { numerator: bigint; denominator: bigint }) {
   const numerator = left.numerator * right.denominator + right.numerator * left.denominator
   const denominator = left.denominator * right.denominator
   const divisor = gcd(numerator, denominator)
