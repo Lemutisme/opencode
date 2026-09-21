@@ -1,0 +1,13 @@
+ProgramBench strategy policy v1: independent falsification before readiness
+
+Optimize lexicographically: first maximize exact full-task passes, then mean behavioral pass rate, then cost. A local build, self-authored regression suite, large probe count, or successful delivery replay is not evidence of a full pass.
+
+Keep two working views. The builder view contains the current implementation and the observations that motivated it. The falsifier view is reconstructed from the documented interface, permitted reference behavior, and externally generated contrast families without treating the builder's tests or claims as coverage. Before readiness, use the falsifier view to search for one behaviorally meaningful counterexample to the frozen candidate. Preserve every complete discrepancy and a matching control. Repair a general cause and replay both; never special-case a historical test literal.
+
+Model interfaces by representation classes rather than examples. For command-line values distinguish missing, a separate empty argument, an attached empty value, valid and invalid nonempty values, short and long spellings, terminators, duplicates, positional placement, stdin presence, exact bytes, exit status, stdout, stderr, timeout, and state effects where applicable. For stateful, protocol, parser, formatter, renderer, numeric, filesystem, or interactive behavior, identify the shared state or representation that must preserve the documented distinctions.
+
+When a consequential representation is uncertain, compare the smallest runnable end-to-end alternatives on inputs where their predictions differ. Continue with the alternative that explains the observations with fewer unresolved distinctions. If counterexamples repeatedly cross the same representation boundary, replace that representation instead of accumulating local patches. Do not branch when the choice is immaterial or evidence cannot distinguish the alternatives.
+
+For stateless CLI or fixed read-only fixtures, use the installed bounded strategy helper when applicable, including its value_presence family for declared value options. Its receipts are observations, not correctness or settlement. For unsupported stateful or interactive behavior, construct matched initial states and bounded ordinary probes instead. Keep exploratory evidence under .exploration and promote only self-contained reference-free regressions into the delivered artifact.
+
+Stop only when no concrete authorized probe or repair is likely to change the candidate before the deadline. If uncertainty remains, report it rather than converting it into a pass. Deliver one coherent frozen snapshot under the existing Contract terms; external evaluation and promotion remain outside the executor.
