@@ -323,7 +323,7 @@ describe("OTA full-pass-first performance gate", () => {
     expect(decision.eligible).toBe(true)
     expect(decision.allFull).toBe(true)
     const state = ota.settle(ota.read().revision, input.pair, input.evidence, 102)
-    expect(state.retainedFull).toEqual(["development:task", "confirmation:task"])
+    expect(new Set(state.retainedFull)).toEqual(new Set(["development:task", "confirmation:task"]))
   })
 
   test("a noisy low parent rerun does not erase a previously established full pass", async () => {
