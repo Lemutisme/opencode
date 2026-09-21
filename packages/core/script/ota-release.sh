@@ -49,6 +49,7 @@ case "$action" in
       --mount "type=bind,src=$bun,dst=/inputs/bun,readonly" \
       --mount "type=bind,src=$models,dst=/inputs/models.json,readonly" \
       --mount "type=bind,src=$patch,dst=/inputs/change.patch,readonly" \
+      --mount "type=bind,src=$here/ota-files.py,dst=/trusted/files.py,readonly" \
       --env HOME=/tmp --env TMPDIR=/tmp --env OPENCODE_VERSION=0.0.0-ota \
       --env OPENCODE_CHANNEL=ota --env MODELS_DEV_API_JSON=/inputs/models.json \
       --entrypoint /bin/sh "$image" -c 'sleep 21660' > "$output/container"
@@ -63,7 +64,8 @@ case "$action" in
       git -c core.hooksPath=/dev/null add --force --all
       if [ -s /inputs/change.patch ]; then git -c core.hooksPath=/dev/null apply --index --whitespace=nowarn /inputs/change.patch; fi
       git -c core.hooksPath=/dev/null -c user.name=OTA -c user.email=ota@localhost -c commit.gpgsign=false commit -qm source
-      git archive HEAD > /output/source.tar
+      # Export actual tracked bytes, not candidate-controlled export-ignore/subst.
+      python3 -I /trusted/files.py source /work/repo /output/source.tar
     ' 2>&1 | head -c 16777217 > "$output/source.log"
     phase=export-source
     docker exec "$name" /bin/tar -C /output -cf - -- source.tar | python3 -I "$here/ota-files.py" export "$output/source.tar" source.tar 1073741824

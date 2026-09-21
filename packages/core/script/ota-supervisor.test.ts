@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { link, mkdtemp, mkdir, rm, symlink, chmod } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { Artifacts, supervise } from "./ota-supervisor"
+import { Artifacts, evaluationWorkers, supervise } from "./ota-supervisor"
 import { configure } from "./ota-fixture"
 import { hash, OTA, subject } from "./ota-rsi"
 import { Sandbox } from "./ota-sandbox"
@@ -18,6 +18,39 @@ async function directory() {
 }
 
 describe("OTA artifact boundary", () => {
+  test("paired evaluation workers enforce concurrency and drain before returning", async () => {
+    const observed = { running: 0, peak: 0, finished: 0 }
+    await evaluationWorkers([0, 1, 2, 3, 4, 5], 3, async () => {
+      observed.running += 1
+      observed.peak = Math.max(observed.peak, observed.running)
+      const child = Bun.spawn(["python3", "-I", "-c", "import time;time.sleep(.1)"], {
+        stdout: "ignore",
+        stderr: "ignore",
+      })
+      expect(await child.exited).toBe(0)
+      observed.running -= 1
+      observed.finished += 1
+    })
+    expect(observed).toEqual({ running: 0, peak: 3, finished: 6 })
+  })
+
+  test("a failed evaluation aborts peers, drains them and admits no later work", async () => {
+    const seen: number[] = []
+    const completed: number[] = []
+    await expect(
+      evaluationWorkers([0, 1, 2, 3, 4], 2, async (value, signal) => {
+        seen.push(value)
+        if (value === 0) {
+          await Bun.sleep(20)
+          throw new Error("missing evidence")
+        }
+        while (!signal.aborted) await Bun.sleep(5)
+        completed.push(value)
+      }),
+    ).rejects.toThrow("missing evidence")
+    expect(seen).toEqual([0, 1])
+    expect(completed).toEqual([1])
+  })
   test("only one bounded regular inactive artifact can be imported", async () => {
     const root = await directory()
     const store = new Artifacts(path.join(root, "objects"))

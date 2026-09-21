@@ -236,6 +236,29 @@ describe("OTA full-pass-first performance gate", () => {
     ],
   }
 
+  test("a required historical full pass cannot be traded for mean gain or called a new gain", async () => {
+    const policy = { ...performance, requiredFull: ["development:task", "confirmation:task"] }
+    const { ota } = await fixture(policy)
+    const input = proposal(ota)
+    input.evidence.baseline.rows.slice(1).forEach((row) => {
+      row.passed = 150
+    })
+    const all = qualify(policy, ota.digest, input.pair, input.evidence)
+    expect(all.eligible).toBe(true)
+    expect(all.primaryImproved).toBe(false)
+    input.evidence.rows[1].passed = 199
+    expect(qualify(policy, ota.digest, input.pair, input.evidence).eligible).toBe(false)
+  })
+
+  test("control full passes are remembered even when the candidate is rejected", async () => {
+    const { ota } = await fixture(performance)
+    const input = proposal(ota)
+    input.evidence.rows[1].passed = 190
+    const rejected = ota.settle(ota.read().revision, input.pair, input.evidence, 102)
+    expect(rejected.retainedFull).toEqual(["development:task", "confirmation:task"])
+    expect(rejected.active.slot).toBe("s")
+  })
+
   test("a paired +2 pp mean gain can switch, without claiming primary improvement", async () => {
     const { ota } = await fixture(performance)
     const input = proposal(ota)

@@ -22,6 +22,9 @@ export type Protocol = {
   startupMs: number
   heartbeatMs: number
   probationMs: number
+  evaluationConcurrency?: number
+  stopOnPrimaryImprovement?: boolean
+  requiredFull?: string[]
 }
 export type Evidence = {
   protocol: string
@@ -47,6 +50,7 @@ export type State = {
   fallback?: Boot
   epoch: number
   trial: boolean
+  primaryImproved?: boolean
   job?: {
     id: string
     deadline: number
@@ -79,6 +83,12 @@ export class OTA {
   constructor(path: string, protocol: Protocol, seed: Pair) {
     requireHash(protocol.trusted)
     requirePair(seed)
+    if (
+      !Number.isInteger(protocol.evaluationConcurrency ?? 1) ||
+      (protocol.evaluationConcurrency ?? 1) < 1 ||
+      (protocol.evaluationConcurrency ?? 1) > 16
+    )
+      throw new Error("invalid evaluation concurrency")
     if (!protocol.tests.length || new Set(protocol.tests.map((test) => test.id)).size !== protocol.tests.length)
       throw new Error("nonempty fixed test manifest required")
     protocol.tests.forEach((test) => {
@@ -118,6 +128,13 @@ export class OTA {
       }
     }
     if (!protocol.tests.some((test) => !test.performance)) throw new Error("fixed safety tests required")
+    const assigned = new Set(
+      protocol.tests.flatMap((test) =>
+        test.performance ? [`${test.performance.panel}:${test.performance.task}`] : [],
+      ),
+    )
+    if ((protocol.requiredFull ?? []).some((task) => !assigned.has(task)))
+      throw new Error("required full pass is not assigned")
     ;[protocol.startupMs, protocol.heartbeatMs, protocol.probationMs].forEach((ms) => {
       if (!Number.isSafeInteger(ms) || ms <= 0 || ms > SIX_HOURS) throw new Error("invalid watchdog interval")
     })
@@ -235,6 +252,7 @@ export class OTA {
       if (evidence.baseline.subject !== subject(state.active.pair)) throw new Error("baseline is not the current pair")
       const decision = qualify(this.protocol, this.digest, pair, evidence, state.retainedFull)
       const passed = decision.eligible
+      if (decision.safety) state.retainedFull = [...new Set([...state.retainedFull, ...decision.baselineFull])]
       const id = ProContract.ID.make(`pct_ota_${hash(JSON.stringify([this.digest, state.job.id, subject(pair)]))}`)
       const spec = ProContract.Spec.make({
         trigger: { type: "immediate" },
@@ -308,6 +326,7 @@ export class OTA {
       }
       state.epoch += 1
       state.trial = true
+      state.primaryImproved = decision.primaryImproved
       state.retainedFull = [...new Set([...state.retainedFull, ...decision.full])]
       delete state.job
       return { evidence, decision, passed: true }
@@ -398,6 +417,7 @@ export class OTA {
       delete state.fallback
       state.epoch += 1
       state.trial = false
+      state.primaryImproved = false
       if (state.job) {
         // No fresh six-hour allowance after rollback or supervisor restart.
         state.job.started = now
@@ -493,18 +513,26 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
       (key) => !scores[1].full.includes(key),
     )
     const added = scores[1].full.filter((key) => !scores[0].full.includes(key))
+    const missingRequired = (protocol.requiredFull ?? []).filter(
+      (key) => key.startsWith(panel + ":") && !scores[1].full.includes(key),
+    )
     const improved = added.length > 0 || gain[0] * 10_000n >= BigInt(protocol.minimumMeanGainBps) * gain[1]
     return [
       {
         panel,
         lost,
         added,
+        baselineFull: scores[0].full,
         full: scores[1].full,
         totalTasks: tasks.length,
         meanGain: Number((gain[0] * 1_000_000_000_000n) / gain[1]) / 1_000_000_000_000,
         meanGainExact: gain.map(String),
         improved,
-        eligible: !lost.length && (improved || scores.every((score) => score.full.length === tasks.length)),
+        missingRequired,
+        eligible:
+          !lost.length &&
+          !missingRequired.length &&
+          (improved || scores.every((score) => score.full.length === tasks.length)),
       },
     ]
   })
@@ -516,8 +544,13 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
     safety,
     panels,
     full: panels.flatMap((panel) => panel.full),
+    baselineFull: panels.flatMap((panel) => panel.baselineFull),
     primaryImproved:
-      safety && panels.every((panel) => panel.eligible) && panels.some((panel) => panel.added.length > 0),
+      safety &&
+      panels.every((panel) => panel.eligible) &&
+      panels.some((panel) =>
+        panel.added.some((task) => !retained.includes(task) && !(protocol.requiredFull ?? []).includes(task)),
+      ),
     allFull: panels.length > 0 && safety && panels.every((panel) => panel.full.length === panel.totalTasks),
     scope: protocol.scope,
   }

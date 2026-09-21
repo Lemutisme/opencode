@@ -41,7 +41,8 @@ const ota = new OTA(path.join(root, "ota.sqlite"), config.protocol, {
 try {
   const state = await supervise(root, ota, artifacts, config.driver)
   await Bun.write(path.join(root, "STATUS.json"), JSON.stringify(state, null, 2))
-  process.exitCode = state.stopped?.startsWith("cancelled") ? 0 : 1
+  process.exitCode =
+    state.stopped?.startsWith("cancelled") || state.stopped === "full-pass improvement confirmed" ? 0 : 1
 } finally {
   ota.db.close()
 }

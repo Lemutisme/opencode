@@ -106,3 +106,15 @@ with tarfile.open(sys.argv[2],'w') as t:
   expect(await bad.exited).not.toBe(0)
   expect(await Bun.file(path.join(f.root, "escaped")).exists()).toBe(false)
 })
+
+test("full source snapshots cannot omit code through export-ignore attributes", async () => {
+  const f = await fixture()
+  await run(["git", "init", "-q", f.old])
+  await Bun.write(path.join(f.old, ".gitattributes"), "secret.ts export-ignore\n")
+  await Bun.write(path.join(f.old, "secret.ts"), "export const realCode = 1\n")
+  await run(["git", "-C", f.old, "add", "."])
+  const output = path.join(f.root, "source.tar")
+  await run(["python3", "-I", helper, "source", f.old, output])
+  const names = await run(["tar", "-tf", output])
+  expect(names).toContain("secret.ts")
+})

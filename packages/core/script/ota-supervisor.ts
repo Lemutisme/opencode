@@ -14,7 +14,13 @@ export type Job = {
   pair: { s: string; h: string }
   output: string
   memory: State["active"]["memory"]
-  feedback?: { eligible: boolean; developmentPassed?: number; developmentTotal?: number; preparationFailure?: string }
+  feedback?: {
+    eligible: boolean
+    developmentPassed?: number
+    developmentTotal?: number
+    development?: { task: string; replicate: string; passed: number; total: number; baselinePassed: number }[]
+    preparationFailure?: string
+  }
 }
 export type Worker = {
   result: Promise<void>
@@ -174,7 +180,10 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
       ) {
         const value = previous.details as {
           passed: boolean
-          evidence: { rows: { id: string; passed: number; total: number }[] }
+          evidence: {
+            rows: { id: string; passed: number; total: number }[]
+            baseline: { rows: { id: string; passed: number }[] }
+          }
         }
         const development = value.evidence.rows.filter(
           (row) => ota.protocol.tests.find((test) => test.id === row.id)?.performance?.panel === "development",
@@ -183,6 +192,16 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
           eligible: value.passed,
           developmentPassed: development.reduce((sum, row) => sum + row.passed, 0),
           developmentTotal: development.reduce((sum, row) => sum + row.total, 0),
+          development: development.map((row) => {
+            const assignment = ota.protocol.tests.find((test) => test.id === row.id)!.performance!
+            return {
+              task: assignment.task,
+              replicate: assignment.replicate,
+              passed: row.passed,
+              total: row.total,
+              baselinePassed: value.evidence.baseline.rows.find((item) => item.id === row.id)!.passed,
+            }
+          }),
         }
       }
       if (
@@ -214,6 +233,8 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
         while (!running.done) {
           if (await cancelled()) return "cancelled"
           const live = ota.read()
+          if (ota.protocol.stopOnPrimaryImprovement && live.primaryImproved && !live.trial)
+            return "full-pass improvement confirmed"
           if (Date.now() >= live.job!.deadline) return "original job deadline reached"
           if (ota.expired(live, Date.now())) return "progress heartbeat expired"
           const sequence = await bounded(worker.progress(), 5_000)
@@ -235,6 +256,7 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
         accounting: requireAccounting(accounting),
         originalDeadline: job.deadline,
       })
+      if (outcome === "full-pass improvement confirmed") return halt(outcome)
       if (outcome !== "handoff") {
         const live = ota.read()
         if (outcome === "cancelled" || outcome === "original job deadline reached" || !live.fallback)
@@ -243,6 +265,8 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
         continue
       }
       await verify()
+      if (ota.protocol.stopOnPrimaryImprovement && ota.read().primaryImproved)
+        return halt("full-pass improvement confirmed")
       const proposal = await artifacts.candidate(output, job.mutable)
       const live = ota.read()
       ota.handedOff(live.revision, state.epoch, job.id, Date.now(), accounting.checkpoint)
@@ -275,44 +299,62 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
         baseline: [] as { id: string; passed: number; total: number; valid: boolean }[],
         candidate: [] as { id: string; passed: number; total: number; valid: boolean }[],
       }
-      for (const version of ["baseline", "candidate"] as const) {
-        for (const test of ota.protocol.tests) {
-          if (await cancelled()) return halt("cancelled before evaluation")
+      // Interleave paired controls/candidates; each admission owns its own clock.
+      const assignments = ota.protocol.tests.flatMap((test) =>
+        (["baseline", "candidate"] as const).map((version) => ({ test, version })),
+      )
+      await evaluationWorkers(
+        assignments,
+        ota.protocol.evaluationConcurrency ?? 1,
+        async ({ test, version }, batch) => {
+          if (await cancelled()) throw new Error("cancelled before evaluation")
           await verify()
           const request = {
             test,
             pair: await artifacts.pair(version === "baseline" ? state.active.pair : pair),
             deadline: Date.now() + SIX_HOURS,
           }
-          // Each evaluator instance has its own durable ORIGINAL six-hour deadline.
           await record(`${name}-${version}-test-${hash(test.id)}-admission`, request)
           const abort = new AbortController()
+          const stop = () => abort.abort()
+          batch.addEventListener("abort", stop, { once: true })
           const waiting = { done: false }
           const watchdog = async () => {
             while (!waiting.done) {
-              if ((await cancelled()) || Date.now() >= request.deadline) {
+              if (batch.aborted || (await cancelled()) || Date.now() >= request.deadline) {
                 abort.abort()
                 throw new Error("evaluation cancelled or original deadline reached")
               }
               await Bun.sleep(100)
             }
           }
+          const work = driver.evaluate({ ...request, signal: abort.signal })
           const watch = watchdog()
-          const result = await Promise.race([driver.evaluate({ ...request, signal: abort.signal }), watch]).finally(
-            () => {
-              waiting.done = true
-              abort.abort()
-            },
-          )
-          await watch
-          if (!result || Date.now() >= request.deadline) throw new Error("incomplete or late evaluation")
-          await record(`${name}-${version}-test-${hash(test.id)}-result`, {
-            ...result,
-            accounting: requireAccounting(result.accounting),
-          })
-          tables[version].push({ id: test.id, passed: result.passed, total: result.total, valid: result.valid })
-        }
-      }
+          try {
+            const result = await Promise.race([work, watch])
+            if (!result || Date.now() >= request.deadline) throw new Error("incomplete or late evaluation")
+            await record(`${name}-${version}-test-${hash(test.id)}-result`, {
+              ...result,
+              accounting: requireAccounting(result.accounting),
+            })
+            if (!result.valid) throw new Error("invalid evaluator evidence; do not drop a failed assignment")
+            tables[version].push({ id: test.id, passed: result.passed, total: result.total, valid: result.valid })
+          } finally {
+            waiting.done = true
+            abort.abort()
+            batch.removeEventListener("abort", stop)
+            await watch.catch(() => undefined)
+            // Abort is not an acknowledgement. Drain before any promotion/rollback.
+            await bounded(
+              work.then(
+                () => undefined,
+                () => undefined,
+              ),
+              60_000,
+            )
+          }
+        },
+      )
       await verify()
       await artifacts.pair(pair)
       if (await cancelled()) return halt("cancelled before switch")
@@ -373,4 +415,28 @@ async function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
       timeout.timer = setTimeout(() => reject(new Error("control operation timed out")), ms)
     }),
   ]).finally(() => clearTimeout(timeout.timer))
+}
+
+export async function evaluationWorkers<T>(
+  items: readonly T[],
+  concurrency: number,
+  execute: (item: T, signal: AbortSignal) => Promise<void>,
+) {
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) throw new Error("invalid concurrency")
+  const queue = { next: 0 }
+  const abort = new AbortController()
+  const results = await Promise.allSettled(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (!abort.signal.aborted) {
+        const index = queue.next++
+        if (index >= items.length) return
+        await execute(items[index], abort.signal).catch((error) => {
+          abort.abort()
+          throw error
+        })
+      }
+    }),
+  )
+  const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (failed) throw failed.reason
 }

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 
@@ -45,6 +46,36 @@ def sync_tree(root):
 
 def main():
     action, *args = sys.argv[1:]
+    if action == 'source':
+        root, destination = map(Path, args)
+        root = root.resolve()
+        names = subprocess.check_output(['git', '-c', 'core.hooksPath=/dev/null', 'ls-files', '-z'], cwd=root, timeout=60).decode().rstrip('\0').split('\0')
+        total = 0
+        with tarfile.open(destination, 'w', format=tarfile.PAX_FORMAT) as archive:
+            for name in sorted(names):
+                path = root / name
+                if not name or Path(name).is_absolute() or set(Path(name).parts) & {'..', '.git'}:
+                    raise ValueError('unsafe source name')
+                info = path.lstat()
+                if path.resolve().is_relative_to(root) is False:
+                    raise ValueError('source link escapes its tree')
+                member = tarfile.TarInfo(name)
+                member.mode = 0o755 if info.st_mode & 0o111 else 0o644
+                if stat.S_ISLNK(info.st_mode):
+                    if Path(os.readlink(path)).is_absolute():
+                        raise ValueError('absolute source link')
+                    member.type, member.linkname = tarfile.SYMTYPE, os.readlink(path)
+                    archive.addfile(member)
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError('source contains special files')
+                total += info.st_size
+                if total > 1024 ** 3:
+                    raise ValueError('source archive limit')
+                member.size = info.st_size
+                with path.open('rb') as stream:
+                    archive.addfile(member, stream)
+        return
     if action == 'export':
         destination, expected, limit = Path(args[0]), args[1], int(args[2])
         with tarfile.open(fileobj=sys.stdin.buffer, mode='r|') as archive:
