@@ -115,3 +115,46 @@ Qualification is not experimental success. Read `STATUS.json`, generation-specif
 An inner task's fresh-context Falsifier is still **not implemented**; the independent
 boundary here is outer strategy evaluation and issuer-owned promotion. No claim of
 an independent within-task reviewer or per-tool-call strategy revision is made.
+
+## Live R3 → R4 checkpoint
+
+R3 finished both paired panels on 2026-09-21. Every task/version has two executions:
+
+| Panel                         | R2 robust full passes | R3 robust full passes |  R2 mean |  R3 mean |
+| ----------------------------- | --------------------: | --------------------: | -------: | -------: |
+| Development                   |                   0/3 |                   0/3 | 32.9688% | 36.8895% |
+| Sealed-to-search confirmation |                   0/3 |                   0/3 | 58.8039% | 77.6796% |
+
+Despite the mean gains, **R3 did not satisfy the primary objective and was not
+promoted**. Its performance Contract is `escalated`; its separate research-use
+Contract is `discharged`. R4's native binding and first real Sol Max provider
+request contain the exact R3 generator-policy bytes, SHA-256
+`92b2c29d6908086952adc515c45b313f98ab3277e15ff208255cff71e4eeda97`.
+The receipt is `R4-SUCCESSOR-ADMISSION.json` under the batch root. This establishes
+actual strategy succession, not improved generator intelligence.
+
+## Beyond the first frozen batch
+
+The separate continuation owner is
+`/home/duozhou/run-artifacts/procontract-sol-strategy-continuation-20260921`.
+Its runner is `/home/duozhou/ProgramBench-sol-rsi-next`, branch
+`strategy-successor`, commit `c839092`. Seventeen planner/comparator/native-kernel
+tests pass. Its comparator is byte-identical to the initial batch comparator.
+
+It waits without model work while the first batch is active. After an unpromoted
+batch closes, it checks the exact live research parent, freezes a new batch with
+that solver/generator pair, keeps the original R2 comparator, and allocates only
+previously unused confirmation tasks. The next batch also checks each evaluation
+version's own support and binding, rather than gating controls only on candidate
+qualification. No running or frozen batch is patched.
+
+Continuation stops on a verified **panel-scoped** primary gain, explicit
+cancellation, an infrastructure/incomplete-evidence fault, or exhaustion of the
+finite fresh-to-search task pool. Pool exhaustion is not success and does not
+permit recycling old confirmation blocks. It is not a cumulative provider/tool/
+request/money budget. Known full-pass retention is checked only on the measured
+panels; a global 200-task retention claim still requires a full matched evaluation.
+
+Create `CANCEL` in the continuation owner's directory to stop future batches and
+propagate cancellation to the currently owned batch. `TERMINAL.json` or a
+`FAILURE-*.json` records the eventual outcome; all prior negative artifacts remain.
