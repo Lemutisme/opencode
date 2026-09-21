@@ -39,18 +39,19 @@ Source examples in this checkout include `src/system-context`,
 These are examples, not the extent of H. Candidate source/build scripts execute
 only inside the isolated build/worker environment, never as host imports.
 
-The full implementation must bind **source tree + build inputs + runnable
-release/image digest** as H and actually start that release for both generation
-and evaluation. Keeping the old OpenCode binary and merely reading a new policy
-file does **not** implement this definition. A release manifest may be a small
-artifact; the complete source/image closure it names must be verified by the
-trusted materializer. The current generic artifact store and offline fixture do
-not yet provide that materializer or a full OpenCode build/deployment profile.
+The full implementation binds **source archive + build inputs + runnable binary
+digest + execution-image digest** as H and actually starts that release for both
+generation and evaluation. Keeping the old OpenCode binary and merely reading a
+new policy file does **not** implement this definition. The small release manifest
+is content-addressed; its referenced source, build evidence and executable are
+rehash-checked before use. `ota-opencode.ts` now supplies this full-release driver.
+The qualified target is the Linux headless OpenCode executable, not a claim that
+all desktop/UI/platform distributions have been built and tested.
 
 ### Memory and state are part of the rollout problem
 
 Rolling back code alone is insufficient when H can change memory/storage schemas.
-Before enabling full H mutation, the production driver must additionally:
+The full-release driver now:
 
 - Fence the old worker and checkpoint its derived memory/workspace state.
 - Boot the trial in a private, copy-on-write state namespace. A trial may not
@@ -61,10 +62,11 @@ Before enabling full H mutation, the production driver must additionally:
   original deadlines outside the rollback. Reverting derived memory must not
   erase facts or cause an already performed action to be replayed as new work.
 
-These full-release and persistent-memory properties are **not covered by the
-91-test offline qualification at `f47982a2e`**. That qualification proves the
-controller's pair switch, health fencing and exact artifact rollback with a small
-stateless fixture. It must not be reported as full OpenCode harness RSI.
+The earlier 91-test qualification at `f47982a2e` covered only a small stateless
+fixture. The new `ota-opencode-e2e.ts` separately exercises these properties with
+actual rebuilt OpenCode binaries, real native Sessions/tools, schema changes and
+private-state recovery. Its provider is explicitly scripted: this proves runtime
+wiring and recovery, **not Sol intelligence or benchmark improvement**.
 
 ## The small invariant
 
@@ -179,6 +181,24 @@ not zero; native and gateway overlapping cost sources must not be added together
 - `ota-run.ts`: OS-locked CLI for a trusted immutable application profile.
 - `ota-fixture.ts`: deterministic **no-model** profile for real-container checks.
   It executes and mutates actual S/H artifacts. It is not a Sol strategy experiment.
+- `ota-release.sh`: thin build/fence/checkpoint OS operations. Candidate source and
+  build scripts run in non-root, network-none containers; no host source execution.
+- `ota-files.py`: bounded single-file export and quiescent state copying, including
+  committed SQLite WAL. Files/directories are fsynced; links are never followed by
+  the host, and unsupported special files/hardlinks fail closed.
+- `ota-supplies.py`: freeze the full source commit, installed workspace dependencies,
+  Bun and model metadata for an offline build. No download or candidate execution.
+- `ota-native.ts`: start the **selected release binary** in a credential-isolated
+  container, communicate through the public native API, observe the external
+  gateway's completed requests, and positively stop the runtime and gateway.
+- `ota-opencode.ts`: full-release driver for proposer, materialization, independent
+  task evaluation and private-state lifecycle. Syntax/patch failures are recorded
+  as negative preparation Contracts and stay in the current partition; missing
+  infrastructure/evidence still stops rather than inventing performance scores.
+- `ota-profile.ts`: production CLI entrypoint loading a frozen operator-owned JSON
+  profile, independent grader module and a host-only provider credential.
+- `ota-opencode-e2e.ts`: actual OpenCode source mutation → build → native execution
+  → external gate → cold switch → successor request, plus failed-migration rollback.
 
 From `packages/core`:
 
@@ -201,17 +221,83 @@ switching, full-pass retention/priority, confirmation regression, cancellation
 and original-deadline preservation. These are controller properties, not evidence
 of model self-improvement.
 
-## Remaining live-experiment boundary
+## Full native E2E
 
-The generic `Driver` is trusted application wiring. A **production Sol profile
-is not included yet**. It must build and execute the complete mutable OpenCode
-release inside the credential-isolated worker boundary, keep the
-grader/gateway/admission/Kernel outside that code, pin the external trusted
-closure (not the evolvable worker binary), implement the memory/checkpoint
-boundary above, and report real host-observed progress and native accounting.
-`evaluate` must independently recompute
-scores rather than accepting a candidate-written report. An exit code or hash
-alone does not authenticate a model's claim.
+The following is an **offline mechanics qualification**, not a paid model run.
+Use new directories; prior artifacts and failed preparation attempts are retained.
+From `packages/core`, with an installed dependency tree and a pinned local image:
+
+```sh
+python3 -I script/ota-supplies.py \
+  /absolute/opencode-repository FULL_COMMIT_SHA \
+  /absolute/public-model-metadata.json sha256:IMAGE_ID /absolute/inputs
+
+# Freeze the already qualified deadline-only gateway, not an edited live cohort.
+cp /absolute/frozen-ProgramBench/scripts/campaign_provider_gateway.py \
+  /absolute/inputs/provider-gateway.py
+
+mkdir /absolute/qualification
+bash script/ota-release.sh build /absolute/qualification sha256:IMAGE_ID \
+  /absolute/inputs/source.tar /absolute/inputs/dependencies.tar \
+  /absolute/inputs/bun /absolute/inputs/models.json \
+  /absolute/inputs/empty.patch /absolute/qualification/seed
+
+bun script/ota-opencode-e2e.ts /absolute/qualification/healthy \
+  /absolute/inputs/supplies.json /absolute/qualification/seed healthy
+bun script/ota-opencode-e2e.ts /absolute/qualification/rollback \
+  /absolute/inputs/supplies.json /absolute/qualification/seed rollback
+```
+
+The healthy case changes actual context assembly, bash implementation and database
+schema, rebuilds OpenCode, runs the new H to produce S, then observes the new S
+in the next provider request. The failure case passes fresh-state checks but hangs
+after modifying its inherited memory. The external watchdog restores the prior
+binary and a fresh copy of the prior sealed memory, then observes the restored
+runtime's next real provider request. No reverse database migration is needed.
+
+Memory lineage (`id`, `parent`, exact checkpoint hash) is part of the same durable
+Kernel-controlled boot pointer as `(S,H)`, not an independently switched symlink.
+Trial state cannot become the rollback source. Bootstrap is explicit; old state
+formats are not silently migrated into an ongoing/frozen campaign. Aborted
+startup is fenced before rollback, and the original admitted deadline survives.
+
+## Live-experiment boundary
+
+`ota-opencode.driver(...)` accepts a pinned gateway, model/effort, upstream
+endpoint, and host-only credential, plus operator-owned task and grading functions.
+It runs both controls and candidates through their actual selected binaries in
+fresh evaluation namespaces; evaluator memory never becomes proposer memory.
+Real-provider usage stays in each host-side gateway ledger. Until independent
+cost reconciliation is supplied, monetary usage is explicitly incomplete/null,
+not zero and not the evolved runtime's self-reported cost. The scripted fixture
+alone records zero real model cost.
+
+An experiment profile uses `scope: performance`, replicated development and
+confirmation tasks, the frozen margin and independent grading. `task` supplies
+only legitimate task inputs; `grade` must independently recompute outcomes using
+safe exported artifacts, never candidate score claims. The provided mechanics
+test is not a replacement for ProgramBench and is not evidence of full-pass gains.
+No new paid Sol/ProgramBench OTA cohort has been launched by this qualification.
+
+To use the full driver with real provider/task evaluation:
+
+```sh
+# Credential is supplied to the host process, never passed as a CLI argument.
+OPENCODE_OTA_PROFILE=/absolute/frozen-profile.json \
+  bun script/ota-run.ts /absolute/new-campaign script/ota-profile.ts
+```
+
+The JSON names hash-bound `supplies`, `harness` (release manifest), `strategy`,
+`grader`, and optional transitive `authority` files. `provider` names the pinned
+gateway, exact `model`, `effort`, `upstream`, and the host credential's environment
+variable name (default `OPENAI_API_KEY`), never its value. `tests` uses the frozen
+safety/development/confirmation identities described above. The independent grader
+module exports `task(test)` → `{goal, brief, artifact}` and `grade({test,state,run,
+harness})` → `{passed,total,valid}`. Use `artifact(...)` for safe exported-file
+reads; do not follow guest-created links into the host. Task assets/environment
+and the grader's transitive dependencies belong in the operator-owned profile,
+not the candidate's proposed source. The mechanics grader is deliberately **not**
+automatically substituted for the requested ProgramBench evaluation.
 
 Before model work, qualify matching deadline-only support through configuration,
 Contract/Session admission, gateway and accounting, including continuation past

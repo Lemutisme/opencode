@@ -32,7 +32,12 @@ export type Evidence = {
   // Reference to issuer-recorded execution/accounting, including incomplete usage.
   receipt: string
 }
-type Boot = { slot: Slot; pair: Pair; support?: string }
+type Boot = {
+  slot: Slot
+  pair: Pair
+  memory: { id: string; parent?: string; origin?: string; checkpoint?: string }
+  support?: string
+}
 export type State = {
   revision: number
   protocol: string
@@ -136,7 +141,7 @@ export class OTA {
           protocol: this.digest,
           seed,
           kernel: ProContractKernel.empty,
-          active: { slot: "s", pair: seed },
+          active: { slot: "s", pair: seed, memory: { id: "e1" } },
           epoch: 1,
           trial: false,
           quarantine: [],
@@ -201,11 +206,15 @@ export class OTA {
 
   // Called only AFTER a useful completed handoff and acknowledged worker stop.
   // A short successful operation need not be kept busy to fill probation time.
-  handedOff(revision: number, epoch: number, job: string, now: number) {
+  handedOff(revision: number, epoch: number, job: string, now: number, checkpoint?: string) {
     return this.change(revision, now, "quiescent-handoff", (state) => {
       requireJob(state, epoch, job, now)
       if (state.job!.phase !== "running" || this.expired(state, now)) throw new Error("handoff arrived after lease")
       state.job!.phase = "evaluating"
+      if (checkpoint) {
+        requireHash(checkpoint)
+        state.active.memory.checkpoint = checkpoint
+      }
       state.trial = false
     })
   }
@@ -291,12 +300,60 @@ export class OTA {
         },
       })
       state.fallback = state.active
-      state.active = { slot: target, pair, support: id }
+      state.active = {
+        slot: target,
+        pair,
+        support: id,
+        memory: { id: `e${state.epoch + 1}`, parent: state.active.memory.id, origin: state.active.memory.checkpoint },
+      }
       state.epoch += 1
       state.trial = true
       state.retainedFull = [...new Set([...state.retainedFull, ...decision.full])]
       delete state.job
       return { evidence, decision, passed: true }
+    })
+  }
+
+  rejectPreparation(revision: number, pair: Pair, reason: string, receipt: string, now: number) {
+    return this.change(revision, now, "preparation-rejected", (state, commands) => {
+      if (state.job?.phase !== "evaluating") throw new Error("quiescent proposal required")
+      requireStanding(state, state.active)
+      requirePair(pair)
+      requireHash(receipt)
+      if (pair[state.active.slot] !== state.active.pair[state.active.slot]) throw new Error("active partition changed")
+      const id = ProContract.ID.make(`pct_ota_build_${hash(JSON.stringify([state.protocol, state.job.id, pair]))}`)
+      const spec = ProContract.Spec.make({
+        trigger: { type: "immediate" },
+        goal: "Qualify this source proposal for evaluation",
+        brief: JSON.stringify({ protocol: state.protocol, pair, job: state.job.id }),
+        requires: [],
+        authority: [],
+        budget: { deadline: now + 60_000 },
+        evidence: { type: "principal", claim: "The proposed artifact builds under the frozen recipe" },
+        resolution: { maxAttempts: 1, retryDelay: 0 },
+      })
+      apply(state, commands, {
+        type: "issue",
+        actor: issuer,
+        draft: {
+          id,
+          issuer,
+          executor: `partition-${state.active.slot}`,
+          scope: state.protocol,
+          spec,
+          specHash: ProContractKernel.hashSpec(spec),
+        },
+      })
+      apply(state, commands, {
+        type: "escalate",
+        actor: "institution",
+        contractID: id,
+        revision: 1,
+        reason: `Preparation failed: ${receipt}`,
+        time: now,
+      })
+      delete state.job
+      return { reason, receipt, performanceEvaluated: false }
     })
   }
 
@@ -330,7 +387,14 @@ export class OTA {
           })
       }
       state.quarantine.push(subject(state.active.pair))
-      state.active = state.fallback
+      state.active = {
+        ...state.fallback,
+        memory: {
+          id: `e${state.epoch + 1}`,
+          parent: state.fallback.memory.id,
+          origin: state.fallback.memory.checkpoint,
+        },
+      }
       delete state.fallback
       state.epoch += 1
       state.trial = false

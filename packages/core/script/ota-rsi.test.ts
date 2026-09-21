@@ -35,9 +35,9 @@ async function fixture(policy = protocol) {
   return { ota, file }
 }
 
-function proposal(ota: OTA, now = 100) {
+function proposal(ota: OTA, now = 100, checkpoint?: string) {
   const begun = ota.begin(ota.read().revision, now)
-  ota.handedOff(begun.revision, begun.epoch, begun.job!.id, now + 1)
+  ota.handedOff(begun.revision, begun.epoch, begun.job!.id, now + 1, checkpoint)
   const pair = { ...begun.active.pair, [begun.active.slot === "s" ? "h" : "s"]: hash(`next-${begun.epoch}`) }
   const evidence: Evidence = {
     protocol: ota.digest,
@@ -54,6 +54,25 @@ function proposal(ota: OTA, now = 100) {
 }
 
 describe("fixed Kernel OTA authority", () => {
+  test("memory lineage rolls back to the sealed parent, never the migrated trial", async () => {
+    const { ota } = await fixture()
+    const input = proposal(ota, 100, hash("sealed memory"))
+    ota.settle(ota.read().revision, input.pair, input.evidence, 102)
+    expect(ota.read().active.memory).toEqual({ id: "e2", parent: "e1", origin: hash("sealed memory") })
+    ota.rollback(ota.read().revision, "bad migration", 103)
+    expect(ota.read().active.memory).toEqual({ id: "e3", parent: "e1", origin: hash("sealed memory") })
+  })
+
+  test("a rejected build retains the active partition and permits another proposal, without inventing scores", async () => {
+    const { ota } = await fixture()
+    const input = proposal(ota)
+    const rejected = ota.rejectPreparation(ota.read().revision, input.pair, "syntax error", hash("build log"), 102)
+    expect(rejected.active.pair).toEqual(seed)
+    expect(rejected.epoch).toBe(1)
+    expect(Object.values(rejected.kernel.contracts)[0].status).toBe("escalated")
+    expect(ota.history().at(-1)).toMatchObject({ details: { performanceEvaluated: false } })
+    expect(ota.begin(rejected.revision, 103).job).toBeDefined()
+  })
   test("S changes only H, then H changes only S; qualification and switch are atomic", async () => {
     const { ota } = await fixture()
     const h = proposal(ota)
@@ -74,7 +93,7 @@ describe("fixed Kernel OTA authority", () => {
     const input = proposal(ota)
     input.evidence.rows[1].passed = 199
     const result = ota.settle(ota.read().revision, input.pair, input.evidence, 102)
-    expect(result.active).toEqual({ slot: "s", pair: seed })
+    expect(result.active).toMatchObject({ slot: "s", pair: seed })
     expect(Object.values(result.kernel.contracts)[0].status).toBe("escalated")
     expect(result.job).toBeUndefined()
   })

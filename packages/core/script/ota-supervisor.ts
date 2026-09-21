@@ -4,7 +4,7 @@ import path from "node:path"
 import { hash, opposite, OTA, SIX_HOURS, subject } from "./ota-rsi"
 import type { Pair, Protocol, Slot, State } from "./ota-rsi"
 
-export type Accounting = { source: string; knownCost: string | null; incomplete: boolean }
+export type Accounting = { source: string; knownCost: string | null; incomplete: boolean; checkpoint?: string }
 export type Job = {
   id: string
   epoch: number
@@ -13,7 +13,8 @@ export type Job = {
   deadline: number
   pair: { s: string; h: string }
   output: string
-  feedback?: { eligible: boolean; developmentPassed: number; developmentTotal: number }
+  memory: State["active"]["memory"]
+  feedback?: { eligible: boolean; developmentPassed?: number; developmentTotal?: number; preparationFailure?: string }
 }
 export type Worker = {
   result: Promise<void>
@@ -29,6 +30,13 @@ export type Driver = {
   // Recover/fence all processes owned by THIS campaign, including after a crash.
   fence(): Promise<void>
   start(job: Job): Promise<Worker>
+  // Materialize an inactive source proposal into a sealed runnable release.
+  // Runs after the producer has stopped, before independent evaluation.
+  prepare?(input: {
+    job: Job
+    proposal: string
+    signal: AbortSignal
+  }): Promise<Uint8Array | { rejected: true; reason: string; receipt: string }>
   // Runs OUTSIDE the proposer. Untrusted harness execution must be sandboxed away
   // from test authority, ledger, credentials, host filesystem and Docker socket.
   evaluate(input: {
@@ -146,13 +154,24 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
         deadline: state.job!.deadline,
         pair: await artifacts.pair(state.active.pair),
         output,
+        memory: state.active.memory,
       }
       const previous = ota
         .history()
         .findLast(
-          (event) => typeof event === "object" && event !== null && "type" in event && event.type === "qualification",
+          (event) =>
+            typeof event === "object" &&
+            event !== null &&
+            "type" in event &&
+            ["qualification", "preparation-rejected"].includes(String(event.type)),
         )
-      if (previous && typeof previous === "object" && "details" in previous) {
+      if (
+        previous &&
+        typeof previous === "object" &&
+        "details" in previous &&
+        "type" in previous &&
+        previous.type === "qualification"
+      ) {
         const value = previous.details as {
           passed: boolean
           evidence: { rows: { id: string; passed: number; total: number }[] }
@@ -166,8 +185,26 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
           developmentTotal: development.reduce((sum, row) => sum + row.total, 0),
         }
       }
+      if (
+        previous &&
+        typeof previous === "object" &&
+        "type" in previous &&
+        previous.type === "preparation-rejected" &&
+        "details" in previous
+      )
+        job.feedback = { eligible: false, preparationFailure: (previous.details as { reason: string }).reason }
       await record(name + "-admission", job)
-      const worker = await bounded(driver.start(job), 30_000)
+      const worker = await bounded(driver.start(job), Math.min(300_000, Math.max(1, job.deadline - Date.now()))).catch(
+        async (error) => {
+          await record(name + "-startup-failure", { error: String(error), usageIncomplete: true })
+          await bounded(driver.fence(), 30_000)
+          const live = ota.read()
+          if (!live.fallback || Date.now() >= job.deadline || (await cancelled())) throw error
+          ota.rollback(live.revision, `startup failed: ${error}`, Date.now())
+          return undefined
+        },
+      )
+      if (!worker) continue
       const running = { done: false }
       const completed = worker.result.then(
         () => "handoff",
@@ -206,9 +243,34 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
         continue
       }
       await verify()
-      const pair = { ...state.active.pair, [job.mutable]: await artifacts.candidate(output, job.mutable) }
+      const proposal = await artifacts.candidate(output, job.mutable)
       const live = ota.read()
-      ota.handedOff(live.revision, state.epoch, job.id, Date.now())
+      ota.handedOff(live.revision, state.epoch, job.id, Date.now(), accounting.checkpoint)
+      const prepared = new AbortController()
+      const preparing = setInterval(() => {
+        void cancelled().then((value) => {
+          if (value) prepared.abort()
+        })
+      }, 100)
+      const materialization = await (
+        driver.prepare
+          ? driver.prepare({ job, proposal: await artifacts.get(proposal), signal: prepared.signal })
+          : Bun.file(await artifacts.get(proposal)).bytes()
+      ).finally(() => clearInterval(preparing))
+      if (!(materialization instanceof Uint8Array)) {
+        await bounded(driver.fence(), 30_000)
+        ota.rejectPreparation(
+          ota.read().revision,
+          { ...state.active.pair, [job.mutable]: proposal },
+          materialization.reason,
+          materialization.receipt,
+          Date.now(),
+        )
+        continue
+      }
+      const replacement = await artifacts.put(materialization)
+      await record(name + "-materialization", { proposed: proposal, materialized: replacement })
+      const pair = { ...state.active.pair, [job.mutable]: replacement }
       const tables = {
         baseline: [] as { id: string; passed: number; total: number; valid: boolean }[],
         candidate: [] as { id: string; passed: number; total: number; valid: boolean }[],
