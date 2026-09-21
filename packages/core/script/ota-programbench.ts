@@ -18,6 +18,7 @@ export async function evaluate(input: Parameters<Driver["evaluate"]>[0] & { root
       evaluator: unknown
       assignments: Record<string, { instance: string; seed: number }>
       safety: Record<string, FileRef>
+      images?: Record<string, { tag: string; image: string }>
     }
   }
   const plan = config.programbench
@@ -35,6 +36,9 @@ export async function evaluate(input: Parameters<Driver["evaluate"]>[0] & { root
   }
   const assigned = plan.assignments[input.test.id]
   if (!assigned || !input.test.performance) throw new Error("unassigned ProgramBench test")
+  const image = plan.images?.[assigned.instance]
+  if (image && (await run(["docker", "image", "inspect", image.tag, "--format", "{{.Id}}"])).trim() !== image.image)
+    throw new Error("qualified task image changed")
   await Promise.all([checked(plan.bridge), checked(plan.configuration), checked(plan.metadata)])
   const parent = path.join(input.root, "programbench")
   await mkdir(parent, { recursive: true, mode: 0o700 })
@@ -53,6 +57,7 @@ export async function evaluate(input: Parameters<Driver["evaluate"]>[0] & { root
       configuration: plan.configuration,
       metadata: plan.metadata,
       evaluator: plan.evaluator,
+      expected_image: image?.image,
     }),
     { flag: "wx", mode: 0o400 },
   )
