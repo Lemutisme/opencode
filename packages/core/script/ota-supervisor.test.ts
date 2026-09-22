@@ -88,6 +88,73 @@ describe("OTA artifact boundary", () => {
 })
 
 describe.skipIf(!process.env.OPENCODE_OTA_IMAGE)("OTA real isolated processes (no model)", () => {
+  test.each(["healthy", "hang"])(
+    "operator readmission cold-boots or rolls back the selected pair (%s)",
+    async (mode) => {
+      const root = await directory()
+      const config = await configure(root, mode)
+      const artifacts = new Artifacts(path.join(root, "objects"))
+      const seed = { s: await artifacts.put(config.seed.s), h: await artifacts.put(config.seed.h) }
+      const pair = {
+        ...seed,
+        h: await artifacts.put(
+          new TextEncoder().encode(new TextDecoder().decode(config.seed.h).replace("VERSION = 0", "VERSION = 1")),
+        ),
+      }
+      const ota = new OTA(path.join(root, "ota.sqlite"), config.protocol, seed)
+      const rows = config.protocol.tests.map((test) => ({
+        id: test.id,
+        total: test.total,
+        passed: test.total,
+        valid: true,
+      }))
+      const readmission = {
+        manifest: hash("operator revision with archived observations; not a model improvement claim"),
+        checkpoint: hash("sealed fixture memory"),
+        pair,
+        evidence: {
+          protocol: hash("old protocol; never overwritten"),
+          subject: subject(pair),
+          job: "old-completed-job",
+          rows,
+          baseline: { subject: subject(seed), rows },
+          receipt: hash("archived fixture receipt"),
+        },
+      }
+      const waiting = { done: false }
+      const cancel = (async () => {
+        while (!waiting.done) {
+          if (ota.read().epoch >= 3) {
+            await Bun.write(path.join(root, "CANCEL"), "readmission qualification completed")
+            return
+          }
+          await Bun.sleep(50)
+        }
+      })()
+      try {
+        const state = await supervise(root, ota, artifacts, config.driver, readmission)
+        expect(state.epoch).toBe(3)
+        expect(state.stopped).toBe("cancelled")
+        expect(
+          (await Bun.file(path.join(root, "receipts/operator-readmission.json")).json()).data.evidence.protocol,
+        ).toBe(readmission.evidence.protocol)
+        const event = ota.history().find((value) => (value as { type: string }).type === "qualification") as {
+          details: { evidence: { protocol: string }; passed: boolean }
+        }
+        expect(event.details.passed).toBe(true)
+        expect(event.details.evidence.protocol).toBe(ota.digest)
+        expect(state.active.pair.h).toBe(mode === "healthy" ? pair.h : seed.h)
+        expect(Object.keys(state.kernel.attestations)).toHaveLength(mode === "healthy" ? 2 : 1)
+      } finally {
+        waiting.done = true
+        await cancel
+        await config.driver.fence()
+        ota.db.close()
+      }
+    },
+    90_000,
+  )
+
   test("restart fences an orphan before rolling back, preserving the admitted deadline", async () => {
     const root = await directory()
     const config = await configure(root, "healthy")

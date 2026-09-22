@@ -1,12 +1,14 @@
 // Production entrypoint for ota-run.ts. The JSON profile and grader module are
 // operator-owned; they must never come from a candidate's source/output tree.
 import { pathToFileURL } from "node:url"
+import path from "node:path"
 import { driver } from "./ota-opencode"
 import type { Configuration, Supplies } from "./ota-opencode"
 import { checked, reference, release } from "./ota-native"
 import type { FileRef } from "./ota-native"
 import type { Protocol } from "./ota-rsi"
-import type { Driver } from "./ota-supervisor"
+import { Artifacts } from "./ota-supervisor"
+import type { Driver, Readmission } from "./ota-supervisor"
 
 export async function configure(root: string) {
   const file = process.env.OPENCODE_OTA_PROFILE
@@ -21,12 +23,14 @@ export async function configure(root: string) {
     provider: { gateway: FileRef; model: string; effort: string; upstream: string; keyEnvironment?: string }
     tests: Protocol["tests"]
     minimumMeanGainBps?: number
+    performanceRule?: Protocol["performanceRule"]
     startupMs?: number
     heartbeatMs?: number
     probationMs?: number
     evaluationConcurrency?: number
     stopOnPrimaryImprovement?: boolean
     requiredFull?: string[]
+    readmission?: FileRef
   }
   const supplies = (await Bun.file(await checked(config.supplies)).json()) as Supplies
   const harness = await checked(config.harness)
@@ -36,6 +40,7 @@ export async function configure(root: string) {
   if (!text.trim() || text.includes("\0") || strategy.length > 65_536) throw new Error("invalid initial strategy")
   const key = process.env[config.provider.keyEnvironment ?? "OPENAI_API_KEY"]
   if (!key) throw new Error("host-only provider credential is missing")
+  const readmission = config.readmission ? await loadReadmission(root, config.readmission, config) : undefined
   const { task, grade, evaluate, fence } = (await import(pathToFileURL(await checked(config.grader)).href)) as Partial<
     Pick<Configuration, "task" | "grade">
   > & {
@@ -48,7 +53,14 @@ export async function configure(root: string) {
     root,
     supplies,
     provider: { ...config.provider, key },
-    authority: [await reference(import.meta.path), ref, config.supplies, config.grader, ...(config.authority ?? [])],
+    authority: [
+      await reference(import.meta.path),
+      ref,
+      config.supplies,
+      config.grader,
+      ...(config.authority ?? []),
+      ...(config.readmission ? [config.readmission] : []),
+    ],
     task:
       task ??
       (() => {
@@ -73,12 +85,15 @@ export async function configure(root: string) {
   }
   return {
     driver: value,
+    readmission,
     seed: { s: strategy, h: await Bun.file(harness).bytes() },
     protocol: {
       trusted: await value.fingerprint(),
       scope: "performance" as const,
       tests: config.tests,
-      minimumMeanGainBps: config.minimumMeanGainBps ?? 100,
+      performanceRule:
+        config.performanceRule ?? (config.minimumMeanGainBps === undefined ? "task-pareto" : "panel-margin"),
+      minimumMeanGainBps: config.minimumMeanGainBps,
       startupMs: config.startupMs ?? 1_200_000,
       heartbeatMs: config.heartbeatMs ?? 1_200_000,
       probationMs: config.probationMs ?? 60_000,
@@ -87,4 +102,50 @@ export async function configure(root: string) {
       requiredFull: config.requiredFull ?? [],
     },
   }
+}
+
+async function loadReadmission(
+  root: string,
+  ref: FileRef,
+  config: {
+    tests: Protocol["tests"]
+    strategy: FileRef
+    harness: FileRef
+    performanceRule?: Protocol["performanceRule"]
+  },
+) {
+  const input = (await Bun.file(await checked(ref)).json()) as {
+    kind: "operator-readmission-v1"
+    evidence: Readmission["evidence"]
+    pair: { s: FileRef; h: FileRef }
+    baseline: { s: FileRef; h: FileRef }
+    tests: Protocol["tests"]
+    sources: FileRef[]
+    memory: FileRef
+  }
+  if (input.kind !== "operator-readmission-v1" || config.performanceRule !== "task-pareto")
+    throw new Error("explicit task-pareto operator readmission required")
+  if (JSON.stringify(input.tests) !== JSON.stringify(config.tests)) throw new Error("readmission test manifest changed")
+  if (input.baseline.s.sha256 !== config.strategy.sha256 || input.baseline.h.sha256 !== config.harness.sha256)
+    throw new Error("readmission baseline differs from authorized seed")
+  if (path.resolve(input.memory.path) !== path.join(root, "memory", "e1.json"))
+    throw new Error("readmission must bind this cohort's private seed memory")
+  if (!input.sources.length) throw new Error("readmission provenance required")
+  await Promise.all(
+    [...input.sources, ...Object.values(input.baseline), ...Object.values(input.pair), input.memory].map(checked),
+  )
+  await release(input.pair.h.path)
+  const store = new Artifacts(path.join(root, "objects"))
+  const checkpoint = (await Bun.file(input.memory.path).json()).tree_sha256
+  if (typeof checkpoint !== "string" || !/^[a-f0-9]{64}$/.test(checkpoint))
+    throw new Error("sealed memory checkpoint required")
+  return {
+    manifest: ref.sha256,
+    pair: {
+      s: await store.put(await Bun.file(input.pair.s.path).bytes()),
+      h: await store.put(await Bun.file(input.pair.h.path).bytes()),
+    },
+    evidence: input.evidence,
+    checkpoint,
+  } satisfies Readmission
 }

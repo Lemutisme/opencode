@@ -13,7 +13,8 @@ export type Protocol = {
   // OpenCode worker runtime. That runtime belongs to H and changes with H.
   trusted: string
   scope: "mechanics" | "performance"
-  minimumMeanGainBps: number
+  performanceRule?: "panel-margin" | "task-pareto"
+  minimumMeanGainBps?: number
   tests: {
     id: string
     total: number
@@ -101,10 +102,15 @@ export class OTA {
       )
         throw new Error("invalid performance assignment")
     })
+    if (protocol.performanceRule !== undefined && !["panel-margin", "task-pareto"].includes(protocol.performanceRule))
+      throw new Error("unknown performance rule")
+    if (protocol.performanceRule === "task-pareto" && protocol.minimumMeanGainBps !== undefined)
+      throw new Error("task-pareto uses strict growth, not a mean margin")
     if (
-      !Number.isSafeInteger(protocol.minimumMeanGainBps) ||
-      protocol.minimumMeanGainBps <= 0 ||
-      protocol.minimumMeanGainBps > 10_000
+      protocol.performanceRule !== "task-pareto" &&
+      (!Number.isSafeInteger(protocol.minimumMeanGainBps) ||
+        protocol.minimumMeanGainBps! <= 0 ||
+        protocol.minimumMeanGainBps! > 10_000)
     )
       throw new Error("freeze a positive minimum mean gain in basis points")
     if (protocol.scope !== "mechanics" && protocol.scope !== "performance")
@@ -504,6 +510,7 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
       })
       const sum = summaries.map((row) => row.mean).reduce(add, [0n, 1n])
       return {
+        tasks: summaries,
         full: summaries.filter((row) => row.full).map((row) => `${panel}:${row.task}`),
         mean: [sum[0], sum[1] * BigInt(tasks.length)] as const,
       }
@@ -516,7 +523,15 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
     const missingRequired = (protocol.requiredFull ?? []).filter(
       (key) => key.startsWith(panel + ":") && !scores[1].full.includes(key),
     )
-    const improved = added.length > 0 || gain[0] * 10_000n >= BigInt(protocol.minimumMeanGainBps) * gain[1]
+    const changes = scores[1].tasks.map((task, index) => ({
+      task: `${panel}:${task.task}`,
+      gain: add(task.mean, [-scores[0].tasks[index].mean[0], scores[0].tasks[index].mean[1]]),
+    }))
+    const regressed = changes.filter((task) => task.gain[0] < 0n).map((task) => task.task)
+    const improved =
+      protocol.performanceRule === "task-pareto"
+        ? changes.some((task) => task.gain[0] > 0n)
+        : added.length > 0 || gain[0] * 10_000n >= BigInt(protocol.minimumMeanGainBps!) * gain[1]
     return [
       {
         panel,
@@ -529,10 +544,13 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
         meanGainExact: gain.map(String),
         improved,
         missingRequired,
+        regressed,
         eligible:
           !lost.length &&
           !missingRequired.length &&
-          (improved || scores.every((score) => score.full.length === tasks.length)),
+          (protocol.performanceRule === "task-pareto"
+            ? !regressed.length
+            : improved || scores.every((score) => score.full.length === tasks.length)),
       },
     ]
   })

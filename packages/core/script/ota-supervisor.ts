@@ -2,7 +2,14 @@ import { constants } from "node:fs"
 import { mkdir, open, readdir, rename, statfs } from "node:fs/promises"
 import path from "node:path"
 import { hash, opposite, OTA, SIX_HOURS, subject } from "./ota-rsi"
-import type { Pair, Protocol, Slot, State } from "./ota-rsi"
+import type { Evidence, Pair, Protocol, Slot, State } from "./ota-rsi"
+
+export type Readmission = {
+  manifest: string
+  pair: Pair
+  evidence: Evidence
+  checkpoint: string
+}
 
 export type Accounting = { source: string; knownCost: string | null; incomplete: boolean; checkpoint?: string }
 export type Job = {
@@ -110,7 +117,13 @@ export class Artifacts {
 /** Run under an OS-held exclusive lock (see CLI). No candidate process executes
  * in this address space. The driver is trusted, immutable application wiring.
  */
-export async function supervise(root: string, ota: OTA, artifacts: Artifacts, driver: Driver) {
+export async function supervise(
+  root: string,
+  ota: OTA,
+  artifacts: Artifacts,
+  driver: Driver,
+  readmission?: Readmission,
+) {
   const receipts = path.join(root, "receipts")
   await mkdir(receipts, { recursive: true, mode: 0o700 })
   const record = async (name: string, data: unknown) => {
@@ -141,6 +154,33 @@ export async function supervise(root: string, ota: OTA, artifacts: Artifacts, dr
       if (state.trial && state.fallback && (!state.job || Date.now() < state.job.deadline))
         ota.rollback(state.revision, "supervisor restarted during unconfirmed boot", Date.now())
       else return halt("interrupted work: fenced; no implicit provider retry")
+    }
+    // An operator may re-adjudicate sealed observations under a NEW protocol.
+    // This is not a model handoff or a retry, and it never rewrites old standing.
+    if (readmission && state.revision === 0) {
+      if (await cancelled()) return halt("cancelled before readmission")
+      await artifacts.pair(readmission.pair)
+      const receipt = await record("operator-readmission", readmission)
+      const admitted = ota.begin(state.revision, Date.now())
+      const ready = ota.handedOff(
+        admitted.revision,
+        admitted.epoch,
+        admitted.job!.id,
+        Date.now(),
+        readmission.checkpoint,
+      )
+      const selected = ota.settle(
+        ready.revision,
+        readmission.pair,
+        {
+          ...readmission.evidence,
+          protocol: ota.digest,
+          job: admitted.job!.id,
+          receipt,
+        },
+        Date.now(),
+      )
+      if (!selected.trial) return halt("operator readmission rejected")
     }
     while (!ota.read().stopped) {
       await verify()

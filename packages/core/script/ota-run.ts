@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url"
 import { OTA } from "./ota-rsi"
 import type { Protocol } from "./ota-rsi"
 import { Artifacts, supervise } from "./ota-supervisor"
-import type { Driver } from "./ota-supervisor"
+import type { Driver, Readmission } from "./ota-supervisor"
 
 const [rootArg, profileArg, locked] = process.argv.slice(2)
 if (!rootArg || !profileArg) throw new Error("usage: bun script/ota-run.ts ROOT TRUSTED_PROFILE")
@@ -30,7 +30,9 @@ if (locked !== "--locked") {
   process.exit(await child.exited)
 }
 const { configure } = (await import(pathToFileURL(profile).href)) as {
-  configure(root: string): Promise<{ protocol: Protocol; seed: { s: Uint8Array; h: Uint8Array }; driver: Driver }>
+  configure(
+    root: string,
+  ): Promise<{ protocol: Protocol; seed: { s: Uint8Array; h: Uint8Array }; driver: Driver; readmission?: Readmission }>
 }
 const config = await configure(root)
 const artifacts = new Artifacts(path.join(root, "objects"))
@@ -39,7 +41,7 @@ const ota = new OTA(path.join(root, "ota.sqlite"), config.protocol, {
   h: await artifacts.put(config.seed.h),
 })
 try {
-  const state = await supervise(root, ota, artifacts, config.driver)
+  const state = await supervise(root, ota, artifacts, config.driver, config.readmission)
   await Bun.write(path.join(root, "STATUS.json"), JSON.stringify(state, null, 2))
   process.exitCode =
     state.stopped?.startsWith("cancelled") || state.stopped === "full-pass improvement confirmed" ? 0 : 1

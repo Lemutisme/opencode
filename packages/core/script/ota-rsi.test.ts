@@ -237,6 +237,115 @@ describe("OTA full-pass-first performance gate", () => {
     ],
   }
 
+  const pareto: Protocol = { ...performance, performanceRule: "task-pareto", minimumMeanGainBps: undefined }
+
+  test("task-pareto accepts exact positive growth even below one basis point and with a tied confirmation panel", async () => {
+    const { ota } = await fixture({
+      ...pareto,
+      tests: pareto.tests.map((test) => (test.performance ? { ...test, total: 1_000_000_000 } : test)),
+    })
+    const input = proposal(ota)
+    input.evidence.baseline.rows.slice(1).forEach((row) => {
+      row.passed = 500_000_000
+    })
+    input.evidence.rows.slice(1).forEach((row) => {
+      row.passed = 500_000_000
+    })
+    input.evidence.rows[1].passed += 1
+    const decision = qualify(ota.protocol, ota.digest, input.pair, input.evidence)
+    expect(decision.eligible).toBe(true)
+    expect(decision.primaryImproved).toBe(false)
+    expect(decision.panels[0].meanGainExact).toEqual(["1", "2000000000"])
+    expect(decision.panels[1].improved).toBe(false)
+    expect(ota.settle(ota.read().revision, input.pair, input.evidence, 102).active.slot).toBe("h")
+  })
+
+  test.each([150, 200])("task-pareto rejects all ties, including all-full panels (%i)", async (passed) => {
+    const { ota } = await fixture(pareto)
+    const input = proposal(ota)
+    input.evidence.baseline.rows.slice(1).forEach((row) => {
+      row.passed = passed
+    })
+    input.evidence.rows.slice(1).forEach((row) => {
+      row.passed = passed
+    })
+    expect(ota.settle(ota.read().revision, input.pair, input.evidence, 102).active.pair).toEqual(seed)
+  })
+
+  test.each([180, 200])(
+    "task-pareto cannot hide a task decline with another task's gain or new full pass (%i)",
+    async (passed) => {
+      const { ota } = await fixture({
+        ...pareto,
+        tests: pareto.tests.flatMap((test) =>
+          test.performance
+            ? [test, { ...test, id: test.id + "/other", performance: { ...test.performance, task: "other" } }]
+            : [test],
+        ),
+      })
+      const input = proposal(ota)
+      input.evidence.baseline.rows.slice(1).forEach((row) => {
+        row.passed = 150
+      })
+      input.evidence.rows.slice(1).forEach((row) => {
+        row.passed = row.id.endsWith("/other") ? passed : 149
+      })
+      const decision = qualify(ota.protocol, ota.digest, input.pair, input.evidence)
+      expect(decision.panels.every((panel) => panel.meanGain > 0)).toBe(true)
+      expect(decision.panels[0].regressed).toEqual(["development:task"])
+      expect(decision.eligible).toBe(false)
+      expect(decision.primaryImproved).toBe(false)
+      expect(ota.settle(ota.read().revision, input.pair, input.evidence, 102).active.pair).toEqual(seed)
+    },
+  )
+
+  test("task-pareto compares each task's replicate mean, not individual stochastic replicates", async () => {
+    const { ota } = await fixture(pareto)
+    const input = proposal(ota)
+    input.evidence.baseline.rows.slice(1).forEach((row) => {
+      row.passed = 150
+    })
+    input.evidence.rows.slice(1).forEach((row) => {
+      row.passed = row.id.endsWith("/0") ? 149 : 153
+    })
+    expect(qualify(ota.protocol, ota.digest, input.pair, input.evidence).eligible).toBe(true)
+  })
+
+  test.each(["safety", "retained-full", "required-full", "invalid"])(
+    "task-pareto retains the %s guard",
+    async (kind) => {
+      const { ota } = await fixture({ ...pareto, requiredFull: kind === "required-full" ? ["development:task"] : [] })
+      const input = proposal(ota)
+      input.evidence.baseline.rows.slice(1).forEach((row) => {
+        row.passed = 150
+      })
+      input.evidence.rows.slice(1).forEach((row) => {
+        row.passed = 190
+      })
+      if (kind === "safety") input.evidence.rows[0].passed -= 1
+      if (kind === "invalid") {
+        input.evidence.rows[1].valid = false
+        expect(() => qualify(ota.protocol, ota.digest, input.pair, input.evidence)).toThrow("incomplete")
+        return
+      }
+      expect(
+        qualify(
+          ota.protocol,
+          ota.digest,
+          input.pair,
+          input.evidence,
+          kind === "retained-full" ? ["development:task"] : [],
+        ).eligible,
+      ).toBe(false)
+    },
+  )
+
+  test("task-pareto is a new frozen rule, never a zero sentinel or a hot protocol replacement", async () => {
+    const { file } = await fixture(performance)
+    expect(() => new OTA(file, { ...pareto, minimumMeanGainBps: 0 }, seed)).toThrow("strict growth")
+    expect(() => new OTA(file, pareto, seed)).toThrow("protocol or seed changed")
+  })
+
   test("a required historical full pass cannot be traded for mean gain or called a new gain", async () => {
     const policy = { ...performance, requiredFull: ["development:task", "confirmation:task"] }
     const { ota } = await fixture(policy)
