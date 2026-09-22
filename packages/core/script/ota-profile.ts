@@ -78,7 +78,7 @@ export async function configure(root: string) {
       trusted: await value.fingerprint(),
       scope: "performance" as const,
       tests: config.tests,
-      minimumMeanGainBps: config.minimumMeanGainBps ?? 200,
+      minimumMeanGainBps: config.minimumMeanGainBps ?? 100,
       startupMs: config.startupMs ?? 1_200_000,
       heartbeatMs: config.heartbeatMs ?? 1_200_000,
       probationMs: config.probationMs ?? 60_000,

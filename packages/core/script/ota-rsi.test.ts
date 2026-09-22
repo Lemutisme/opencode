@@ -192,6 +192,7 @@ describe("fixed Kernel OTA authority", () => {
 
   test("fixed protocol cannot be changed across restart or through object mutation", async () => {
     const { ota, file } = await fixture()
+    expect(() => new OTA(file, { ...protocol, minimumMeanGainBps: 100 }, seed)).toThrow("protocol or seed changed")
     expect(() => new OTA(file, { ...protocol, tests: protocol.tests.slice(0, 1) }, seed)).toThrow(
       "protocol or seed changed",
     )
@@ -259,24 +260,40 @@ describe("OTA full-pass-first performance gate", () => {
     expect(rejected.active.slot).toBe("s")
   })
 
-  test("a paired +2 pp mean gain can switch, without claiming primary improvement", async () => {
-    const { ota } = await fixture(performance)
+  test.each([100, 200])(
+    "a paired gain at the %i bps threshold can switch, without claiming primary improvement",
+    async (margin) => {
+      const policy = { ...performance, minimumMeanGainBps: margin }
+      const { ota } = await fixture(policy)
+      const input = proposal(ota)
+      input.evidence.baseline.rows.slice(1).forEach((row) => {
+        row.passed = 150
+      })
+      input.evidence.rows.slice(1).forEach((row) => {
+        row.passed = 150 + margin / 50
+      })
+      const decision = qualify(policy, ota.digest, input.pair, input.evidence)
+      expect(decision.eligible).toBe(true)
+      expect(decision.primaryImproved).toBe(false)
+      expect(decision.allFull).toBe(false)
+      expect(decision.panels.map((panel) => panel.meanGainExact)).toEqual([
+        ["1", String(10_000 / margin)],
+        ["1", String(10_000 / margin)],
+      ])
+      expect(ota.settle(ota.read().revision, input.pair, input.evidence, 102).active.slot).toBe("h")
+    },
+  )
+
+  test.each([100, 200])("a gain below %i bps cannot switch", async (margin) => {
+    const { ota } = await fixture({ ...performance, minimumMeanGainBps: margin })
     const input = proposal(ota)
     input.evidence.baseline.rows.slice(1).forEach((row) => {
       row.passed = 150
     })
     input.evidence.rows.slice(1).forEach((row) => {
-      row.passed = 154
+      row.passed = 149 + margin / 50
     })
-    const decision = qualify(performance, ota.digest, input.pair, input.evidence)
-    expect(decision.eligible).toBe(true)
-    expect(decision.primaryImproved).toBe(false)
-    expect(decision.allFull).toBe(false)
-    expect(decision.panels.map((panel) => panel.meanGainExact)).toEqual([
-      ["1", "50"],
-      ["1", "50"],
-    ])
-    expect(ota.settle(ota.read().revision, input.pair, input.evidence, 102).active.slot).toBe("h")
+    expect(ota.settle(ota.read().revision, input.pair, input.evidence, 102).active.pair).toEqual(seed)
   })
 
   test.each(["too-small", "confirmation-regression", "safety-failure", "lost-full", "old-baseline"])(

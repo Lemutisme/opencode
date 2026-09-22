@@ -42,6 +42,26 @@ signal and can overfit; full-200/generalization claims need separate evaluation.
 
 ## Execution and authority
 
+### Operator threshold revision (2026-09-22)
+
+The user authorized a +1 percentage-point task-equal mean gain as sufficient for
+mean-only advancement. New profiles default to `minimumMeanGainBps: 100`; explicit
+frozen values still take precedence. Full-pass priority, retention floors, both
+panels, repeated execution, safety, recovery and evidence requirements are unchanged.
+
+The 2026-09-21 campaign remains frozen at 200 bps. Its live profile, authority DB,
+source, deadlines and historical decisions must not be rewritten. The separate
+operator revision and staged 100-bps profile are recorded at
+`/home/duozhou/run-artifacts/procontract-sol-ota-policy-20260922`.
+This revision is not yet a running cohort or a promotion. Applying it requires a
+separately qualified authority boundary, never replacing the live protocol in place.
+The user saw H1's development gain (+1.318642 pp) before changing the threshold;
+any re-analysis of that evidence is explicitly post-hoc, not a preregistered win.
+Development clearance alone does not authorize switching before confirmation and
+full-pass retention have completed.
+
+### Frozen campaign execution
+
 At most six external evaluation allocations run concurrently, interleaving paired
 controls and candidates. Every allocation receives its own original six-hour
 deadline before setup. The same deadline reaches native Contract admission,
