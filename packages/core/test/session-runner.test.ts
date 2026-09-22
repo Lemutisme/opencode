@@ -773,7 +773,11 @@ describe("SessionRunnerLLM", () => {
         output: Schema.String,
         execute: () => Effect.succeed("reference"),
       })
-      yield* registry.register({ reference_run: reference, reference_read: reference })
+      yield* registry.register({
+        reference_run: reference,
+        reference_contrast: reference,
+        reference_read: reference,
+      })
       const contracts = yield* ProContract.Service
       const bindings = yield* ProContractOpenCode.Service
       const session = yield* SessionV2.Service
@@ -876,7 +880,11 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(blockedAttempt!.sessionID)
 
       expect(requests).toHaveLength(1)
-      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["reference_run", "reference_read"])
+      expect(requests[0]?.tools.map((tool) => tool.name)).toEqual([
+        "reference_run",
+        "reference_contrast",
+        "reference_read",
+      ])
       const projected = requests[0]?.system.map((part) => part.text).join("\n") ?? ""
       expect(projected).toContain("Contract execution: this Session is already bound")
       expect(projected).toContain("Admission is complete")

@@ -10,6 +10,7 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { QuestionTool } from "./question"
 import { ReadTool } from "./read"
+import { ReferenceTools } from "./reference"
 import { SessionObservationTools } from "./observation"
 import { SkillTool } from "./skill"
 import { TodoWriteTool } from "./todowrite"
@@ -42,6 +43,7 @@ export const node = makeLocationNode({
     GrepTool.node,
     QuestionTool.node,
     ReadTool.node,
+    ReferenceTools.configuredNode,
     SessionObservationTools.configuredNode,
     SkillTool.node,
     TodoWriteTool.node,

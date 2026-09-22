@@ -36,7 +36,8 @@ describe("host-configured reference tools", () => {
           const candidate = AbsolutePath.make(path.join(tmp.path, "candidate"))
           const reference = AbsolutePath.make(path.join(tmp.path, "reference"))
           const executable = AbsolutePath.make(path.join(reference, "program"))
-          const source = "#!/bin/sh\ncat\n"
+          const source =
+            '#!/bin/sh\nif [ "$1" = "--constant" ]; then printf "shared setup failure\\n" >&2; exit 2; fi\ncat\n'
           const contractID = ProContract.ID.make("pct_reference_tools")
           yield* Effect.promise(async () => {
             await fs.mkdir(candidate)
@@ -64,7 +65,7 @@ describe("host-configured reference tools", () => {
               spec: {
                 ...base,
                 authority: ["reference.run"],
-                budget: { ...base.budget, actions: 5 },
+                budget: { ...base.budget, actions: 9 },
               },
             })
             yield* bindings.create({
@@ -97,7 +98,7 @@ describe("host-configured reference tools", () => {
               .pipe(Effect.orDie)
 
             const catalog = (yield* registry.materialize()).definitions
-            expect(catalog.map((item) => item.name)).toEqual(["reference_run", "reference_read"])
+            expect(catalog.map((item) => item.name)).toEqual(["reference_run", "reference_contrast", "reference_read"])
             expect(catalog[0]?.description).toContain(Hash.sha256(Buffer.from(source)))
             const invoke = (name: string, input: unknown, sessionID = binding.sessionID) =>
               settleTool(registry, {
@@ -129,6 +130,70 @@ describe("host-configured reference tools", () => {
             expect(read.output?.structured).toMatchObject({
               content: { data: Buffer.from("observed\n").toString("base64") },
             })
+            const invalidContrast = yield* invoke("reference_contrast", {
+              hypothesis: "A contrast needs distinct case identities",
+              expected: "different",
+              left: { label: "same", args: [], stdin: "unchanged" },
+              right: { label: "same", args: [], stdin: "unchanged" },
+            })
+            expect(invalidContrast.result).toMatchObject({
+              type: "error",
+              value: "Reference contrast labels must be distinct",
+            })
+            expect((yield* bindings.get(contractID))?.actionsUsed).toBe(2)
+
+            const contrasted = yield* invoke("reference_contrast", {
+              hypothesis: "Two valid inputs should select different semantic paths",
+              expected: "different",
+              left: { label: "first", args: [], stdin: "left\n" },
+              right: { label: "second", args: [], stdin: "right\n" },
+            })
+            expect(contrasted.output?.structured).toMatchObject({
+              relation: "different-exact-outcome",
+              exactRelationMet: true,
+              left: {
+                status: "completed",
+                observation: { receipt: { execution: "completed", exit: 0 } },
+                preview: { stdout: "left\n" },
+              },
+              right: {
+                status: "completed",
+                observation: { receipt: { execution: "completed", exit: 0 } },
+                preview: { stdout: "right\n" },
+              },
+            })
+            const contrastedOutput = Schema.decodeUnknownSync(ReferenceTools.ContrastOutput)(
+              contrasted.output?.structured,
+            )
+            expect(contrastedOutput.left.outcomeHash).not.toBe(contrastedOutput.right.outcomeHash)
+            expect((yield* bindings.get(contractID))?.actionsUsed).toBe(4)
+
+            const collapsed = yield* invoke("reference_contrast", {
+              hypothesis: "Different valid files should reach different analysis paths",
+              expected: "different",
+              left: { label: "alpha", args: ["--constant", "alpha.c"], stdin: "" },
+              right: { label: "beta", args: ["--constant", "beta.c"], stdin: "" },
+            })
+            expect(collapsed.output?.structured).toMatchObject({
+              relation: "same-exact-outcome",
+              exactRelationMet: false,
+              left: {
+                status: "completed",
+                observation: { receipt: { execution: "completed", exit: 2, targetExecution: "unobserved" } },
+                preview: { stderr: "shared setup failure\n" },
+              },
+              right: {
+                status: "completed",
+                observation: { receipt: { execution: "completed", exit: 2, targetExecution: "unobserved" } },
+                preview: { stderr: "shared setup failure\n" },
+              },
+            })
+            const collapsedOutput = Schema.decodeUnknownSync(ReferenceTools.ContrastOutput)(
+              collapsed.output?.structured,
+            )
+            expect(collapsedOutput.interpretation).toContain("pre-dispatch obstruction")
+            expect(collapsedOutput.left.outcomeHash).toBe(collapsedOutput.right.outcomeHash)
+            expect((yield* bindings.get(contractID))?.actionsUsed).toBe(6)
             expect(
               (yield* invoke("reference_run", { args: [], stdin: "" }, SessionSchema.ID.make("ses_unbound"))).result
                 .type,
@@ -157,7 +222,7 @@ describe("host-configured reference tools", () => {
               (yield* invoke("reference_read", { handle: record.handle, stream: "stdout", offset: 0, length: 64 }))
                 .result,
             ).toMatchObject({ type: "error", value: "Contract action budget exhausted" })
-            expect(yield* bindings.get(contractID)).toMatchObject({ actionsUsed: 5, attempts: 1 })
+            expect(yield* bindings.get(contractID)).toMatchObject({ actionsUsed: 9, attempts: 1 })
             expect((yield* contracts.get(contractID))?.handoff).toBeUndefined()
           }).pipe(
             Effect.provide(

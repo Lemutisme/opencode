@@ -302,6 +302,7 @@ const layer = Layer.effect(
             ...(authority.includes("reference.run")
               ? [
                   { action: "reference_run", resource: "*", effect: "allow" as const },
+                  { action: "reference_contrast", resource: "*", effect: "allow" as const },
                   { action: "reference_read", resource: "*", effect: "allow" as const },
                 ]
               : []),
@@ -309,6 +310,7 @@ const layer = Layer.effect(
         : [
             { action: "mutate_run", resource: "*", effect: "deny" as const },
             { action: "reference_run", resource: "*", effect: "deny" as const },
+            { action: "reference_contrast", resource: "*", effect: "deny" as const },
             { action: "reference_read", resource: "*", effect: "deny" as const },
             { action: "contract_check", resource: "*", effect: "deny" as const },
             { action: "contract_read_observation", resource: "*", effect: "deny" as const },

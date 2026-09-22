@@ -163,6 +163,7 @@ describe("Session observation packing", () => {
         "contract_check",
         "contract_report_ready",
         "reference_run",
+        "reference_contrast",
         "reference_read",
         SessionObservationPack.toolName,
       ].map((name) => ({ ...tool, name })),
