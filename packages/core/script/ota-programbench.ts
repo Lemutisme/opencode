@@ -7,7 +7,7 @@ import type { Driver } from "./ota-supervisor"
 
 export async function evaluate(input: Parameters<Driver["evaluate"]>[0] & { root: string }) {
   const config = (await Bun.file(process.env.OPENCODE_OTA_PROFILE!).json()) as {
-    provider: { upstream: string; keyEnvironment?: string }
+    provider: { model: string; effort: string; upstream: string; keyEnvironment?: string }
     programbench: {
       runner: string
       commit: string
@@ -49,6 +49,8 @@ export async function evaluate(input: Parameters<Driver["evaluate"]>[0] & { root
     request,
     JSON.stringify({
       instance: assigned.instance,
+      model: `openai/${config.provider.model}`,
+      effort: config.provider.effort,
       seed: assigned.seed,
       deadline: input.deadline,
       harness: await reference(input.pair.h),

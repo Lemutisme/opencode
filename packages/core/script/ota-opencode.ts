@@ -6,7 +6,11 @@ import type { Driver, Job } from "./ota-supervisor"
 import { artifact, checked, fence, Native, reference, release, run } from "./ota-native"
 import type { FileRef, Provider, Release } from "./ota-native"
 
-export type Supplies = { image: string; files: { "dependencies.tar": FileRef; bun: FileRef; "models.json": FileRef } }
+export type Supplies = {
+  image: string
+  files: { "dependencies.tar": FileRef; bun: FileRef; "models.json": FileRef }
+  fixedKernel?: FileRef
+}
 export type Task = { goal: string; brief: string; artifact: string }
 export type Configuration = {
   root: string
@@ -35,6 +39,7 @@ class BuildRejected extends Error {
 
 export async function build(root: string, supplies: Supplies, parent: Release, patch: string, signal?: AbortSignal) {
   await Promise.all([checked(parent.source), ...Object.values(supplies.files).map(checked)])
+  if (supplies.fixedKernel) await checked(supplies.fixedKernel)
   const directory = path.join(root, "builds", crypto.randomUUID())
   await mkdir(path.dirname(directory), { recursive: true })
   const cancel = () => {
@@ -56,6 +61,7 @@ export async function build(root: string, supplies: Supplies, parent: Release, p
         supplies.files["models.json"].path,
         patch,
         directory,
+        ...(supplies.fixedKernel ? [supplies.fixedKernel.path] : []),
       ],
       undefined,
       1_260_000,
@@ -68,12 +74,17 @@ export async function build(root: string, supplies: Supplies, parent: Release, p
         | undefined
       if (
         outcome &&
-        ["source", "compile"].includes(outcome.phase) &&
-        (outcome.exit_code === 1 || (outcome.phase === "source" && outcome.exit_code === 128)) &&
+        ["source", "compile", "kernel"].includes(outcome.phase) &&
+        (outcome.exit_code === 1 ||
+          (outcome.phase === "source" && outcome.exit_code === 128) ||
+          (outcome.phase === "kernel" && outcome.exit_code === 65)) &&
         outcome.container_state === "true false" &&
         outcome.cleanup_confirmed
       ) {
-        const log = path.join(directory, outcome.phase === "source" ? "source.log" : "build.log")
+        const log = path.join(
+          directory,
+          outcome.phase === "kernel" ? "kernel.json" : outcome.phase === "source" ? "source.log" : "build.log",
+        )
         const receipt = path.join(directory, "rejection.json")
         await Bun.write(
           receipt,
@@ -200,6 +211,7 @@ export function driver(config: Configuration): Driver {
   return {
     fingerprint: async () => {
       await Promise.all(config.authority.map(checked))
+      if (config.supplies.fixedKernel) await checked(config.supplies.fixedKernel)
       const files = [
         "ota-rsi.ts",
         "ota-supervisor.ts",
@@ -207,8 +219,12 @@ export function driver(config: Configuration): Driver {
         "ota-opencode.ts",
         "ota-release.sh",
         "ota-files.py",
+        "ota-kernel.py",
         "../src/pro-contract/kernel.ts",
+        "../src/util/hash.ts",
         "../../schema/src/pro-contract.ts",
+        "../../schema/src/schema.ts",
+        "../../schema/src/identifier.ts",
       ]
       return hash(
         JSON.stringify({
@@ -249,7 +265,7 @@ export function driver(config: Configuration): Driver {
         brief:
           `Active mode ${job.slot}; only propose ${job.mutable}. Current strategy is read-only at /release/strategy. ` +
           (job.mutable === "h"
-            ? `The full current source is at ${source}. All OpenCode execution components may change: context/compaction, memory/schema, tools, scheduling, dependencies, and implementation. Export a nonempty git diff --binary against its original HEAD to /state/work/h; include new files. Do not edit the external Kernel, grader, gateway or supervisor, which are not mounted. `
+            ? `The full current source is at ${source}. OpenCode execution components may change: context/compaction, memory/schema, tools, scheduling, dependencies, and implementation. The normative kernel.ts, core util/hash.ts, and schema pro-contract.ts/schema.ts/identifier.ts are pinned and must remain byte-identical; they are not H. Export a nonempty git diff --binary against its original HEAD to /state/work/h; include new files. Do not edit the external Kernel, grader, gateway or supervisor, which are not mounted. `
             : "Write the improved nonempty strategy to /state/work/s. Do not propose a harness change. ") +
           `Only the opposite artifact is admitted. Original deadline: ${job.deadline}. External development feedback: ${JSON.stringify(job.feedback ?? null)}. ` +
           "Use contract_check, then contract_report_ready for the artifact handoff. Do not claim test, performance or promotion authority.",

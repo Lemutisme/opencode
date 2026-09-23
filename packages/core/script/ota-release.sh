@@ -22,9 +22,10 @@ case "$action" in
     python3 -I "$here/ota-files.py" fork "$@"
     ;;
   build)
-    image=$1; source=$2; dependencies=$3; bun=$4; models=$5; patch=$6; output=$7
+    image=$1; source=$2; dependencies=$3; bun=$4; models=$5; patch=$6; output=$7; kernel=${8:-}
     [[ "$image" =~ ^sha256:[a-f0-9]{64}$ ]] || exit 65
     for file in "$source" "$dependencies" "$bun" "$models" "$patch"; do regular "$file"; done
+    if [[ -n "$kernel" ]]; then regular "$kernel"; fi
     mkdir -- "$output"
     name="ota-build-${label:0:12}-$(cat /proc/sys/kernel/random/uuid)"
     phase=admission
@@ -69,6 +70,10 @@ case "$action" in
     ' 2>&1 | head -c 16777217 > "$output/source.log"
     phase=export-source
     docker exec "$name" /bin/tar -C /output -cf - -- source.tar | python3 -I "$here/ota-files.py" export "$output/source.tar" source.tar 1073741824
+    if [[ -n "$kernel" ]]; then
+      phase=kernel
+      python3 -I "$here/ota-kernel.py" "$kernel" "$output/source.tar" > "$output/kernel.json"
+    fi
     phase=compile
     timeout --signal=TERM --kill-after=10s 1200s docker exec "$name" /bin/sh -eu -c '
       cd /work/repo

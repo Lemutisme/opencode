@@ -154,7 +154,7 @@ const adapter = driver({
   supplies,
   provider: {
     gateway: await reference(path.join(path.dirname(path.resolve(suppliesArg)), "provider-gateway.py")),
-    model: "gpt-5.6-sol",
+    model: process.env.OPENCODE_OTA_E2E_MODEL ?? "gpt-5.6-sol",
     effort: "max",
     upstream: `http://127.0.0.1:${server.port}/v1`,
     key: "local-scripted-only",

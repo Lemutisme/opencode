@@ -31,6 +31,7 @@ export async function configure(root: string) {
     stopOnPrimaryImprovement?: boolean
     requiredFull?: string[]
     readmission?: FileRef
+    evaluationReadiness?: { plan: FileRef; receipt: string }
   }
   const supplies = (await Bun.file(await checked(config.supplies)).json()) as Supplies
   const harness = await checked(config.harness)
@@ -60,6 +61,7 @@ export async function configure(root: string) {
       config.grader,
       ...(config.authority ?? []),
       ...(config.readmission ? [config.readmission] : []),
+      ...(config.evaluationReadiness ? [config.evaluationReadiness.plan] : []),
     ],
     task:
       task ??
@@ -72,6 +74,31 @@ export async function configure(root: string) {
         throw new Error("external evaluator owns scoring")
       }),
   })
+  if (config.evaluationReadiness) {
+    const readiness = config.evaluationReadiness
+    if (path.resolve(readiness.receipt) !== path.join(root, "qualification", "EVALUATOR-ADMISSION.json"))
+      throw new Error("evaluator readiness must be an external campaign-owned receipt")
+    await checked(readiness.plan)
+    const prepare = value.prepare
+    value.prepare = async (input) => {
+      const candidate = prepare ? await prepare(input) : await Bun.file(input.proposal).bytes()
+      if (!(candidate instanceof Uint8Array)) return candidate
+      // A proposal may be researched before grader qualification, but no paid
+      // task trial or OTA settlement may pass this external readiness boundary.
+      // The proposer has already handed off and stopped; this admits no work.
+      await Bun.write(
+        path.join(root, "qualification", "EVALUATOR-WAIT.json"),
+        JSON.stringify({
+          job: input.job.id,
+          plan: readiness.plan,
+          candidatePrepared: true,
+          modelWorkStopped: true,
+        }),
+      )
+      await evaluationReady(readiness, input.signal)
+      return candidate
+    }
+  }
   if (evaluate) value.evaluate = (input) => evaluate({ ...input, root })
   if (fence) {
     const close = value.fence
@@ -102,6 +129,22 @@ export async function configure(root: string) {
       requiredFull: config.requiredFull ?? [],
     },
   }
+}
+
+export async function evaluationReady(readiness: { plan: FileRef; receipt: string }, signal: AbortSignal) {
+  await checked(readiness.plan)
+  while (!(await Bun.file(readiness.receipt).exists())) {
+    if (signal.aborted) throw new Error("cancelled while awaiting evaluator qualification")
+    await Bun.sleep(100)
+  }
+  if (signal.aborted) throw new Error("cancelled before evaluator readiness admission")
+  await checked(readiness.plan)
+  const receipt = (await Bun.file(await checked(await reference(readiness.receipt))).json()) as {
+    passed: boolean
+    plan_sha256: string
+  }
+  if (receipt.passed !== true || receipt.plan_sha256 !== readiness.plan.sha256)
+    throw new Error("evaluator qualification failed or names a different frozen plan; no task trials admitted")
 }
 
 async function loadReadmission(
