@@ -197,6 +197,7 @@ describe("ProContract export", () => {
           contractID: input.contractID,
           subjectHash: input.subjectHash,
           directory: input.directory,
+          target: (yield* contracts.get(input.contractID))!.recognition.handoff!,
         })
         expect(yield* Effect.promise(() => fs.readFile(path.join(input.directory, "artifact.txt"), "utf8"))).toBe(
           "frozen\n",
@@ -253,9 +254,9 @@ describe("ProContract export", () => {
         const contracts = yield* ProContract.Service
         expect(
           (yield* contracts.challenge({
+            operationID: crypto.randomUUID(),
+            expected: (yield* contracts.get(input.contractID))!.recognition.handoff!,
             contractID: input.contractID,
-            revision: 1,
-            subjectHash: input.subjectHash,
             evidenceHash: "counterevidence",
             disclosure: "executor",
             summary: "The frozen subject lost its support",
@@ -317,9 +318,9 @@ describe("ProContract export", () => {
         const exports = yield* ProContractExport.Service
         const contracts = yield* ProContract.Service
         yield* contracts.challenge({
+          operationID: crypto.randomUUID(),
+          expected: (yield* contracts.get(input.contractID))!.recognition.handoff!,
           contractID: input.contractID,
-          revision: 1,
-          subjectHash: input.subjectHash,
           evidenceHash: "counterevidence",
           disclosure: "executor",
           summary: "Replace the prior handoff",

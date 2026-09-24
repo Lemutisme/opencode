@@ -454,6 +454,7 @@ describe("LocationServiceMap", () => {
             const base = ProContract.defaultSpec("Repair the candidate before handoff", Date.now())
             const spec = {
               ...base,
+              authority: [...base.authority, "process.execute"],
               budget: { ...base.budget, actions: 5 },
               resolution: { ...base.resolution, maxAttempts: 1 },
               evidence: {
@@ -536,7 +537,18 @@ describe("LocationServiceMap", () => {
             expect((yield* contracts.get(contractID))?.handoff).toBeUndefined()
             expect(yield* contracts.quiet("check")).toMatchObject({ quiet: false })
             expect(
-              (yield* contracts.principalAttest({ contractID, evidenceHash: "not-a-handoff" })).decision.type,
+              (yield* contracts.principalAttest({
+                operationID: crypto.randomUUID(),
+                expected: {
+                  revision: 1,
+                  specHash: "missing",
+                  subjectHash: "missing",
+                  handoffID: "missing",
+                  contextHash: "missing",
+                },
+                contractID,
+                evidenceHash: "not-a-handoff",
+              })).decision.type,
             ).toBe("rejected")
             yield* Effect.promise(() => fs.writeFile(path.join(dir.path, "candidate.txt"), "regressed\n"))
             const ready = yield* settleTool(registry, {
@@ -588,7 +600,11 @@ describe("LocationServiceMap", () => {
           yield* contracts.issue({
             id: contractID,
             scope: "check-budget",
-            spec: { ...spec, budget: { ...spec.budget, actions: 1 } },
+            spec: {
+              ...spec,
+              authority: [...spec.authority, "process.execute"],
+              budget: { ...spec.budget, actions: 1 },
+            },
             executor: "opencode",
           })
           yield* bindings.create({
@@ -649,6 +665,7 @@ describe("LocationServiceMap", () => {
             const base = ProContract.defaultSpec("Replay the frozen candidate", Date.now())
             const spec = {
               ...base,
+              authority: [...base.authority, "process.execute"],
               budget: { ...base.budget, actions: 2 },
               resolution: { ...base.resolution, maxAttempts: 1 },
               evidence: {

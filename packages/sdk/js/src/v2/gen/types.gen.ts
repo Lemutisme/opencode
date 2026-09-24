@@ -2691,6 +2691,11 @@ export type InvalidCursorError = {
   message: string
 }
 
+export type ForbiddenError = {
+  _tag: "ForbiddenError"
+  message: string
+}
+
 export type SessionActive = {
   type: "running"
 }
@@ -2940,11 +2945,6 @@ export type V2Event =
 
 export type V2EventStream = string
 
-export type ForbiddenError = {
-  _tag: "ForbiddenError"
-  message: string
-}
-
 export type ProjectCopyError = {
   name: "ProjectCopyError"
   data: {
@@ -2957,6 +2957,12 @@ export type ProContractNotFoundError = {
   _tag: "ProContractNotFoundError"
   contractID: string
   message: string
+}
+
+export type ProContractRecognitionError = {
+  _tag: "ProContractRecognitionError"
+  message: string
+  receipt: ProContractOperationReceipt
 }
 
 export type EffectHttpApiErrorForbidden = {
@@ -6210,7 +6216,7 @@ export type ProContractEvidence = {
 }
 
 export type ProContractResolution = {
-  maxAttempts: number
+  maxAttempts?: number
   retryDelay: number
 }
 
@@ -6261,6 +6267,42 @@ export type ProContractChallenge = {
   attestationID?: string
 }
 
+export type ProContractContextTarget = {
+  revision: number
+  specHash: string
+  version: number
+  phaseID: string
+  handoffID?: string
+}
+
+export type ProContractRecognitionContext = {
+  target: ProContractContextTarget
+  profile: string
+  referenceHash: string
+  admitted: boolean
+}
+
+export type ProContractRecognitionTarget = {
+  revision: number
+  specHash: string
+  subjectHash: string
+  handoffID: string
+  contextHash: string
+}
+
+export type ProContractRevisionTarget = {
+  revision: number
+  specHash: string
+  petition: number
+}
+
+export type ProContractRecognition = {
+  context?: ProContractRecognitionContext
+  handoff?: ProContractRecognitionTarget
+  pending?: ProContractRevisionTarget
+  unavailable?: string
+}
+
 export type ProContractInfo = {
   id: string
   scope: string
@@ -6282,6 +6324,7 @@ export type ProContractInfo = {
     reason: string
   }
   attestationID?: string
+  recognition?: ProContractRecognition
 }
 
 export type ProContractOpenCodeExecution = {
@@ -6304,6 +6347,28 @@ export type ProContractOpenCodeExecution = {
 export type ProContractReceipt = {
   frontier: number
   hash: string
+}
+
+export type ProContractOperationReceipt = {
+  operationID: string
+  fingerprint: string
+  decision:
+    | {
+        type: "accepted"
+      }
+    | {
+        type: "rejected"
+        reason: string
+      }
+  frontier: number
+  hash: string
+  replayed: boolean
+  support?: {
+    contractID: string
+    attestationID: string
+    target: ProContractRecognitionTarget
+    valid: boolean
+  }
 }
 
 export type EventModelsDevRefreshed = {
@@ -11546,6 +11611,10 @@ export type V2SessionCreateErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2SessionCreateError = V2SessionCreateErrors[keyof V2SessionCreateErrors]
@@ -11652,6 +11721,10 @@ export type V2SessionSwitchAgentErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -11688,6 +11761,10 @@ export type V2SessionSwitchModelErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -11728,6 +11805,10 @@ export type V2SessionPromptErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -11851,6 +11932,10 @@ export type V2SessionRevertStageErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * MessageNotFoundError | SessionNotFoundError
    */
   404: MessageNotFoundError | SessionNotFoundError
@@ -11892,6 +11977,10 @@ export type V2SessionRevertClearErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -11930,6 +12019,10 @@ export type V2SessionRevertCommitErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -13900,6 +13993,42 @@ export type V2ProContractGetResponses = {
 
 export type V2ProContractGetResponse = V2ProContractGetResponses[keyof V2ProContractGetResponses]
 
+export type V2ProContractRecognitionData = {
+  body?: never
+  path: {
+    contractID: string
+  }
+  query?: never
+  url: "/api/contract/{contractID}/recognition"
+}
+
+export type V2ProContractRecognitionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProContractNotFoundError
+   */
+  404: ProContractNotFoundError
+}
+
+export type V2ProContractRecognitionError = V2ProContractRecognitionErrors[keyof V2ProContractRecognitionErrors]
+
+export type V2ProContractRecognitionResponses = {
+  /**
+   * ProContract.Recognition
+   */
+  200: ProContractRecognition
+}
+
+export type V2ProContractRecognitionResponse =
+  V2ProContractRecognitionResponses[keyof V2ProContractRecognitionResponses]
+
 export type V2ProContractExecutionData = {
   body?: never
   path: {
@@ -13938,6 +14067,8 @@ export type V2ProContractExecutionResponse = V2ProContractExecutionResponses[key
 export type V2ProContractAttestData = {
   body: {
     evidenceHash: string
+    operationID: string
+    expected: ProContractRecognitionTarget
   }
   path: {
     contractID: string
@@ -13960,26 +14091,26 @@ export type V2ProContractAttestErrors = {
    */
   404: ProContractNotFoundError
   /**
-   * ConflictError
+   * ProContractRecognitionError
    */
-  409: ConflictError
+  409: ProContractRecognitionError
 }
 
 export type V2ProContractAttestError = V2ProContractAttestErrors[keyof V2ProContractAttestErrors]
 
 export type V2ProContractAttestResponses = {
   /**
-   * ProContract.Receipt
+   * ProContract.OperationReceipt
    */
-  200: ProContractReceipt
+  200: ProContractOperationReceipt
 }
 
 export type V2ProContractAttestResponse = V2ProContractAttestResponses[keyof V2ProContractAttestResponses]
 
 export type V2ProContractChallengeData = {
   body: {
-    revision: number
-    subjectHash: string
+    operationID: string
+    expected: ProContractRecognitionTarget
     evidenceHash: string
     disclosure: "executor" | "sealed"
     summary?: string
@@ -14005,18 +14136,18 @@ export type V2ProContractChallengeErrors = {
    */
   404: ProContractNotFoundError
   /**
-   * ConflictError
+   * ProContractRecognitionError
    */
-  409: ConflictError
+  409: ProContractRecognitionError
 }
 
 export type V2ProContractChallengeError = V2ProContractChallengeErrors[keyof V2ProContractChallengeErrors]
 
 export type V2ProContractChallengeResponses = {
   /**
-   * ProContract.Receipt
+   * ProContract.OperationReceipt
    */
-  200: ProContractReceipt
+  200: ProContractOperationReceipt
 }
 
 export type V2ProContractChallengeResponse = V2ProContractChallengeResponses[keyof V2ProContractChallengeResponses]
@@ -14024,6 +14155,8 @@ export type V2ProContractChallengeResponse = V2ProContractChallengeResponses[key
 export type V2ProContractDecideRevisionData = {
   body: {
     accept: boolean
+    operationID: string
+    expected: ProContractRevisionTarget
   }
   path: {
     contractID: string
@@ -14046,9 +14179,9 @@ export type V2ProContractDecideRevisionErrors = {
    */
   404: ProContractNotFoundError
   /**
-   * ConflictError
+   * ProContractRecognitionError
    */
-  409: ConflictError
+  409: ProContractRecognitionError
 }
 
 export type V2ProContractDecideRevisionError =
@@ -14056,9 +14189,9 @@ export type V2ProContractDecideRevisionError =
 
 export type V2ProContractDecideRevisionResponses = {
   /**
-   * ProContract.Receipt
+   * ProContract.OperationReceipt
    */
-  200: ProContractReceipt
+  200: ProContractOperationReceipt
 }
 
 export type V2ProContractDecideRevisionResponse =

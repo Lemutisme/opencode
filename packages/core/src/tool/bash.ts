@@ -105,96 +105,101 @@ const layer = Layer.effectDiscard(
 
     yield* tools
       .register({
-        [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
-          input: Input,
-          output: Output,
-          structured: StructuredOutput,
-          toStructuredOutput: ({ output }) => ({
-            truncated: output.truncated,
-            ...(output.exit === undefined ? {} : { exit: output.exit }),
-            ...(output.timeout === undefined ? {} : { timeout: output.timeout }),
-          }),
-          toModelOutput: ({ output }) => [
-            { type: "text", text: output.output },
-            { type: "text", text: modelOutput(output) },
-          ],
-          execute: (input, context) =>
-            Effect.gen(function* () {
-              const source = {
-                type: "tool" as const,
-                messageID: context.assistantMessageID,
-                callID: context.toolCallID,
-              }
-              const target = yield* mutation.resolve({ path: input.workdir ?? ".", kind: "directory" })
-              const external = target.externalDirectory
-              if (external)
+        [name]: Tool.withCapability(
+          Tool.make({
+            description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
+            input: Input,
+            output: Output,
+            structured: StructuredOutput,
+            toStructuredOutput: ({ output }) => ({
+              truncated: output.truncated,
+              ...(output.exit === undefined ? {} : { exit: output.exit }),
+              ...(output.timeout === undefined ? {} : { timeout: output.timeout }),
+            }),
+            toModelOutput: ({ output }) => [
+              { type: "text", text: output.output },
+              { type: "text", text: modelOutput(output) },
+            ],
+            execute: (input, context) =>
+              Effect.gen(function* () {
+                const source = {
+                  type: "tool" as const,
+                  messageID: context.assistantMessageID,
+                  callID: context.toolCallID,
+                }
+                const target = yield* mutation.resolve({ path: input.workdir ?? ".", kind: "directory" })
+                const external = target.externalDirectory
+                if (external)
+                  yield* permission.assert({
+                    ...LocationMutation.externalDirectoryPermission(external),
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source,
+                  })
+                const warnings = (yield* externalCommandDirectories(fs, input.command, target.canonical)).map(
+                  (directory) =>
+                    `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
+                )
                 yield* permission.assert({
-                  ...LocationMutation.externalDirectoryPermission(external),
+                  action: name,
+                  resources: [input.command],
+                  save: [input.command],
                   sessionID: context.sessionID,
                   agent: context.agent,
                   source,
                 })
-              const warnings = (yield* externalCommandDirectories(fs, input.command, target.canonical)).map(
-                (directory) =>
-                  `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
-              )
-              yield* permission.assert({
-                action: name,
-                resources: [input.command],
-                save: [input.command],
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source,
-              })
 
-              if ((yield* fs.stat(target.canonical)).type !== "Directory")
-                return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
+                if ((yield* fs.stat(target.canonical)).type !== "Directory")
+                  return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
 
-              const entries = yield* config.entries()
-              const shell =
-                Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
-                  .shell ?? defaultShell()
-              const command = ChildProcess.make(input.command, [], {
-                cwd: target.canonical,
-                shell,
-                stdin: "ignore",
-                detached: process.platform !== "win32",
-                forceKillAfter: Duration.seconds(3),
-              })
-              const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
-              const result = yield* appProcess
-                .run(command, {
-                  combineOutput: true,
-                  timeout: Duration.millis(timeout),
-                  maxOutputBytes: MAX_CAPTURE_BYTES,
+                const entries = yield* config.entries()
+                const shell =
+                  Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
+                    .shell ?? defaultShell()
+                const command = ChildProcess.make(input.command, [], {
+                  cwd: target.canonical,
+                  shell,
+                  stdin: "ignore",
+                  detached: process.platform !== "win32",
+                  forceKillAfter: Duration.seconds(3),
                 })
-                .pipe(
-                  Effect.catchTag("AppProcessError", (error) =>
-                    isTimeout(error) ? Effect.succeed(undefined) : Effect.fail(error),
-                  ),
-                )
-              if (!result) {
+                const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
+                const result = yield* appProcess
+                  .run(command, {
+                    combineOutput: true,
+                    timeout: Duration.millis(timeout),
+                    maxOutputBytes: MAX_CAPTURE_BYTES,
+                  })
+                  .pipe(
+                    Effect.catchTag("AppProcessError", (error) =>
+                      isTimeout(error) ? Effect.succeed(undefined) : Effect.fail(error),
+                    ),
+                  )
+                if (!result) {
+                  return {
+                    output: `Command exceeded timeout of ${timeout} ms. Retry with a larger timeout if the command is expected to take longer.`,
+                    truncated: false,
+                    timeout: true,
+                    ...(warnings.length ? { warnings } : {}),
+                  }
+                }
+
+                const output = result.output?.toString("utf8") || "(no output)"
+                const notice = result.outputTruncated
+                  ? "[output capture truncated at the in-memory safety limit]"
+                  : undefined
                 return {
-                  output: `Command exceeded timeout of ${timeout} ms. Retry with a larger timeout if the command is expected to take longer.`,
-                  truncated: false,
-                  timeout: true,
+                  exit: result.exitCode,
+                  output: notice ? `${output}\n\n${notice}` : output,
+                  truncated: result.outputTruncated === true,
                   ...(warnings.length ? { warnings } : {}),
                 }
-              }
-
-              const output = result.output?.toString("utf8") || "(no output)"
-              const notice = result.outputTruncated
-                ? "[output capture truncated at the in-memory safety limit]"
-                : undefined
-              return {
-                exit: result.exitCode,
-                output: notice ? `${output}\n\n${notice}` : output,
-                truncated: result.outputTruncated === true,
-                ...(warnings.length ? { warnings } : {}),
-              }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to execute command: ${input.command}` }))),
-        }),
+              }).pipe(
+                Effect.mapError(() => new ToolFailure({ message: `Unable to execute command: ${input.command}` })),
+              ),
+          }),
+          "process",
+        ),
       })
       .pipe(Effect.orDie)
   }),

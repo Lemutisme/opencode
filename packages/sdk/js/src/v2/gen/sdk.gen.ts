@@ -133,8 +133,10 @@ import type {
   ProContractBudget,
   ProContractCapability,
   ProContractEvidence,
+  ProContractRecognitionTarget,
   ProContractRequirement,
   ProContractResolution,
+  ProContractRevisionTarget,
   ProContractTrigger,
   ProjectCommands,
   ProjectCurrentErrors,
@@ -327,6 +329,8 @@ import type {
   V2ProContractListResponses,
   V2ProContractQuietErrors,
   V2ProContractQuietResponses,
+  V2ProContractRecognitionErrors,
+  V2ProContractRecognitionResponses,
   V2ProContractReleaseErrors,
   V2ProContractReleaseResponses,
   V2ProContractResumeErrors,
@@ -7123,6 +7127,27 @@ export class ProContract extends HeyApiClient {
   }
 
   /**
+   * Read exact recognition identities
+   */
+  public recognition<ThrowOnError extends boolean = false>(
+    parameters: {
+      contractID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "contractID" }] }])
+    return (options?.client ?? this.client).get<
+      V2ProContractRecognitionResponses,
+      V2ProContractRecognitionErrors,
+      ThrowOnError
+    >({
+      url: "/api/contract/{contractID}/recognition",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get OpenCode execution
    */
   public execution<ThrowOnError extends boolean = false>(
@@ -7150,6 +7175,8 @@ export class ProContract extends HeyApiClient {
     parameters: {
       contractID: string
       evidenceHash?: string
+      operationID?: string
+      expected?: ProContractRecognitionTarget
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -7160,6 +7187,8 @@ export class ProContract extends HeyApiClient {
           args: [
             { in: "path", key: "contractID" },
             { in: "body", key: "evidenceHash" },
+            { in: "body", key: "operationID" },
+            { in: "body", key: "expected" },
           ],
         },
       ],
@@ -7184,8 +7213,8 @@ export class ProContract extends HeyApiClient {
   public challenge<ThrowOnError extends boolean = false>(
     parameters: {
       contractID: string
-      revision?: number
-      subjectHash?: string
+      operationID?: string
+      expected?: ProContractRecognitionTarget
       evidenceHash?: string
       disclosure?: "executor" | "sealed"
       summary?: string
@@ -7198,8 +7227,8 @@ export class ProContract extends HeyApiClient {
         {
           args: [
             { in: "path", key: "contractID" },
-            { in: "body", key: "revision" },
-            { in: "body", key: "subjectHash" },
+            { in: "body", key: "operationID" },
+            { in: "body", key: "expected" },
             { in: "body", key: "evidenceHash" },
             { in: "body", key: "disclosure" },
             { in: "body", key: "summary" },
@@ -7230,6 +7259,8 @@ export class ProContract extends HeyApiClient {
     parameters: {
       contractID: string
       accept?: boolean
+      operationID?: string
+      expected?: ProContractRevisionTarget
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -7240,6 +7271,8 @@ export class ProContract extends HeyApiClient {
           args: [
             { in: "path", key: "contractID" },
             { in: "body", key: "accept" },
+            { in: "body", key: "operationID" },
+            { in: "body", key: "expected" },
           ],
         },
       ],

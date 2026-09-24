@@ -80,7 +80,7 @@ export interface Interface {
           readonly stdoutTruncated: boolean
           readonly stderrTruncated: boolean
         }
-      | { readonly error: string }
+      | { readonly error: string; readonly stdout?: Uint8Array; readonly stderr?: Uint8Array }
   }) => Effect.Effect<Recorded, Unavailable>
   readonly get: (handle: string) => Effect.Effect<Receipt, Unavailable>
   readonly read: (input: typeof ReadInput.Type) => Effect.Effect<typeof ReadOutput.Type, Unavailable>
@@ -131,11 +131,11 @@ const layer = Layer.effect(
       record: Effect.fn("ProContractObservation.record")(function* (input) {
         const stdin = yield* put(Buffer.from(input.stdin))
         const result = "error" in input.result ? undefined : input.result
-        const stdout = result
-          ? yield* put(result.stdout, result.execution === "completed" && !result.stdoutTruncated)
+        const stdout = input.result.stdout
+          ? yield* put(input.result.stdout, result?.execution === "completed" && !result.stdoutTruncated)
           : undefined
-        const stderr = result
-          ? yield* put(result.stderr, result.execution === "completed" && !result.stderrTruncated)
+        const stderr = input.result.stderr
+          ? yield* put(input.result.stderr, result?.execution === "completed" && !result.stderrTruncated)
           : undefined
         const receipt = Receipt.make({
           version: 1,

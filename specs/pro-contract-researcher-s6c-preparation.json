@@ -1,0 +1,760 @@
+{
+  "kind": "research-eval-preparation:1",
+  "status": "awaiting-runtime-configuration",
+  "preparedAt": "2026-09-19T19:07:55.635Z",
+  "launchable": false,
+  "qualification": "not_run",
+  "modelRequests": 0,
+  "issuedInstances": 0,
+  "artifactDirectory": "/tmp/opencode-s6c-preparation-20260919T190440559Z",
+  "source": {
+    "directory": "/tmp/opencode-s6c-preparation-20260919T190440559Z",
+    "hash": "f76c92909c1c7eb89d5e35747a6ada443d0918bb14c4c93e23ab4082322e6291",
+    "files": 6534,
+    "kind": "preparation-snapshot-not-a-launched-cohort",
+    "reviewedCodeFiles": 31,
+    "reviewedCodeManifestHash": "18bc7bc25d6ea317b02c97d61749407cdd808722ef1f799488fb92d9c07e8995",
+    "runtimeChangesSinceS6b": []
+  },
+  "runtime": [
+    {
+      "executable": "/tmp/opencode-research-toolchain/bun-linux-x64/bun",
+      "version": "1.3.14",
+      "hash": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+    },
+    {
+      "executable": "/usr/bin/node",
+      "version": "v24.21.0",
+      "hash": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c"
+    }
+  ],
+  "matrix": {
+    "version": "synthetic-node:1",
+    "split": "qualification",
+    "seed": "s6b-frozen-20260919",
+    "scheduled": 66,
+    "probes": 48,
+    "research": 18,
+    "instances": [
+      {
+        "id": "770c19425b219bb5662a9254",
+        "family": "P4",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "9ab6d5ad01df849907e2aac0257524ba555af005312c814ccaeb57af1ff98e8a"
+      },
+      {
+        "id": "668bc7ae4881a1b486b53208",
+        "family": "P4",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "54afc98fed70ed22300ce7e407536b33457f9ea4964830fa4d627aaacb19ba2c"
+      },
+      {
+        "id": "ba8f6950b0a2d15bb137a453",
+        "family": "R5",
+        "repeat": 1,
+        "track": "research",
+        "defective": false,
+        "packetHash": "aace55b33321470a13f7214f147f85f1aace8bd86b52d5c5be4ad0ac18a3833c"
+      },
+      {
+        "id": "da124b22a5313399465bf437",
+        "family": "R2",
+        "repeat": 2,
+        "track": "research",
+        "defective": false,
+        "packetHash": "a1578d11e30fbf967ffe5d63179d0e6d09f62cf59690813d90671bde28a3fded"
+      },
+      {
+        "id": "c75bb6ab296a9b4a62bd8d36",
+        "family": "R3",
+        "repeat": 3,
+        "track": "research",
+        "defective": false,
+        "packetHash": "7acdacddc58c31b7837145704254b0639387f10a0046a200b5b514514a61719e"
+      },
+      {
+        "id": "dcea28cd7bf023af78eb0150",
+        "family": "F3",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "f3e1c05ddf2726382f09d9102b120332adaf95d40f4df0370b8262b7fb32e932"
+      },
+      {
+        "id": "b5ae5210f037704f9f7629e9",
+        "family": "R5",
+        "repeat": 2,
+        "track": "research",
+        "defective": false,
+        "packetHash": "8052f3458cd460962912f97396c3fe33aaa53dd74143852d5771b0816ce55949"
+      },
+      {
+        "id": "c3a6d6f2020abbfa2a33bd76",
+        "family": "R4",
+        "repeat": 3,
+        "track": "research",
+        "defective": false,
+        "packetHash": "dba7f4fc256f78f548a319b78f2e116490162087136169f46deed3e01452630e"
+      },
+      {
+        "id": "2d23d2bcd1c72cd8be93043c",
+        "family": "P4",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "c7e853c815ba81e29e475b44cee7b3b8820d3cdbb89025aaaacb030d20008b99"
+      },
+      {
+        "id": "746f0c666622c2c169962445",
+        "family": "F4",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "b9b9e1209dc1122c72bfffe36597226e52f365fa9dae1a306be59b4697d03a91"
+      },
+      {
+        "id": "91814b9078aff7d7e2d095d6",
+        "family": "F2",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "ce7b4bd636f5e2470dca763518eee29863158aa74cc5bb9cb2961ab242aa9c57"
+      },
+      {
+        "id": "7e9924fa19e77cf73ac8bd9e",
+        "family": "F1",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "f67f45d9bbb9fb8244b9020b6bae41d5a390f6cee4f43c1af6a464675a93389f"
+      },
+      {
+        "id": "f67335a48ae9eedbc919d28c",
+        "family": "R6",
+        "repeat": 3,
+        "track": "research",
+        "defective": false,
+        "packetHash": "a65a23dcc1f0ca99aca866ea178729e46fe76cc258166fd9da2ed1e12cb4aa23"
+      },
+      {
+        "id": "655f64f3781726b47fc9479a",
+        "family": "F2",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "b7636495af4b08b61a6bc1e0fb6c293cd25b248863d91f173fcbe80d53b3e069"
+      },
+      {
+        "id": "950ee8c9d52f4fe55b26f597",
+        "family": "P3",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "4475451863efc355b89029a142232283b88f1be6e5ffa19f85967bf830999e22"
+      },
+      {
+        "id": "163b8f6fc1387ff1cc76b3e6",
+        "family": "R4",
+        "repeat": 1,
+        "track": "research",
+        "defective": false,
+        "packetHash": "539f20bd6028b7d2ca431f82d296dcc704b6564b42cd5255e57a554433da3b21"
+      },
+      {
+        "id": "5930bf9e36dec0ccd479377b",
+        "family": "P1",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "32e8f4ebfda746420c377adcfacad2381a80e2ada93fb244912f33f6ed400f5f"
+      },
+      {
+        "id": "3380ee6325e8078a79ffd2d8",
+        "family": "F2",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "008335a00c9ef2dd840ea1f2b2b12bf87209705375606def83ad5afe1961e896"
+      },
+      {
+        "id": "b10c351e2853c1979eab34db",
+        "family": "F3",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "36cf94ca549b7723f395d4515aa2f88e67a088b7e563c015a35eefe7a019ce5c"
+      },
+      {
+        "id": "1ef33c291dd62fc79cb4b768",
+        "family": "F3",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "4c78ee344ed6f7bdb8a8d90f1d7dafcae8ba5d03260888ffb7f2f2003593947e"
+      },
+      {
+        "id": "3a04342f4436bda7852c5ab6",
+        "family": "P4",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "3efce438c3aedcbfdf6bdc399be761c8951221be06f89a70c155e460aacc264b"
+      },
+      {
+        "id": "15111267222829dd4df908a0",
+        "family": "F1",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "3da831784541e4295e5836c20238cca2e33b8fa03d1dc9974a9712855ce1dd06"
+      },
+      {
+        "id": "e85f305f4de8f74efa864ed6",
+        "family": "R3",
+        "repeat": 2,
+        "track": "research",
+        "defective": false,
+        "packetHash": "268dea051528ffb3b6ea7e945287d2de8a402e209825da5d3e9aef568a8d307f"
+      },
+      {
+        "id": "90923370183cb7bfd124b000",
+        "family": "P3",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "a9500934b458dd1b7e12789c959e53989beeb4bfef9b53288c5cc60d932726d8"
+      },
+      {
+        "id": "fabaeffbd1f0b00f0df3762f",
+        "family": "P1",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "dad31e20fa9fba8b5ceefc27eb13a9b4f5bbe7d68c353f80a0d72d6f0b167475"
+      },
+      {
+        "id": "da127cf71d7cc350c2342689",
+        "family": "R3",
+        "repeat": 1,
+        "track": "research",
+        "defective": false,
+        "packetHash": "85408142f7ef4783f2ed0f4c6c34bcdd3199cbb5036e8b11386ae076ef39c641"
+      },
+      {
+        "id": "5846f73560bfe4990f8854d5",
+        "family": "R6",
+        "repeat": 2,
+        "track": "research",
+        "defective": false,
+        "packetHash": "587fa3a7985599dbe13097d2a3dd11108e5282975e5902bea1ca6d6122854fe8"
+      },
+      {
+        "id": "4b95240b17aa79fc5f70a39a",
+        "family": "F1",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "26c4d460ea623a77baadade6ba9717ede4b9ac0ef995dbfa81cd83a772e9cc00"
+      },
+      {
+        "id": "0753dfa534394d2d04983680",
+        "family": "P3",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "9445452d5e9113a90549fe6ee041d6db5c902e9e52d0fc9aacffef7e307f264d"
+      },
+      {
+        "id": "8d22f766ff57190c475e6783",
+        "family": "F2",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "3438b38752afdf80643e8c4e63ea5c6e1c6ac48bcf38965b9026862055077b17"
+      },
+      {
+        "id": "349f8f1f7cd9bcc7155c03c9",
+        "family": "R1",
+        "repeat": 1,
+        "track": "research",
+        "defective": false,
+        "packetHash": "85f3b0b5657fc539781322980dc5e4a88e0137c5479e7655e3806f89224ee044"
+      },
+      {
+        "id": "790fbc6b8bc04bc4987053de",
+        "family": "F2",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "abac686b0a26d30829ab7e27adeeb579293cd1dbd3b373d4d0a9d3c84c12d429"
+      },
+      {
+        "id": "f984b582bc86077e94e72a17",
+        "family": "P4",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "6772da57f94d4c1d43718bc96d487b4216554eacf9fb02821d3da31a900b0880"
+      },
+      {
+        "id": "2033206ad6f5fc3417e25c1a",
+        "family": "F2",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "ea3b6542665986eb199398003a6729447fba94c86922cf3afd51c0e9d3885db9"
+      },
+      {
+        "id": "0a0b6a99a65bd9f043c940bf",
+        "family": "P2",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "9765ac0c3ccd675bf582dff5003da5b8c5015ab70e63b9e899cd2942a1c14a0b"
+      },
+      {
+        "id": "db75cb71b5d2a0eb79103648",
+        "family": "F4",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "4e2dbe5836aca8e6a38b8b06e32627335913edcd201f495207e5e0a518ec857c"
+      },
+      {
+        "id": "8a454dd52780923332adbe1c",
+        "family": "R1",
+        "repeat": 2,
+        "track": "research",
+        "defective": false,
+        "packetHash": "aed2574104234afec4e5612dbd78a965bbe063be5a1e07dfa2150048b95d54d6"
+      },
+      {
+        "id": "3a2776b1b8b42c0cd6556e4f",
+        "family": "P2",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "24c2b349a0eb99b268e9ccf28082fdfeaabdef1967e59eb1671fafd640da799e"
+      },
+      {
+        "id": "daaeaf21842173ef3080bd29",
+        "family": "R2",
+        "repeat": 1,
+        "track": "research",
+        "defective": false,
+        "packetHash": "5210b2a53265965632579e51dd021ae63ea92444eb46d03f679d448d3321af15"
+      },
+      {
+        "id": "ad2a789470f4a807a5374932",
+        "family": "P3",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "e23015ead4a538bd79326b47e8beb62b114309c618ca9e29ab0be46749e71ed9"
+      },
+      {
+        "id": "6e1f39ccda0cf079d73708eb",
+        "family": "P2",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "ed36232f158f067c1431cac5153e783ad6657c2d8b908717fe704418bc1c77f9"
+      },
+      {
+        "id": "822ad34864183319c0863361",
+        "family": "P1",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "2a907435408b88b0126824877fa21bae8a7051c6de0262a66b585ba30f85c4de"
+      },
+      {
+        "id": "e3bf72c90744a5f6435c9a08",
+        "family": "P3",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "2bfac360ea3101fc9e1be7f2b9323e5fe87c1dc8a4df5d55fe785d9eda1f3914"
+      },
+      {
+        "id": "e6b90c3338c89f83d6326a15",
+        "family": "P2",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "2d80e5030df443afc8a959eaf8811d0e5f38532a63c1e8874914f7dd9a7eb896"
+      },
+      {
+        "id": "55ff4e01f8f981d29986919a",
+        "family": "P1",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "e602c12e10e5abe12422b8da83bc396f8bd34fbad4ad14d402eadca208951f06"
+      },
+      {
+        "id": "e632213c1e88e67957585195",
+        "family": "F4",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "736aeec341407726d4f9448b3b7d94fdee82e11bcfd73606e98e873b26d0dce6"
+      },
+      {
+        "id": "c9416d919399d8f1867f4ecc",
+        "family": "R2",
+        "repeat": 3,
+        "track": "research",
+        "defective": false,
+        "packetHash": "2a2c603ab78a1cd10519b6787f6cd26f1e2a9429a6edddf314f881f52e49bf1d"
+      },
+      {
+        "id": "215decfb19519f62acaf16e4",
+        "family": "F1",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "8027e0e2261dda719f60644d58609f2e56a813af2e5f47f53ea734a9f302a74f"
+      },
+      {
+        "id": "0d6a841f9622f6d42156938e",
+        "family": "F4",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "a340a1b02f5055aa93e9f7f66bad8a91eef7a3ff5472fe4ac463bc12a7511b67"
+      },
+      {
+        "id": "5bd5b8fe5e9c09463dd3b914",
+        "family": "F3",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "efb15660665b6a8c931069fa8e15e35fddc930a418eb54c4503c04fb31733a7a"
+      },
+      {
+        "id": "842bb698bdad05552b33f374",
+        "family": "F1",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "9b06c8eda3f4851c79d1b008eaf824dad724de86b3bdf276c27bafcaec13daeb"
+      },
+      {
+        "id": "e1a35740cb81b89e7ed61a08",
+        "family": "F3",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "766a32cb2431939bf2e60232fb0c963bb1cd9366340baee58209c26dd702582b"
+      },
+      {
+        "id": "03e02d54ee8c1de7fe7e2355",
+        "family": "P4",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "c8ea5dcff3985a17265480b4467c99baee9dffdaba3e2d0f99a6903d3669300c"
+      },
+      {
+        "id": "bcafffb50f6faf67bd2df5e5",
+        "family": "P1",
+        "repeat": 2,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "4be5701420864caf3113cb7a301d710b56824eb0d7ae32a6754dcecea1b6babe"
+      },
+      {
+        "id": "b3fb4beb918db3bbb5269b2b",
+        "family": "F4",
+        "repeat": 3,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "9ee9bed23daa7e7b4dfc3dd8cad4f468ed2a0cfe8cf9e1b15992b859d626df96"
+      },
+      {
+        "id": "802e3657bf08eb90ffd83f51",
+        "family": "P3",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "f1b605ab8abcf28863bea1b5e168c2757d801ea9df4dcbc6ecc4ad3397aa3c4b"
+      },
+      {
+        "id": "f841c6ab3e30bfb4540a061f",
+        "family": "F4",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "76cfad981bf1654fd04edfbb554020ac09610dd51959ddd2167f58d035113bf9"
+      },
+      {
+        "id": "864618f55ff4873bdb7ea674",
+        "family": "R6",
+        "repeat": 1,
+        "track": "research",
+        "defective": false,
+        "packetHash": "80ac691a396ea1f652c5efaff84819411e31afd5a28539dd1e0ccc1bc97edcab"
+      },
+      {
+        "id": "eeef7de3aac7b0cb932c5863",
+        "family": "F1",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "d2526ca6a3cb96da01709f4a1e32c6fadb449686da34961ad927450fcae671a0"
+      },
+      {
+        "id": "bb14ad581f1deb9edeadeca6",
+        "family": "F3",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "51f191318bc5b99c29e69b39fe758bd37b357a20fbedea73a95d3cb822030d70"
+      },
+      {
+        "id": "bad265a29191398f6090b4a6",
+        "family": "R4",
+        "repeat": 2,
+        "track": "research",
+        "defective": false,
+        "packetHash": "1b711d352f2c0d383a46a5898de09d16ea92bb0f743715454603a037f29de05a"
+      },
+      {
+        "id": "ebc3a0da6088732a569012df",
+        "family": "P2",
+        "repeat": 3,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "496bbe8095925202096a93bd3b974dae0eace99a8cc1d58f6e82acef2d3ae021"
+      },
+      {
+        "id": "612928e03cd1e0e23d386e81",
+        "family": "R1",
+        "repeat": 3,
+        "track": "research",
+        "defective": false,
+        "packetHash": "64db623fe189905988ff57953bc14c4aa3143b37ecea94c3d844f26317d3fdab"
+      },
+      {
+        "id": "3525f7f47487366e12427fd6",
+        "family": "P2",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "700b4f060b639af1ca4f8fdab2f40dc851d42ea25e733a5cdc8619dc0e9147c8"
+      },
+      {
+        "id": "0b25c9e09a893fcd925d5861",
+        "family": "P1",
+        "repeat": 2,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "18a8e6d88a587c77cbb1095703c662ec030dcfe057da5d986bf9f9d95a68e44a"
+      },
+      {
+        "id": "c23a82196c0a11c2934be4a3",
+        "family": "R5",
+        "repeat": 3,
+        "track": "research",
+        "defective": false,
+        "packetHash": "2cc0c4b64ad247ba575c810b2158bf84b6a31e18af50ac00cdbaf30fd434c0dd"
+      }
+    ],
+    "publicPacketsHash": "31b2a9d6584dd8170d94fa1054eda1c4325136550b170e898fc51f811839ce03",
+    "privatePacketsHash": "d00e38088f6f994a298d9687932a94eb9475e90ceeccd624dfe506986006337a"
+  },
+  "calibration": {
+    "split": "development",
+    "instances": [
+      {
+        "id": "105ad0d3a8f84a996709fac1",
+        "family": "P1",
+        "repeat": 1,
+        "track": "probe",
+        "defective": true,
+        "packetHash": "32796681406d8f93cc17f8924762226f16593c35758b3e99db31b971e686485b"
+      },
+      {
+        "id": "094dc33dc897a592f56af228",
+        "family": "R3",
+        "repeat": 1,
+        "track": "research",
+        "defective": false,
+        "packetHash": "698f34a4f20340d8b9c78282289a49bb1c1d1a8f285371f7732abfd1cdd98c79"
+      },
+      {
+        "id": "e2a6db9dc83b48959d244f4d",
+        "family": "P1",
+        "repeat": 1,
+        "track": "probe",
+        "defective": false,
+        "packetHash": "88b8872f9d26d2b68afcdb9b64fe2fb9b52fd46c17613803a56d737ee044be96"
+      }
+    ],
+    "countsTowardQualification": false,
+    "performed": false
+  },
+  "policy": {
+    "label": "6h-only",
+    "concurrency": 1,
+    "budget": {
+      "milliseconds": 21600000
+    },
+    "cumulativeCeilings": "omitted for turns, actions, requests, costs and attempts",
+    "seeds": "provider support must be established separately from the corpus order seed",
+    "scoring": "two independent raters; third-party adjudication; no qualification success with unresolved judgments"
+  },
+  "observedConnections": {
+    "checkedPaths": [
+      "/root/.config/opencode",
+      "/root/.local/share/opencode/auth.json",
+      "/workspace/opencode/.opencode/opencode.jsonc"
+    ],
+    "configuredProviders": [],
+    "configuredModel": null,
+    "providerEnvironmentPresent": false,
+    "historicalProgramBenchDeploymentPresent": false
+  },
+  "runtimeConstraints": {
+    "providerTurnAbsoluteMilliseconds": 900000,
+    "providerIdleMilliseconds": 600000,
+    "transport": "current observer requires a fixed HTTP deployment proxy; not direct HTTPS",
+    "candidateTimeoutMillisecondsInSelfcheck": 5000,
+    "noQualificationLauncherPresent": true
+  },
+  "pending": [
+    "worker and reviewer provider/model/variant/supported sampling/seed",
+    "provider deployment and credential reference outside candidate authority",
+    "real-provider launcher and operation identity routing; role-based scripted probe worker only",
+    "effective prompt, agent, tools and isolated configuration bytes",
+    "single-operation limits and deadline/cancel propagation across actual gateway/proxy",
+    "two independent blinded raters and a separate adjudicator",
+    "development wiring calibration before new final source/configuration freeze"
+  ],
+  "preliminaryChecks": [
+    {
+      "file": "local-selfcheck.log",
+      "hash": "f5464a4e5b18419cfc8b2fca1ed791cd9f7d6f294c386cc217d695da3ea676d8",
+      "passed": 19,
+      "assertions": 3487
+    },
+    {
+      "file": "core-budget-check.log",
+      "hash": "c832a2a984a2d902db851d526b13f2817959ed980db2bddeb8c95eccc4be314e",
+      "passed": 2,
+      "assertions": 32
+    },
+    {
+      "file": "schema-budget-check.log",
+      "hash": "9f8207ad266bb3994b01c5380f976de3702be44a6c1c363c0672c253b27e2d11",
+      "passed": 2,
+      "assertions": 17
+    }
+  ],
+  "incompleteConfigurationRejected": true,
+  "proposedConfiguration": {
+    "version": 1,
+    "mode": "qualification",
+    "worker": null,
+    "reviewer": null,
+    "sourceSnapshot": "f76c92909c1c7eb89d5e35747a6ada443d0918bb14c4c93e23ab4082322e6291",
+    "lockfile": "b5b76fda6f891ca40db756b63fb848f86f0c2eef20496303c8a775f9ddfea987",
+    "prompts": null,
+    "agents": null,
+    "tools": null,
+    "configuration": null,
+    "runner": null,
+    "corpus": "d00e38088f6f994a298d9687932a94eb9475e90ceeccd624dfe506986006337a",
+    "oracle": "0776c73ca0b1d1b3d3f71dbc32d13ad13fe60a3eadebf29f146239bfc03819ce",
+    "scorer": "e23c583426332f9157980f75e759f92860b06761feacfa7562be3158636246b7",
+    "bun": {
+      "version": "1.3.14",
+      "hash": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+    },
+    "node": {
+      "version": "v24.21.0",
+      "hash": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c"
+    },
+    "order": [
+      "770c19425b219bb5662a9254",
+      "668bc7ae4881a1b486b53208",
+      "ba8f6950b0a2d15bb137a453",
+      "da124b22a5313399465bf437",
+      "c75bb6ab296a9b4a62bd8d36",
+      "dcea28cd7bf023af78eb0150",
+      "b5ae5210f037704f9f7629e9",
+      "c3a6d6f2020abbfa2a33bd76",
+      "2d23d2bcd1c72cd8be93043c",
+      "746f0c666622c2c169962445",
+      "91814b9078aff7d7e2d095d6",
+      "7e9924fa19e77cf73ac8bd9e",
+      "f67335a48ae9eedbc919d28c",
+      "655f64f3781726b47fc9479a",
+      "950ee8c9d52f4fe55b26f597",
+      "163b8f6fc1387ff1cc76b3e6",
+      "5930bf9e36dec0ccd479377b",
+      "3380ee6325e8078a79ffd2d8",
+      "b10c351e2853c1979eab34db",
+      "1ef33c291dd62fc79cb4b768",
+      "3a04342f4436bda7852c5ab6",
+      "15111267222829dd4df908a0",
+      "e85f305f4de8f74efa864ed6",
+      "90923370183cb7bfd124b000",
+      "fabaeffbd1f0b00f0df3762f",
+      "da127cf71d7cc350c2342689",
+      "5846f73560bfe4990f8854d5",
+      "4b95240b17aa79fc5f70a39a",
+      "0753dfa534394d2d04983680",
+      "8d22f766ff57190c475e6783",
+      "349f8f1f7cd9bcc7155c03c9",
+      "790fbc6b8bc04bc4987053de",
+      "f984b582bc86077e94e72a17",
+      "2033206ad6f5fc3417e25c1a",
+      "0a0b6a99a65bd9f043c940bf",
+      "db75cb71b5d2a0eb79103648",
+      "8a454dd52780923332adbe1c",
+      "3a2776b1b8b42c0cd6556e4f",
+      "daaeaf21842173ef3080bd29",
+      "ad2a789470f4a807a5374932",
+      "6e1f39ccda0cf079d73708eb",
+      "822ad34864183319c0863361",
+      "e3bf72c90744a5f6435c9a08",
+      "e6b90c3338c89f83d6326a15",
+      "55ff4e01f8f981d29986919a",
+      "e632213c1e88e67957585195",
+      "c9416d919399d8f1867f4ecc",
+      "215decfb19519f62acaf16e4",
+      "0d6a841f9622f6d42156938e",
+      "5bd5b8fe5e9c09463dd3b914",
+      "842bb698bdad05552b33f374",
+      "e1a35740cb81b89e7ed61a08",
+      "03e02d54ee8c1de7fe7e2355",
+      "bcafffb50f6faf67bd2df5e5",
+      "b3fb4beb918db3bbb5269b2b",
+      "802e3657bf08eb90ffd83f51",
+      "f841c6ab3e30bfb4540a061f",
+      "864618f55ff4873bdb7ea674",
+      "eeef7de3aac7b0cb932c5863",
+      "bb14ad581f1deb9edeadeca6",
+      "bad265a29191398f6090b4a6",
+      "ebc3a0da6088732a569012df",
+      "612928e03cd1e0e23d386e81",
+      "3525f7f47487366e12427fd6",
+      "0b25c9e09a893fcd925d5861",
+      "c23a82196c0a11c2934be4a3"
+    ],
+    "seed": "s6b-frozen-20260919",
+    "budget": {
+      "milliseconds": 21600000
+    },
+    "timeouts": null,
+    "recovery": "One scheduled fault opportunity per R5/R6 instance; explicit recovery only after actual unknown operation, prior-process cleanup, and unchanged original deadline; preserve actual replan branch; no other unknown execution replay.",
+    "isolation": null
+  },
+  "preparationCodeHash": "0280426b783a938e25a05ce2a2247c20cd20b2effd58ba40ab4887ccc4c40b70"
+}

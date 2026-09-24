@@ -2,7 +2,7 @@ import { $ } from "bun"
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Schedule } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Global } from "@opencode-ai/core/global"
@@ -10,6 +10,7 @@ import { Location } from "@opencode-ai/core/location"
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractReplay } from "@opencode-ai/core/pro-contract/replay"
 import { ProContractObservation } from "@opencode-ai/core/pro-contract/observation"
+import { ProContractExecutor } from "@opencode-ai/core/pro-contract/executor"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Hash } from "@opencode-ai/core/util/hash"
@@ -17,6 +18,220 @@ import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 describe("ProContract replay verifier", () => {
+  testEffect(Layer.empty).live("retains scratch and reports missing evidence when observation archiving fails", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const project = path.join(tmp.path, "project")
+          const data = path.join(tmp.path, "data")
+          const started = path.join(tmp.path, "started")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(project)
+            await $`git init`.cwd(project).quiet()
+            await $`git config core.fsmonitor false`.cwd(project).quiet()
+            await fs.writeFile(path.join(project, "source.txt"), "frozen input")
+            await fs.mkdir(path.join(data, "pro-contract"), { recursive: true })
+            // A file blocks the observation directory while leaving report publication available.
+            await fs.writeFile(path.join(data, "pro-contract", "observations"), "archive unavailable")
+          })
+          yield* Effect.gen(function* () {
+            const replay = yield* ProContractReplay.Service
+            const snapshots = yield* Snapshot.Service
+            const subject = yield* snapshots.capture()
+            expect(subject).toBeDefined()
+            if (!subject) return
+            const verify = replay
+              .verify({
+                contractID: ProContract.ID.make("pct_replay_archive_failure"),
+                subjectHash: subject,
+                policy: {
+                  checks: [
+                    {
+                      argv: [
+                        process.execPath,
+                        "-e",
+                        `require('fs').writeFileSync(${JSON.stringify(started)}, process.cwd()); process.stdout.write('not archived')`,
+                      ],
+                      timeout: 10_000,
+                      exit: 0,
+                    },
+                  ],
+                  protected: [],
+                  artifacts: [],
+                },
+              })
+              .pipe(Effect.flip)
+            const failed = yield* verify
+            expect(failed).toMatchObject({
+              _tag: "ProContractReplayUnavailable",
+              message: "Observation archive is unavailable or failed integrity validation",
+            })
+            // The zero-receipt incomplete report has the same digest on retry.
+            expect(yield* verify).toEqual(failed)
+            const files = yield* Effect.promise(() => fs.readdir(path.join(data, "pro-contract", "replay")))
+            expect(files).toHaveLength(1)
+            expect(
+              yield* Effect.promise(() => Bun.file(path.join(data, "pro-contract", "replay", files[0]!)).json()),
+            ).toMatchObject({
+              passed: false,
+              checks: [],
+              incomplete: { reason: "failed", expectedChecks: 1, observationArchiveFailed: true },
+            })
+            const scratch = yield* Effect.promise(() => Bun.file(started).text())
+            expect(yield* Effect.promise(() => fs.stat(scratch).then((info) => info.isDirectory()))).toBe(true)
+          }).pipe(
+            Effect.provide(
+              AppNodeBuilder.build(LayerNode.group([ProContractReplay.node, Snapshot.node]), [
+                [Location.node, Location.boundNode(Location.Ref.make({ directory: AbsolutePath.make(project) }))],
+                [Global.node, Global.layerWith({ data, tmp: path.join(tmp.path, "scratch") })],
+              ]),
+            ),
+          )
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  testEffect(Layer.empty).live(
+    "archives completed and interrupted observations before removing replay scratch",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) =>
+          Effect.gen(function* () {
+            const project = path.join(tmp.path, "project")
+            const data = path.join(tmp.path, "data")
+            const started = path.join(tmp.path, "started")
+            const unrun = path.join(tmp.path, "unrun")
+            yield* Effect.promise(async () => {
+              await fs.mkdir(project)
+              await $`git init`.cwd(project).quiet()
+              await $`git config core.fsmonitor false`.cwd(project).quiet()
+              await fs.writeFile(path.join(project, "source.txt"), "frozen input")
+            })
+            yield* Effect.gen(function* () {
+              const replay = yield* ProContractReplay.Service
+              const snapshots = yield* Snapshot.Service
+              const observations = yield* ProContractObservation.Service
+              const subject = yield* snapshots.capture()
+              expect(subject).toBeDefined()
+              if (!subject) return
+              const contractID = ProContract.ID.make("pct_replay_interrupt")
+              const run = yield* replay
+                .verify({
+                  contractID,
+                  subjectHash: subject,
+                  policy: {
+                    checks: [
+                      {
+                        argv: [process.execPath, "-e", "process.stdout.write('completed evidence')"],
+                        timeout: 10_000,
+                        exit: 0,
+                      },
+                      {
+                        argv: [
+                          process.execPath,
+                          "-e",
+                          `setInterval(() => {}, 1000); process.stdout.write('x'.repeat(2 * 1024 * 1024), () => process.stderr.write('y'.repeat(2 * 1024 * 1024), () => require('fs').writeFileSync(${JSON.stringify(started)}, JSON.stringify({ cwd: process.cwd(), pid: process.pid }))));`,
+                        ],
+                        timeout: 30_000,
+                        exit: 0,
+                        observations: [
+                          {
+                            id: "partial-match",
+                            stream: "stdout",
+                            hash: Hash.sha256(Buffer.from("x".repeat(ProContractExecutor.MAX_OUTPUT_BYTES))),
+                          },
+                        ],
+                      },
+                      {
+                        argv: [
+                          process.execPath,
+                          "-e",
+                          `require('fs').writeFileSync(${JSON.stringify(unrun)}, 'should not run')`,
+                        ],
+                        timeout: 10_000,
+                        exit: 0,
+                      },
+                    ],
+                    protected: [{ path: RelativePath.make("source.txt"), hash: Hash.sha256("frozen input") }],
+                    artifacts: [RelativePath.make("source.txt")],
+                  },
+                })
+                .pipe(Effect.forkChild)
+              yield* Effect.promise(() => Bun.file(started).exists()).pipe(
+                Effect.repeat({ while: (value) => !value, schedule: Schedule.spaced("10 millis") }),
+                Effect.timeout("10 seconds"),
+              )
+              const processInfo = yield* Effect.promise(
+                () => Bun.file(started).json() as Promise<{ cwd: string; pid: number }>,
+              )
+              yield* Fiber.interrupt(run)
+              const exit = yield* Fiber.await(run)
+              expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true)
+              const files = yield* Effect.promise(() => fs.readdir(path.join(data, "pro-contract", "replay")))
+              expect(files).toHaveLength(1)
+              const bytes = yield* Effect.promise(() =>
+                Bun.file(path.join(data, "pro-contract", "replay", files[0]!)).text(),
+              )
+              expect(files[0]).toBe(`${Hash.sha256(bytes)}.json`)
+              expect(JSON.parse(bytes)).toMatchObject({
+                version: 2,
+                contractID,
+                subjectHash: subject,
+                passed: false,
+                incomplete: { reason: "interrupted", expectedChecks: 3, expectedProtected: 1, expectedArtifacts: 1 },
+                protected: [],
+                artifacts: [],
+              })
+              const checks = yield* replay.read({ contractID, evidenceHash: Hash.sha256(bytes) })
+              expect(checks).toHaveLength(2)
+              expect(checks[0]!.receipt).toMatchObject({ execution: "completed", exit: 0, stdout: { complete: true } })
+              expect(checks[1]!.receipt).toMatchObject({
+                execution: "unavailable",
+                error: "Replay check interrupted; captured output may be incomplete",
+                targetExecution: "unobserved",
+                stdout: { bytes: ProContractExecutor.MAX_OUTPUT_BYTES, complete: false },
+                stderr: { bytes: ProContractExecutor.MAX_OUTPUT_BYTES, complete: false },
+                predicates: [{ id: "partial-match", status: "unobserved" }],
+              })
+              expect(checks[1]!.receipt.exit).toBeUndefined()
+              for (const [index, stream, expected] of [
+                [0, "stdout", "completed evidence"],
+                [1, "stdout", "xxxxxxxxxxxxxxxxxx"],
+                [1, "stderr", "yyyyyyyyyyyyyyyyyy"],
+              ] as const) {
+                const raw = yield* observations.read({ handle: checks[index]!.handle, stream, offset: 0, length: 18 })
+                expect(Buffer.from(raw.data, "base64").toString()).toBe(expected)
+              }
+              expect(yield* Effect.promise(() => Bun.file(unrun).exists())).toBe(false)
+              expect(
+                yield* Effect.promise(() =>
+                  fs.stat(processInfo.cwd).then(
+                    () => true,
+                    () => false,
+                  ),
+                ),
+              ).toBe(false)
+              expect(() => process.kill(processInfo.pid, 0)).toThrow()
+            }).pipe(
+              Effect.provide(
+                AppNodeBuilder.build(
+                  LayerNode.group([ProContractReplay.node, Snapshot.node, ProContractObservation.node]),
+                  [
+                    [Location.node, Location.boundNode(Location.Ref.make({ directory: AbsolutePath.make(project) }))],
+                    [Global.node, Global.layerWith({ data, tmp: path.join(tmp.path, "scratch") })],
+                  ],
+                ),
+              ),
+            )
+          }),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    20_000,
+  )
+
   testEffect(Layer.empty).live("replays one frozen subject outside the candidate Location", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

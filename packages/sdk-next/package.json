@@ -15,6 +15,7 @@
     "@opencode-ai/client": "workspace:*",
     "@opencode-ai/core": "workspace:*",
     "@opencode-ai/server": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

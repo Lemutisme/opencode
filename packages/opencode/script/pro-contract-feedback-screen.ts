@@ -1,5 +1,7 @@
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { ProContract } from "@opencode-ai/schema/pro-contract"
+import { Schema } from "effect"
 import { runOracle, tasks } from "./pro-contract-feedback-tasks"
 
 const repository = path.resolve(import.meta.dir, "../../..")
@@ -634,6 +636,11 @@ async function run(root: string, smoke: boolean) {
         )
         await writeFile(path.join(directory, "export.json"), json(captured))
         if (captured.exit !== 0) throw new Error("Frozen handoff export failed")
+        const target = Schema.decodeUnknownSync(Schema.Struct({ target: ProContract.RecognitionTarget }))(
+          JSON.parse(captured.stdout),
+        ).target
+        const operationID = crypto.randomUUID()
+        await writeFile(path.join(directory, "recognition-request.json"), json({ operationID, expected: target }))
         await command(["docker", "pause", container], repository)
         const evaluation = [
           "docker",
@@ -655,12 +662,13 @@ async function run(root: string, smoke: boolean) {
             ? await runOracle(task, exported, [...evaluation.slice(0, 2), "--interactive", ...evaluation.slice(2)])
             : { passed: false, cases: [] }
         await command(["docker", "unpause", container], repository)
-        const contract = result.contract as { handoff: { subjectHash: string }; revision: number; specHash: string }
         const report = {
           contractID,
-          revision: contract.revision,
-          specHash: contract.specHash,
-          subjectHash: contract.handoff.subjectHash,
+          operationID,
+          expected: target,
+          revision: target.revision,
+          specHash: target.specHash,
+          subjectHash: target.subjectHash,
           compiled,
           oracle,
         }
@@ -669,12 +677,17 @@ async function run(root: string, smoke: boolean) {
         result.oraclePassed = oracle.cases.filter((item) => item.passed).length
         result.oracleTotal = task.oracle.length
         if (result.correct) {
-          await api(`/api/contract/${contractID}/attestation`, { evidenceHash: hash(JSON.stringify(report)) })
+          const receipt = await api(`/api/contract/${contractID}/attestation`, {
+            operationID,
+            expected: target,
+            evidenceHash: hash(JSON.stringify(report)),
+          })
           const final = await api(`/api/contract/${contractID}`)
           const quiet = await api("/api/contract/quiet?scope=screen")
-          result.delivery = final.data.status === "discharged" && quiet.quiet === true
+          result.delivery =
+            receipt.support?.valid === true && final.data.status === "discharged" && quiet.quiet === true
           result.status = final.data.status
-          await writeFile(path.join(directory, "settlement.json"), json({ final, quiet }))
+          await writeFile(path.join(directory, "settlement.json"), json({ receipt, final, quiet }))
         }
       }
     } catch (error) {

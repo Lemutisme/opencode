@@ -44,6 +44,7 @@ type Sse = {
 
 type HttpError = {
   type: "http-error"
+  wait?: PromiseLike<unknown>
   status: number
   body: unknown
 }
@@ -565,9 +566,10 @@ export function reply() {
   return new Reply()
 }
 
-export function httpError(status: number, body: unknown): Item {
+export function httpError(status: number, body: unknown, wait?: PromiseLike<unknown>): Item {
   return {
     type: "http-error",
+    wait,
     status,
     body,
   }
@@ -690,7 +692,10 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         }
         hits = [...hits, current]
         yield* notify()
-        if (next.type !== "sse") return fail(next)
+        if (next.type !== "sse") {
+          if (next.wait) yield* Effect.promise(() => Promise.resolve(next.wait))
+          return fail(next)
+        }
         if (mode === "responses") return send(responses(next, modelFrom(body)))
         if (next.reset) {
           yield* reset(next)

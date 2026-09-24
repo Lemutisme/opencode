@@ -221,18 +221,21 @@ describe("ToolRegistry", () => {
       const bindings = yield* ProContractOpenCode.Service
       const started = yield* Deferred.make<void>()
       yield* service.register({
-        edit: Tool.make({
-          description: "Never settles",
-          input: Schema.Struct({ text: Schema.String }),
-          output: Schema.Struct({ text: Schema.String }),
-          execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
-        }),
+        edit: Tool.withCapability(
+          Tool.make({
+            description: "Never settles",
+            input: Schema.Struct({ text: Schema.String }),
+            output: Schema.Struct({ text: Schema.String }),
+            execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+          }),
+          "write",
+        ),
       })
       const contractID = ProContract.ID.make("pct_bounded_tool")
       const issued = yield* contracts.issue({
         id: contractID,
         scope: "bounded-tool",
-        spec: ProContract.defaultSpec("Bound filesystem execution", Date.now()),
+        spec: { ...ProContract.defaultSpec("Bound filesystem execution", Date.now()), authority: ["filesystem.write"] },
         executor: "opencode",
       })
       yield* bindings.create({
@@ -247,10 +250,18 @@ describe("ToolRegistry", () => {
       if (!attempt) return yield* Effect.die("Contract attempt was not claimed")
       const materialized = yield* service.materialize()
       const settled = yield* materialized
-        .settle({ ...call("edit"), sessionID: attempt.sessionID })
+        .settle({
+          ...call("edit"),
+          sessionID: attempt.sessionID,
+          contractExecution: ProContractOpenCode.execution(attempt),
+        })
         .pipe(Effect.forkChild)
       yield* Deferred.await(started)
-      yield* TestClock.adjust("1 minute")
+      yield* TestClock.adjust("20 seconds")
+      yield* bindings.heartbeat(new Set([attempt.sessionID]), 20_000)
+      yield* TestClock.adjust("20 seconds")
+      yield* bindings.heartbeat(new Set([attempt.sessionID]), 40_000)
+      yield* TestClock.adjust("20 seconds")
 
       expect((yield* Fiber.join(settled)).result).toEqual({
         type: "error",

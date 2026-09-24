@@ -44,6 +44,7 @@ import { AgentV2 } from "@opencode-ai/core/agent"
 import { Config } from "@opencode-ai/core/config"
 import { ConfigCompaction } from "@opencode-ai/core/config/compaction"
 import { Tool } from "@opencode-ai/core/tool/tool"
+import { ContractControlTools } from "@opencode-ai/core/tool/contract-control"
 import {
   SessionContextEpochTable,
   SessionInputTable,
@@ -60,6 +61,9 @@ import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ProContractJob } from "@opencode-ai/core/pro-contract/job"
+import { ExecutionPermit } from "@opencode-ai/core/session/execution-permit"
+import { ProContractDriver } from "@opencode-ai/core/pro-contract/driver"
 import { ProContractContext } from "@opencode-ai/core/pro-contract/context"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
@@ -261,7 +265,7 @@ const execution = Layer.effect(
     })
   }),
 ).pipe(Layer.provide(runnerLayer))
-const it = testEffect(
+const runnerTestLayer = (includeContractTools = false) =>
   AppNodeBuilder.build(
     LayerNode.group([
       Database.node,
@@ -282,9 +286,12 @@ const it = testEffect(
       Snapshot.node,
       ProContract.node,
       ProContractOpenCode.node,
+      ProContractJob.node,
+      ExecutionPermit.node,
       SessionRunnerLLM.node,
       SessionExecution.node,
       SessionV2.node,
+      ...(includeContractTools ? [ContractControlTools.node] : []),
     ]),
     [
       [SessionObservationPack.policyNode, SessionObservationPack.policyLayer("1")],
@@ -299,8 +306,9 @@ const it = testEffect(
       [SessionExecution.node, execution],
       [Config.node, config],
     ],
-  ),
-)
+  )
+const it = testEffect(runnerTestLayer())
+const controlIt = testEffect(runnerTestLayer(true))
 const sessionID = SessionV2.ID.make("ses_runner_test")
 const otherSessionID = SessionV2.ID.make("ses_runner_other")
 
@@ -365,18 +373,21 @@ const setupContractSession = Effect.fn(function* (budget: ProContract.Spec["budg
   const session = yield* SessionV2.Service
   const registry = yield* ToolRegistry.Service
   yield* registry.register({
-    read: Tool.make({
-      description: "Read deterministic fixture input",
-      input: Schema.Struct({ text: Schema.String }),
-      output: Schema.Struct({ text: Schema.String }),
-      execute: (input) =>
-        Effect.gen(function* () {
-          executions.push(input.text)
-          activeToolExecutions++
-          if (toolExecutionGate) yield* Deferred.await(toolExecutionGate)
-          return input
-        }).pipe(Effect.ensuring(Effect.sync(() => activeToolExecutions--))),
-    }),
+    read: Tool.withCapability(
+      Tool.make({
+        description: "Read deterministic fixture input",
+        input: Schema.Struct({ text: Schema.String }),
+        output: Schema.Struct({ text: Schema.String }),
+        execute: (input) =>
+          Effect.gen(function* () {
+            executions.push(input.text)
+            activeToolExecutions++
+            if (toolExecutionGate) yield* Deferred.await(toolExecutionGate)
+            return input
+          }).pipe(Effect.ensuring(Effect.sync(() => activeToolExecutions--))),
+      }),
+      "read",
+    ),
   })
   const contractID = ProContract.ID.create()
   yield* bindings.issue({
@@ -398,6 +409,52 @@ const setupContractSession = Effect.fn(function* (budget: ProContract.Spec["budg
   requests.length = 0
   executions.length = 0
   return binding
+})
+
+const setupReviewJob = Effect.fnUntraced(function* (text: string, deadline = 120_000) {
+  yield* setup
+  requests.length = 0
+  executions.length = 0
+  const bindings = yield* ProContractOpenCode.Service
+  const contracts = yield* ProContract.Service
+  const jobs = yield* ProContractJob.Service
+  const sessions = yield* SessionV2.Service
+  const issued = yield* bindings.issue({
+    id: ProContract.ID.create(),
+    scope: "review-runner",
+    now: 0,
+    location: { directory: AbsolutePath.make("/project") },
+    model: ModelV2.Ref.make({ id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") }),
+    spec: { ...ProContract.defaultSpec("Independent review", 0), budget: { deadline } },
+  })
+  const created = yield* jobs.create({
+    id: crypto.randomUUID(),
+    contractID: issued.contract!.id,
+    context: (yield* contracts.get(issued.contract!.id))!.recognition.context!.target,
+    driver: ProContractDriver.native.identity,
+    kind: "review",
+    inputHash: "a".repeat(64),
+    sessionID: SessionV2.ID.create(),
+    promptID: SessionMessage.ID.create(),
+    location: issued.execution!.location,
+    model: issued.execution!.model,
+    agent: AgentV2.ID.make("build"),
+    prompt: { text },
+  })
+  const job = yield* jobs.start(created.input.id)
+  yield* sessions.create({
+    id: job.input.sessionID,
+    location: job.input.location,
+    model: job.input.model,
+    agent: job.input.agent,
+  })
+  yield* sessions.prompt({
+    id: job.input.promptID,
+    sessionID: job.input.sessionID,
+    prompt: job.input.prompt,
+    resume: false,
+  })
+  return { job, jobs, bindings, sessions }
 })
 
 const setupOverflowRecovery = Effect.gen(function* () {
@@ -797,7 +854,12 @@ describe("SessionRunnerLLM", () => {
         subjectHash: "dependency-subject",
         time: Date.now(),
       })
-      yield* contracts.principalAttest({ contractID: dependencyID, evidenceHash: "dependency-evidence" })
+      yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(dependencyID))!.recognition.handoff!,
+        contractID: dependencyID,
+        evidenceHash: "dependency-evidence",
+      })
       const prerequisiteID = ProContract.ID.make("pct_runner_prerequisite")
       const prerequisiteSpec = ProContract.defaultSpec("Establish the verified prerequisite", Date.now())
       yield* contracts.issue({
@@ -815,7 +877,12 @@ describe("SessionRunnerLLM", () => {
         subjectHash: "prerequisite-subject",
         time: Date.now(),
       })
-      yield* contracts.principalAttest({ contractID: prerequisiteID, evidenceHash: "prerequisite-evidence" })
+      yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(prerequisiteID))!.recognition.handoff!,
+        contractID: prerequisiteID,
+        evidenceHash: "prerequisite-evidence",
+      })
       const spec = {
         ...ProContract.defaultSpec("Inspect the repository without changing it", Date.now()),
         authority: ["filesystem.read", "organization.approve", "reference.run"],
@@ -856,8 +923,14 @@ describe("SessionRunnerLLM", () => {
         reason: "waiting for a reproducible input",
         time: Date.now(),
       })
-      yield* contracts.activate(contract.id, contract.revision, Date.now())
-      const blockedAttempt = yield* bindings.claim(contract.id, Date.now())
+      const ended = Date.now()
+      expect(yield* bindings.claim(contract.id, ended)).toBeUndefined()
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(attempt!),
+        outcome: { type: "completed", reason: "Blocked drain ended" },
+        now: ended,
+      })
+      const blockedAttempt = yield* bindings.claim(contract.id, ended + spec.resolution.retryDelay)
       expect(blockedAttempt?.sessionID).not.toBe(attempt!.sessionID)
       yield* session.create({
         id: blockedAttempt!.sessionID,
@@ -912,9 +985,9 @@ describe("SessionRunnerLLM", () => {
         time: Date.now(),
       })
       yield* contracts.challenge({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contract.id))!.recognition.handoff!,
         contractID: contract.id,
-        revision: contract.revision,
-        subjectHash: "candidate-subject",
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Independent output mismatch",
@@ -930,24 +1003,29 @@ describe("SessionRunnerLLM", () => {
         time: Date.now(),
       })
       yield* contracts.challenge({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contract.id))!.recognition.handoff!,
         contractID: contract.id,
-        revision: contract.revision,
-        subjectHash: "candidate-subject-2",
         evidenceHash: "offline-witness",
         disclosure: "executor",
         summary: "Offline build regressed",
         time: Date.now(),
       })
       yield* contracts.activate(contract.id, contract.revision, Date.now())
+      yield* bindings.sweep(new Set(), Date.now())
       const challengedAttempt = yield* bindings.claim(contract.id, Date.now())
       expect(challengedAttempt?.sessionID).not.toBe(blockedAttempt!.sessionID)
-      yield* session.prompt({
-        sessionID: blockedAttempt!.sessionID,
-        prompt: Prompt.make({ text: "Continue in the old attempt" }),
-        resume: false,
-      })
+      expect(
+        (yield* session
+          .prompt({
+            sessionID: blockedAttempt!.sessionID,
+            prompt: Prompt.make({ text: "Continue in the old attempt" }),
+            resume: false,
+          })
+          .pipe(Effect.flip))._tag,
+      ).toBe("ExecutionDenied")
       response = []
-      yield* session.resume(blockedAttempt!.sessionID)
+      expect((yield* session.resume(blockedAttempt!.sessionID).pipe(Effect.flip))._tag).toBe("ExecutionDenied")
       expect(requests).toHaveLength(1)
       yield* session.create({
         id: challengedAttempt!.sessionID,
@@ -972,13 +1050,17 @@ describe("SessionRunnerLLM", () => {
       expect(challengedProjection).not.toContain("offline-witness")
 
       yield* contracts.release({ contractID: contract.id, reason: "test complete" })
-      yield* session.prompt({
-        sessionID: challengedAttempt!.sessionID,
-        prompt: Prompt.make({ text: "Continue after release" }),
-        resume: false,
-      })
+      expect(
+        (yield* session
+          .prompt({
+            sessionID: challengedAttempt!.sessionID,
+            prompt: Prompt.make({ text: "Continue after release" }),
+            resume: false,
+          })
+          .pipe(Effect.flip))._tag,
+      ).toBe("ExecutionDenied")
       response = []
-      yield* session.resume(challengedAttempt!.sessionID)
+      expect((yield* session.resume(challengedAttempt!.sessionID).pipe(Effect.flip))._tag).toBe("ExecutionDenied")
 
       expect(requests).toHaveLength(2)
     }),
@@ -3348,6 +3430,51 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  controlIt.effect("interrupts a revoked provider before the same Session is reclaimed", () =>
+    Effect.gen(function* () {
+      const binding = yield* setupContractSession({ deadline: 21_600_000 })
+      const session = yield* SessionV2.Service
+      const bindings = yield* ProContractOpenCode.Service
+      const contracts = yield* ProContract.Service
+      yield* session.prompt({
+        sessionID: binding.sessionID,
+        prompt: Prompt.make({ text: "Continue the approved task" }),
+        resume: false,
+      })
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "old-control", name: "contract_report_blocked", input: { reason: "late response" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "new-turn", ["Awaiting current work"]).completeEvents,
+      ]
+      const runner = yield* SessionRunner.Service
+      const run = yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(binding!),
+        outcome: { type: "retryable-error", reason: "transport retry" },
+        now: 0,
+      })
+      yield* TestClock.adjust("61 seconds")
+      const exit = yield* Fiber.await(run)
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      const replacement = yield* bindings.claim(binding.contractID, 61_000)
+      expect(replacement?.sessionID).toBe(binding.sessionID)
+      expect(replacement?.promptID).not.toBe(binding.promptID)
+      yield* Deferred.succeed(streamGate, undefined)
+      const history = yield* session.context(binding.sessionID)
+      const calls = history.flatMap((message) => (message.type === "assistant" ? message.content : []))
+      expect(calls.some((part) => part.type === "tool" && part.id === "old-control")).toBe(false)
+      expect((yield* contracts.get(binding.contractID))?.blocked).toBeUndefined()
+      expect((yield* bindings.get(binding.contractID))?.actionsUsed).toBe(0)
+    }),
+  )
+
   it.effect("keeps deadline-only Contract tools available beyond generic agent steps", () =>
     Effect.gen(function* () {
       const binding = yield* setupContractSession({ deadline: 21_600_000 })
@@ -3400,7 +3527,9 @@ describe("SessionRunnerLLM", () => {
       yield* TestClock.adjust(1_000)
       const exit = yield* Fiber.await(run)
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
-      yield* runner.run({ sessionID: binding.sessionID, force: true })
+      expect((yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.flip))._tag).toBe(
+        "ExecutionDenied",
+      )
       expect(requests).toHaveLength(1)
     }),
   )
@@ -3459,7 +3588,147 @@ describe("SessionRunnerLLM", () => {
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
       expect(requests).toHaveLength(1)
       expect((yield* session.context(binding.sessionID)).some((message) => message.type === "compaction")).toBe(false)
-      yield* runner.run({ sessionID: binding.sessionID, force: true })
+      expect((yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.flip))._tag).toBe(
+        "ExecutionDenied",
+      )
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  for (const mode of ["automatic", "overflow"] as const) {
+    it.effect(`accounts controlled reviewer ${mode} compaction separately and preserves missing usage`, () =>
+      Effect.gen(function* () {
+        const state = yield* setupReviewJob("Detailed review material ".repeat(mode === "automatic" ? 250 : 700))
+        currentModel = mode === "automatic" ? compactModel : recoveryModel
+        const summary = [
+          ...fragmentFixture("text", "job-summary", ["## Objective\n- Review the candidate"]).completeEvents.filter(
+            (event) => event.type !== "step-finish" && event.type !== "finish",
+          ),
+          LLMEvent.stepFinish({ index: 0, reason: "stop", usage: new Usage({ outputTokens: 9 }) }),
+          LLMEvent.finish({ reason: "stop" }),
+        ]
+        responses = [
+          ...(mode === "overflow"
+            ? [[LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })]]
+            : []),
+          summary,
+          fragmentFixture("text", "review-result", ["Review complete"]).completeEvents.filter(
+            (event) => event.type !== "step-finish" && event.type !== "finish",
+          ),
+        ]
+        const runner = yield* SessionRunner.Service
+        yield* runner.run({ sessionID: state.job.input.sessionID, force: true })
+        const history = yield* state.jobs.operations(state.job.input.contractID)
+        expect(history.map((operation) => operation.kind)).toEqual(
+          mode === "overflow" ? ["provider", "compaction", "provider"] : ["compaction", "provider"],
+        )
+        expect(history.find((operation) => operation.kind === "compaction")?.usage).toEqual({
+          state: "reported",
+          value: { outputTokens: 9 },
+        })
+        expect(history.at(-1)?.usage).toEqual({ state: "unknown" })
+        expect(
+          history.every(
+            (operation) => operation.source.jobID === state.job.input.id && operation.source.deadline === 120_000,
+          ),
+        ).toBe(true)
+        expect(yield* state.bindings.get(state.job.input.contractID)).toMatchObject({ turnsUsed: 0, actionsUsed: 0 })
+      }),
+    )
+  }
+
+  it.effect("gives reviewer guidance and durably ends its already-started tool when cancelled", () =>
+    Effect.gen(function* () {
+      const state = yield* setupReviewJob("Inspect the fixed candidate")
+      const registry = yield* ToolRegistry.Service
+      const runner = yield* SessionRunner.Service
+      const entered = yield* Deferred.make<void>()
+      yield* registry.register({
+        read: Tool.withCapability(
+          Tool.make({
+            description: "Read fixture pending cancellation",
+            input: Schema.Struct({}),
+            output: Schema.String,
+            execute: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+          }),
+          "read",
+        ),
+      })
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "review-read", name: "read", input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      const run = yield* runner.run({ sessionID: state.job.input.sessionID, force: true }).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const guidance = requests[0].system.map((part) => part.text).join("\n")
+      expect(guidance).toContain("independent read-only reviewer")
+      expect(guidance).not.toContain("call contract_propose")
+      yield* state.jobs.cancel(state.job.input.id, "cancel during read")
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.await(run)
+      const tools = (yield* state.sessions.context(state.job.input.sessionID)).flatMap((message) =>
+        message.type === "assistant" ? message.content.filter((part) => part.type === "tool") : [],
+      )
+      expect(tools).toMatchObject([
+        { name: "read", state: { status: "error", error: { message: "Tool execution interrupted" } } },
+      ])
+      expect(
+        (yield* state.jobs.operations(state.job.input.contractID)).find((operation) => operation.kind === "tool")
+          ?.status,
+      ).toBe("interrupted")
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect("refuses a cancelled reviewer through direct runner before promotion or provider work", () =>
+    Effect.gen(function* () {
+      const state = yield* setupReviewJob("Frozen reviewer prompt")
+      const runner = yield* SessionRunner.Service
+      yield* state.jobs.cancel(state.job.input.id, "cancelled before provider")
+      expect((yield* runner.run({ sessionID: state.job.input.sessionID, force: true }).pipe(Effect.flip))._tag).toBe(
+        "ExecutionDenied",
+      )
+      expect(requests).toHaveLength(0)
+      expect(yield* state.jobs.operations(state.job.input.contractID)).toHaveLength(0)
+      expect(yield* state.sessions.context(state.job.input.sessionID)).toHaveLength(0)
+    }),
+  )
+
+  it.effect("never recaptures a recovered generation for an already captured reviewer drain", () =>
+    Effect.gen(function* () {
+      const state = yield* setupReviewJob("Frozen reviewer prompt")
+      const permits = yield* ExecutionPermit.Service
+      const runner = yield* SessionRunner.Service
+      const permit = yield* permits.capture(state.job.input.sessionID)
+      yield* TestClock.adjust("31 seconds")
+      const recovered = yield* state.jobs.recover(state.job.input.id)
+      expect(
+        (yield* runner
+          .run({ sessionID: state.job.input.sessionID, force: true, executionPermit: permit })
+          .pipe(Effect.flip))._tag,
+      ).toBe("ExecutionDenied")
+      expect(requests).toHaveLength(0)
+      expect(yield* state.jobs.operations(state.job.input.contractID)).toHaveLength(0)
+      expect(yield* state.jobs.get(state.job.input.id)).toEqual(recovered)
+    }),
+  )
+
+  it.effect("interrupts reviewer compaction at its original deadline", () =>
+    Effect.gen(function* () {
+      const state = yield* setupReviewJob("Detailed review material ".repeat(250), 1000)
+      currentModel = compactModel
+      responseStream = Stream.never
+      const runner = yield* SessionRunner.Service
+      const run = yield* runner.run({ sessionID: state.job.input.sessionID, force: true }).pipe(Effect.forkChild)
+      while (requests.length === 0) yield* Effect.yieldNow
+      yield* TestClock.adjust(1000)
+      const exit = yield* Fiber.await(run)
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* state.jobs.operations(state.job.input.contractID)).toMatchObject([
+        { kind: "compaction", status: "interrupted", usage: { state: "unknown" } },
+      ])
       expect(requests).toHaveLength(1)
     }),
   )
@@ -4060,13 +4329,10 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.toolInputDelta({ id: "call-before-queued-recovery", name: "read", text: '{"text":"0' }),
         ]
         yield* runner.run({ sessionID: binding.sessionID, force: false })
-        yield* bindings.reschedule({
-          contractID: binding.contractID,
-          revision: binding.revision,
-          promptID: binding.promptID,
-          reason: "OpenCode execution ended without settlement",
+        yield* bindings.complete({
+          execution: ProContractOpenCode.execution(binding!),
+          outcome: { type: "retryable-error", reason: "OpenCode execution ended without settlement" },
           now: 0,
-          attempt: "same",
         })
         yield* TestClock.adjust("1 minute")
         const retry = yield* bindings.claim(binding.contractID, 60_000)
@@ -4110,9 +4376,7 @@ describe("SessionRunnerLLM", () => {
         yield* Effect.forEach(
           [80_000, 100_000, 120_000],
           (now) =>
-            TestClock.adjust("20 seconds").pipe(
-              Effect.andThen(bindings.heartbeat(new Set([retry.sessionID]), now)),
-            ),
+            TestClock.adjust("20 seconds").pipe(Effect.andThen(bindings.heartbeat(new Set([retry.sessionID]), now))),
           { discard: true },
         )
         yield* Fiber.join(run)
@@ -4230,7 +4494,9 @@ describe("SessionRunnerLLM", () => {
         expect(JSON.stringify(context)).toContain("This tool was not executed locally")
         expect(JSON.stringify(context)).not.toContain("Local recovery guard")
         if (boundary === "deadline") {
-          yield* runner.run({ sessionID: binding.sessionID, force: true })
+          expect((yield* runner.run({ sessionID: binding.sessionID, force: true }).pipe(Effect.flip))._tag).toBe(
+            "ExecutionDenied",
+          )
           expect(requests).toHaveLength(2)
         }
       }),

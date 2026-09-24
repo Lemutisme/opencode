@@ -21,9 +21,11 @@ import {
 import { Tools } from "./tools"
 import { makeLocationNode } from "../effect/app-node"
 import { ProContractOpenCode } from "../pro-contract/open-code"
+import { ExecutionPermit } from "../session/execution-permit"
 
 const BOUNDED_CONTRACT_TOOLS = new Set(["read", "edit", "write", "apply_patch", "glob", "grep"])
 const CONTRACT_CONTROL_TOOLS = new Set([
+  "contract_request",
   "contract_report_ready",
   "contract_report_blocked",
   "contract_propose_revision",
@@ -34,6 +36,8 @@ export type ExecuteInput = {
   readonly agent: AgentV2.ID
   readonly assistantMessageID: SessionMessage.ID
   readonly call: ToolCall
+  readonly contractExecution?: ProContractOpenCode.Execution
+  readonly executionPermit?: ExecutionPermit.Permit
 }
 
 export interface Interface {
@@ -61,6 +65,7 @@ const registryLayer = Layer.effect(
     const applications = yield* ApplicationTools.Service
     const resources = yield* ToolOutputStore.Service
     const contracts = yield* ProContractOpenCode.Service
+    const permits = yield* ExecutionPermit.Service
     type Registration = { readonly identity: object; readonly tool: AnyTool }
     const local = new Map<string, Array<{ readonly token: object; readonly registration: Registration }>>()
 
@@ -70,7 +75,11 @@ const registryLayer = Layer.effect(
       if (
         !CONTRACT_CONTROL_TOOLS.has(input.call.name) &&
         !(registration && hasSubactions(registration.tool)) &&
-        !(yield* contracts.reserveAction(input.sessionID, yield* Clock.currentTimeMillis))
+        !(yield* contracts.reserveAction(
+          input.sessionID,
+          yield* Clock.currentTimeMillis,
+          input.contractExecution ?? false,
+        ))
       )
         return { result: { type: "error" as const, value: "Contract action budget exhausted" } }
       if (!registration)
@@ -87,7 +96,9 @@ const registryLayer = Layer.effect(
         agent: input.agent,
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
-      })
+        ...(input.contractExecution ? { contractExecution: input.contractExecution } : {}),
+        ...(input.executionPermit?.source ? { executionPermit: input.executionPermit } : {}),
+      }).pipe(Effect.provideService(ExecutionPermit.Service, permits))
       const boundedContractTool =
         BOUNDED_CONTRACT_TOOLS.has(input.call.name) && (yield* contracts.forSession(input.sessionID)) !== undefined
       const pending = yield* (
@@ -173,11 +184,11 @@ function whollyDisabled(action: string, rules: PermissionV2.Ruleset) {
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [ApplicationTools.node, ToolOutputStore.node, ProContractOpenCode.node],
+  deps: [ApplicationTools.node, ToolOutputStore.node, ProContractOpenCode.node, ExecutionPermit.node],
 })
 
 export const toolsNode = makeLocationNode({
   service: Tools.Service,
   layer,
-  deps: [ApplicationTools.node, ToolOutputStore.node, ProContractOpenCode.node],
+  deps: [ApplicationTools.node, ToolOutputStore.node, ProContractOpenCode.node, ExecutionPermit.node],
 })

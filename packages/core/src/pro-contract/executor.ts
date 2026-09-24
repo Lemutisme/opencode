@@ -1,15 +1,18 @@
 export * as ProContractExecutor from "./executor"
 
-import { Context, Duration, Effect, Layer, Option, Stream } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { makeLocationNode } from "../effect/app-node"
 import { AppProcess } from "../process"
+import { ExecutionContext } from "../session/execution-context"
 
 export interface Request {
   readonly argv: ReadonlyArray<string>
   readonly cwd: string
   readonly stdin?: string
   readonly timeout: number
+  /** Called after process cleanup; captured bytes may be incomplete. */
+  readonly onInterrupt?: (output: { readonly stdout: Buffer; readonly stderr: Buffer }) => void
 }
 
 /** Host-owned seam for an isolated worker. No model, credentials, or ledger is passed to it. */
@@ -46,10 +49,19 @@ const layer = Layer.effect(
       identity: "local-process-v1",
       isolation: "local",
       run: Effect.fn("ProContractExecutor.run")(function* (request) {
+        yield* ExecutionContext.check
+        const current = yield* ExecutionContext.Current
+        if (current && !current.process)
+          return yield* new AppProcess.AppProcessError({
+            command: request.argv[0] ?? "",
+            cause: new Error("Current execution does not permit processes"),
+          })
         const [command, ...args] = request.argv
         if (!command)
           return yield* new AppProcess.AppProcessError({ command: "", cause: new Error("Command is missing") })
-        return yield* Effect.scoped(
+        const stdout = { chunks: [] as Uint8Array[], bytes: 0 }
+        const stderr = { chunks: [] as Uint8Array[], bytes: 0 }
+        const execute = Effect.scoped(
           Effect.gen(function* () {
             const handle = yield* processes.spawn(
               ChildProcess.make(command, args, {
@@ -61,8 +73,6 @@ const layer = Layer.effect(
                 forceKillAfter: Duration.seconds(3),
               }),
             )
-            const stdout = { chunks: [] as Uint8Array[], bytes: 0 }
-            const stderr = { chunks: [] as Uint8Array[], bytes: 0 }
             const collect = (stream: typeof handle.stdout, output: typeof stdout) =>
               Stream.runForEach(stream, (chunk) =>
                 Effect.sync(() => {
@@ -74,7 +84,17 @@ const layer = Layer.effect(
             const completed = yield* Effect.all(
               [collect(handle.stdout, stdout), collect(handle.stderr, stderr), handle.exitCode],
               { concurrency: "unbounded" },
-            ).pipe(Effect.timeoutOption(request.timeout))
+            ).pipe(
+              Effect.timeoutOption(
+                Math.max(
+                  1,
+                  Math.min(
+                    request.timeout,
+                    current ? current.deadline - (yield* Clock.currentTimeMillis) : request.timeout,
+                  ),
+                ),
+              ),
+            )
             const timedOut = Option.isNone(completed)
             return {
               execution: timedOut ? ("timed-out" as const) : ("completed" as const),
@@ -85,7 +105,15 @@ const layer = Layer.effect(
               stderrTruncated: timedOut || stderr.bytes > MAX_OUTPUT_BYTES,
             }
           }),
-        ).pipe(Effect.mapError((cause) => new AppProcess.AppProcessError({ command, cause })))
+        ).pipe(
+          Effect.onInterrupt(() =>
+            Effect.sync(() =>
+              request.onInterrupt?.({ stdout: Buffer.concat(stdout.chunks), stderr: Buffer.concat(stderr.chunks) }),
+            ),
+          ),
+          Effect.mapError((cause) => new AppProcess.AppProcessError({ command, cause })),
+        )
+        return yield* current?.verification ? current.verification(request.argv.join(" "), execute) : execute
       }),
     })
   }),

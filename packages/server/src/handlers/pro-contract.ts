@@ -1,7 +1,7 @@
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { ConflictError } from "@opencode-ai/protocol/errors"
-import { ProContractNotFoundError } from "@opencode-ai/protocol/groups/pro-contract"
+import { ProContractNotFoundError, ProContractRecognitionError } from "@opencode-ai/protocol/groups/pro-contract"
 import { Clock, Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -25,6 +25,11 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
       if (value.decision.type === "rejected") return Effect.fail(new ConflictError({ message: value.decision.reason }))
       return Effect.succeed({ frontier: value.frontier, hash: value.hash })
     }
+
+    const recognitionReceipt = (value: ProContract.OperationReceipt) =>
+      value.decision.type === "rejected"
+        ? Effect.fail(new ProContractRecognitionError({ message: value.decision.reason, receipt: value }))
+        : Effect.succeed(value)
 
     return handlers
       .handle(
@@ -100,6 +105,12 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
         }),
       )
       .handle(
+        "proContract.recognition",
+        Effect.fn(function* (ctx) {
+          return (yield* requireContract(ctx.params.contractID)).recognition
+        }),
+      )
+      .handle(
         "proContract.execution",
         Effect.fn(function* (ctx) {
           yield* requireContract(ctx.params.contractID)
@@ -115,38 +126,37 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
       .handle(
         "proContract.attest",
         Effect.fn(function* (ctx) {
-          yield* requireContract(ctx.params.contractID)
           return yield* contracts
             .principalAttest({ contractID: ctx.params.contractID, ...ctx.payload })
-            .pipe(Effect.flatMap(receipt))
+            .pipe(Effect.flatMap(recognitionReceipt))
         }),
       )
       .handle(
         "proContract.challenge",
         Effect.fn(function* (ctx) {
-          yield* requireContract(ctx.params.contractID)
           return yield* contracts
             .challenge({
               contractID: ctx.params.contractID,
-              revision: ctx.payload.revision,
-              subjectHash: ctx.payload.subjectHash,
+              operationID: ctx.payload.operationID,
+              expected: ctx.payload.expected,
               evidenceHash: ctx.payload.evidenceHash,
               disclosure: ctx.payload.disclosure,
               summary: ctx.payload.summary,
               time: yield* Clock.currentTimeMillis,
             })
-            .pipe(Effect.flatMap(receipt))
+            .pipe(Effect.flatMap(recognitionReceipt))
         }),
       )
       .handle(
         "proContract.decideRevision",
         Effect.fn(function* (ctx) {
-          yield* requireContract(ctx.params.contractID)
           const decision = yield* contracts.decideRevision({
             contractID: ctx.params.contractID,
             accept: ctx.payload.accept,
+            operationID: ctx.payload.operationID,
+            expected: ctx.payload.expected,
           })
-          return yield* receipt(decision)
+          return yield* recognitionReceipt(decision)
         }),
       )
       .handle(

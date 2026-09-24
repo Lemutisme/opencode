@@ -63,6 +63,7 @@ import { ProjectCopy } from "@opencode-ai/core/project/copy"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
+import { ProContractDriver } from "@opencode-ai/core/pro-contract/driver"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
@@ -279,8 +280,12 @@ const app = LayerNode.group([
 
 export function createRoutes(
   corsOptions?: CorsOptions,
+  contractDrivers?: ReadonlyArray<ProContractDriver.Driver>,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
-  const locationServiceMapV2 = buildLocationServiceMap()
+  const replacements = [
+    [ProContractDriver.node, Layer.succeed(ProContractDriver.Service, ProContractDriver.make(contractDrivers))],
+  ] as const
+  const locationServiceMapV2 = buildLocationServiceMap(replacements)
 
   return Layer.mergeAll(
     rootApiRoutes,
@@ -297,7 +302,7 @@ export function createRoutes(
       corsVaryFix,
       fenceLayer,
       cors(corsOptions),
-      AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, locationServiceMapV2]]),
+      AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, locationServiceMapV2], ...replacements]),
       HttpServer.layerServices,
     ]),
     Layer.provide(Layer.succeed(CorsConfig)(corsOptions)),
@@ -310,6 +315,7 @@ export function createRoutes(
       AppNodeBuilderV1.build(app, [
         [LocationServiceMap.node, locationServiceMapV2],
         [SessionExecution.node, SessionExecutionLocal.node],
+        ...replacements,
       ]),
     ),
     // Must stay last: layers provided later in this pipe build beneath earlier ones,

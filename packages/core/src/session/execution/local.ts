@@ -9,7 +9,9 @@ import { SessionStore } from "../store"
 import { ContextSnapshotDecodeError, MessageDecodeError } from "../error"
 import { SessionExecution } from "../execution"
 import { ProContractOpenCode } from "../../pro-contract/open-code"
-import { ProContract } from "../../pro-contract"
+import { ProContractJob } from "../../pro-contract/job"
+import { ProContractActivity } from "../../pro-contract/activity"
+import { ExecutionPermit } from "../execution-permit"
 
 /** Current-process routing for implicit-local Locations. Future remote placement belongs here. */
 const layer = Layer.effect(
@@ -18,7 +20,9 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const bindings = yield* ProContractOpenCode.Service
-    const contracts = yield* ProContract.Service
+    const jobs = yield* ProContractJob.Service
+    const activity = yield* ProContractActivity.Service
+    const permits = yield* ExecutionPermit.Service
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError>({
       drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
         const session = yield* store.get(sessionID)
@@ -31,43 +35,72 @@ const layer = Layer.effect(
             (attempt.leaseExpiresAt ?? 0) <= (yield* Clock.currentTimeMillis))
         )
           return undefined
-        const exit = yield* SessionRunner.Service.use((runner) => runner.run({ sessionID, force })).pipe(
-          Effect.provide(locations.get(session.location)),
-          Effect.tapCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.void
-              : Effect.logError("Failed to drain Session", cause).pipe(Effect.annotateLogs({ sessionID })),
-          ),
-          Effect.exit,
+        const permit = yield* permits.capture(sessionID)
+        const run = Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const exit = yield* restore(
+              SessionRunner.Service.use((runner) => runner.run({ sessionID, force, executionPermit: permit })).pipe(
+                Effect.provide(locations.get(session.location)),
+                Effect.tapCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.void
+                    : Effect.logError("Failed to drain Session", cause).pipe(Effect.annotateLogs({ sessionID })),
+                ),
+              ),
+            ).pipe(Effect.exit)
+            const inspected =
+              (attempt || permit.job) && Exit.isSuccess(exit)
+                ? yield* store.context(sessionID).pipe(Effect.exit)
+                : undefined
+            const failure = Exit.isFailure(exit) ? exit : inspected && Exit.isFailure(inspected) ? inspected : undefined
+            const error = failure ? Option.getOrUndefined(Cause.findErrorOption(failure.cause)) : undefined
+            const lastAssistant =
+              inspected && Exit.isSuccess(inspected)
+                ? inspected.value.findLast((message) => message.type === "assistant")
+                : undefined
+            if (attempt)
+              yield* bindings.complete({
+                execution: ProContractOpenCode.execution(attempt),
+                outcome: {
+                  type:
+                    error instanceof LLMError && !error.retryable
+                      ? "terminal-error"
+                      : error instanceof MessageDecodeError || error instanceof ContextSnapshotDecodeError
+                        ? "invalid-session"
+                        : failure && Cause.hasInterruptsOnly(failure.cause)
+                          ? "interrupted"
+                          : !failure && lastAssistant?.finish !== "error"
+                            ? "completed"
+                            : "retryable-error",
+                  reason:
+                    error instanceof LLMError && !error.retryable
+                      ? "OpenCode provider returned a terminal error"
+                      : Exit.isSuccess(exit)
+                        ? "OpenCode execution ended without settlement"
+                        : "OpenCode execution failed",
+                },
+                now: yield* Clock.currentTimeMillis,
+              })
+            if (permit.job)
+              yield* jobs.finish(
+                permit.job,
+                failure
+                  ? Cause.hasInterrupts(failure.cause)
+                    ? "interrupted"
+                    : "failed"
+                  : lastAssistant?.finish === "error"
+                    ? "failed"
+                    : "completed",
+              )
+            if (failure) return yield* failure
+            return undefined
+          }),
         )
-        const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
-        const terminalProviderError = error instanceof LLMError && !error.retryable
-        const lastAssistant = attempt && Exit.isSuccess(exit)
-          ? (yield* store.context(sessionID)).findLast((message) => message.type === "assistant")
-          : undefined
-        const unclassifiedProviderError = lastAssistant?.finish === "error"
-        const replaceSession =
-          (Exit.isSuccess(exit) && !unclassifiedProviderError) ||
-          error instanceof MessageDecodeError ||
-          error instanceof ContextSnapshotDecodeError
-        if (attempt && terminalProviderError)
-          yield* contracts.escalate({
-            contractID: attempt.contractID,
-            revision: attempt.revision,
-            reason: "OpenCode provider returned a terminal error",
-            time: yield* Clock.currentTimeMillis,
-          })
-        else if (attempt)
-          yield* bindings.reschedule({
-            contractID: attempt.contractID,
-            revision: attempt.revision,
-            promptID: attempt.promptID,
-            reason: Exit.isSuccess(exit) ? "OpenCode execution ended without settlement" : "OpenCode execution failed",
-            now: yield* Clock.currentTimeMillis,
-            attempt: replaceSession ? "new" : "same",
-          })
-        if (Exit.isFailure(exit)) return yield* exit
-        return undefined
+        return yield* attempt
+          ? bindings.dispatch(ProContractOpenCode.execution(attempt), run)
+          : permit.source
+            ? activity.run(permit.source.contractID, run)
+            : run
       }),
     })
 
@@ -83,7 +116,14 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: SessionExecution.Service,
   layer,
-  deps: [SessionStore.node, LocationServiceMap.node, ProContractOpenCode.node, ProContract.node],
+  deps: [
+    SessionStore.node,
+    LocationServiceMap.node,
+    ProContractOpenCode.node,
+    ProContractJob.node,
+    ProContractActivity.node,
+    ExecutionPermit.node,
+  ],
 })
 
 export * as SessionExecutionLocal from "./local"

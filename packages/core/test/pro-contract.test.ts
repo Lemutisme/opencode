@@ -981,11 +981,13 @@ describe("ProContract ledger", () => {
         time: 0,
       })
       const principal = yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contractID))!.recognition.handoff!,
         contractID,
         evidenceHash: "principal-evidence",
       })
-      expect(principal.state.contracts[contractID]?.status).toBe("discharged")
-      const attestationID = principal.state.contracts[contractID]?.attestationID
+      expect((yield* contracts.get(contractID))?.status).toBe("discharged")
+      const attestationID = principal.support?.attestationID
       expect(attestationID ? yield* contracts.getAttestation(attestationID) : undefined).toMatchObject({
         evidenceHash: "principal-evidence",
         subjectHash,
@@ -1020,17 +1022,25 @@ describe("ProContract ledger", () => {
         subjectHash,
         time: 1,
       })
-      yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
+      yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contractID))!.recognition.handoff!,
+        contractID,
+        evidenceHash: "delivery-evidence",
+      })
       expect((yield* contracts.due(2)).map((contract) => contract.id)).toContain(evaluationID)
 
       const settled = yield* contracts.settleEvaluation({
+        operationID: crypto.randomUUID(),
         contractID: evaluationID,
         evidenceHash: "evaluation-evidence",
         time: 2,
         report: {
           deliveryContractID: contractID,
-          deliveryRevision: 1,
-          subjectHash,
+          version: 2,
+          delivery: (yield* contracts.get(contractID))!.recognition.handoff!,
+          deliveryAttestationID: (yield* contracts.get(contractID))!.attestationID!,
+          evaluation: (yield* contracts.get(evaluationID))!.recognition.context!.target,
           evaluatorHash: "evaluator-v1",
           passed: true,
           disclosure: "sealed",
@@ -1038,7 +1048,7 @@ describe("ProContract ledger", () => {
         },
       })
 
-      expect(settled.state.contracts[evaluationID]).toMatchObject({
+      expect(yield* contracts.get(evaluationID)).toMatchObject({
         status: "discharged",
         handoff: { summary: "External evaluator accepted sealed evidence" },
       })
@@ -1066,16 +1076,24 @@ describe("ProContract ledger", () => {
         subjectHash,
         time: 1,
       })
-      yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
+      yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contractID))!.recognition.handoff!,
+        contractID,
+        evidenceHash: "delivery-evidence",
+      })
 
       yield* contracts.settleEvaluation({
+        operationID: crypto.randomUUID(),
         contractID: evaluationID,
         evidenceHash: "negative-evidence",
         time: 2,
         report: {
           deliveryContractID: contractID,
-          deliveryRevision: 1,
-          subjectHash,
+          version: 2,
+          delivery: (yield* contracts.get(contractID))!.recognition.handoff!,
+          deliveryAttestationID: (yield* contracts.get(contractID))!.attestationID!,
+          evaluation: (yield* contracts.get(evaluationID))!.recognition.context!.target,
           evaluatorHash: "evaluator-v1",
           passed: false,
           disclosure: "executor",
@@ -1110,9 +1128,9 @@ describe("ProContract ledger", () => {
       })
 
       const challenged = yield* contracts.challenge({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contractID))!.recognition.handoff!,
         contractID,
-        revision: 1,
-        subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Independent output mismatch",
@@ -1140,7 +1158,12 @@ describe("ProContract ledger", () => {
         subjectHash: "upstream-subject",
         time: 0,
       })
-      yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
+      yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(upstreamID))!.recognition.handoff!,
+        contractID: upstreamID,
+        evidenceHash: "upstream-evidence",
+      })
       const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
       yield* contracts.issue({ id: childID, scope: "support", spec: childSpec, executor: "child" })
       yield* contracts.activate(childID, 1, 1)
@@ -1153,16 +1176,18 @@ describe("ProContract ledger", () => {
         time: 1,
       })
       const childDischarge = yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(childID))!.recognition.handoff!,
         contractID: childID,
         evidenceHash: "child-evidence",
       })
-      const childAttestationID = childDischarge.state.contracts[childID]?.attestationID
+      const childAttestationID = childDischarge.support?.attestationID
       expect(yield* contracts.quiet("support")).toMatchObject({ quiet: true })
 
       const challenged = yield* contracts.challenge({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(upstreamID))!.recognition.handoff!,
         contractID: upstreamID,
-        revision: 1,
-        subjectHash: "upstream-subject",
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Upstream support was withdrawn",
@@ -1257,7 +1282,12 @@ describe("ProContract ledger", () => {
         subjectHash,
         time: 0,
       })
-      yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
+      yield* contracts.principalAttest({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(upstreamID))!.recognition.handoff!,
+        contractID: upstreamID,
+        evidenceHash: "upstream-evidence",
+      })
       expect((yield* contracts.due(0)).map((contract) => contract.id)).toEqual([childID])
     }),
   )
@@ -1572,13 +1602,11 @@ describe("OpenCode Contract binding", () => {
       })
       yield* scheduler.runOnce()
       const first = yield* bindings.get(contractID)
-      yield* bindings.reschedule({
-        contractID,
-        revision: 1,
-        promptID: first!.promptID,
-        reason: "provider unavailable",
+      expect(yield* bindings.reserveTurn(first!.sessionID, 0)).toBe(true)
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(first!),
+        outcome: { type: "retryable-error", reason: "provider unavailable" },
         now: 1,
-        attempt: "same",
       })
       yield* TestClock.setTime(retryAt)
       yield* scheduler.runOnce()
@@ -1629,9 +1657,9 @@ describe("OpenCode Contract binding", () => {
         time: 1,
       })
       yield* contracts.challenge({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contractID))!.recognition.handoff!,
         contractID,
-        revision: 1,
-        subjectHash,
         evidenceHash: "negative-witness",
         disclosure: "executor",
         summary: "Independent output mismatch",
@@ -1690,13 +1718,10 @@ describe("OpenCode Contract binding", () => {
       expect(yield* bindings.reserveTurn(first.sessionID, 1)).toBe(true)
       expect(yield* bindings.reserveAction(first.sessionID, 1)).toBe(true)
 
-      yield* bindings.reschedule({
-        contractID,
-        revision: first.revision,
-        promptID: first.promptID,
-        reason: "Continue unfinished work",
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(first!),
+        outcome: { type: "retryable-error", reason: "Continue unfinished work" },
         now: 2,
-        attempt: "same",
       })
       expect(yield* bindings.reserveTurn(first.sessionID, 2)).toBe(false)
       const continued = yield* bindings.claim(contractID, 2)
@@ -1704,13 +1729,10 @@ describe("OpenCode Contract binding", () => {
       expect(continued.promptID).not.toBe(first.promptID)
       expect(continued).toMatchObject({ sessionID: first.sessionID, attempts: 1, turnsUsed: 1, actionsUsed: 1 })
 
-      yield* bindings.reschedule({
-        contractID,
-        revision: first.revision,
-        promptID: first.promptID,
-        reason: "Stale dispatch must not consume an attempt",
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(first!),
+        outcome: { type: "completed", reason: "Stale dispatch must not consume an attempt" },
         now: 3,
-        attempt: "new",
       })
       expect(yield* bindings.get(contractID)).toEqual(continued)
       expect(yield* bindings.reserveTurn(continued.sessionID, 3)).toBe(true)
@@ -1851,8 +1873,11 @@ describe("OpenCode Contract binding", () => {
         expect(yield* bindings.reserveAction(recovered.sessionID, 30_002)).toBe(true)
         activeSessions.add(recovered.sessionID)
         yield* bindings.heartbeat(activeSessions, deadline - 1)
-        expect(yield* bindings.reserveTurn(recovered.sessionID, deadline - 1)).toBe(true)
-        expect(yield* bindings.reserveAction(recovered.sessionID, deadline - 1)).toBe(true)
+        expect(yield* bindings.reserveTurn(recovered.sessionID, deadline - 1)).toBe(false)
+        const final = yield* bindings.claim(contractID, deadline - 1)
+        expect(final?.generation).toBe(recovered.generation! + 1)
+        expect(yield* bindings.reserveTurn(final!.sessionID, deadline - 1)).toBe(true)
+        expect(yield* bindings.reserveAction(final!.sessionID, deadline - 1)).toBe(true)
         expect(yield* bindings.reserveTurn(recovered.sessionID, deadline)).toBe(false)
         expect(yield* bindings.reserveAction(recovered.sessionID, deadline)).toBe(false)
         yield* TestClock.setTime(deadline)
@@ -1918,21 +1943,55 @@ describe("OpenCode Contract binding", () => {
       expect(yield* bindings.reserveTurn(binding.sessionID, 1)).toBe(false)
       expect(yield* bindings.reserveAction(binding.sessionID, 1)).toBe(false)
 
-      yield* bindings.reschedule({
-        contractID,
-        revision: 1,
-        promptID: attempt!.promptID,
-        reason: "OpenCode execution ended without settlement",
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(attempt!),
+        outcome: { type: "completed", reason: "OpenCode execution ended without settlement" },
         now: 1,
-        attempt: "new",
       })
       const paused = yield* bindings.get(contractID)
       expect(paused).toMatchObject({ sessionID: attempt!.sessionID, attempts: 1, dispatched: false, nextActionAt: 1 })
       expect(paused?.promptID).not.toBe(attempt?.promptID)
 
-      yield* contracts.decideRevision({ contractID, accept: false })
+      yield* contracts.decideRevision({
+        operationID: crypto.randomUUID(),
+        expected: (yield* contracts.get(contractID))!.recognition.pending!,
+        contractID,
+        accept: false,
+      })
       const resumed = yield* bindings.claim(contractID, 1)
-      expect(resumed).toMatchObject({ sessionID: attempt!.sessionID, attempts: 1, promptID: paused?.promptID })
+      expect(resumed).toMatchObject({ attempts: 1, generation: 2, turnsUsed: 0, actionsUsed: 0 })
+      expect(resumed!.sessionID).not.toBe(attempt!.sessionID)
+      expect(resumed!.promptID).not.toBe(paused!.promptID)
+      expect(resumed!.context!.version).toBeGreaterThan(attempt!.context!.version)
+      expect(yield* bindings.reserveTurn(attempt!.sessionID, 1, ProContractOpenCode.execution(attempt!))).toBe(false)
+    }),
+  )
+
+  schedulerIt.effect("retains unlimited semantic attempts across retries until the original deadline", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const bindings = yield* ProContractOpenCode.Service
+      yield* bindings.issue({
+        id: contractID,
+        scope: draft.scope,
+        spec: { ...spec, budget: { deadline: 100 }, resolution: { retryDelay: 1 } },
+        location: { directory: AbsolutePath.make("/project") },
+        model: executionModel,
+        now: 0,
+      })
+      yield* contracts.activate(contractID, 1, 0)
+      for (const index of [0, 1, 2, 3, 4, 5]) {
+        const claimed = yield* bindings.claim(contractID, index * 3)
+        expect(claimed?.attempts).toBe(index + 1)
+        yield* bindings.complete({
+          execution: ProContractOpenCode.execution(claimed!),
+          outcome: { type: "completed", reason: "needs repair" },
+          now: index * 3 + 1,
+        })
+        expect((yield* contracts.get(contractID))?.status).not.toBe("escalated")
+      }
+      expect((yield* contracts.get(contractID))?.spec.budget.deadline).toBe(100)
+      expect(yield* bindings.claim(contractID, 100)).toBeUndefined()
     }),
   )
 
@@ -1952,13 +2011,10 @@ describe("OpenCode Contract binding", () => {
       yield* contracts.activate(contractID, 1, 0)
       const claimed = yield* bindings.claim(contractID, 0)
       expect(claimed).toBeDefined()
-      yield* bindings.reschedule({
-        contractID,
-        revision: 1,
-        promptID: claimed!.promptID,
-        reason: "blocked",
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(claimed!),
+        outcome: { type: "completed", reason: "blocked" },
         now: 1,
-        attempt: "new",
       })
 
       expect(yield* contracts.get(contractID)).toMatchObject({
@@ -1991,13 +2047,10 @@ describe("OpenCode Contract binding", () => {
         subjectHash,
         time: 1,
       })
-      yield* bindings.reschedule({
-        contractID,
-        revision: 1,
-        promptID: attempt!.promptID,
-        reason: "OpenCode execution ended without settlement",
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(attempt!),
+        outcome: { type: "completed", reason: "OpenCode execution ended without settlement" },
         now: 2,
-        attempt: "new",
       })
 
       expect(yield* contracts.get(contractID)).toMatchObject({
@@ -2026,13 +2079,10 @@ describe("OpenCode Contract binding", () => {
       expect(second?.promptID).not.toBe(first?.promptID)
       expect(second?.sessionID).not.toBe(first?.sessionID)
 
-      yield* bindings.reschedule({
-        contractID,
-        revision: first!.revision,
-        promptID: first!.promptID,
-        reason: "stale completion",
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(first!),
+        outcome: { type: "completed", reason: "stale completion" },
         now: 30_001,
-        attempt: "new",
       })
       expect(yield* bindings.get(contractID)).toMatchObject({
         promptID: second?.promptID,
@@ -2086,13 +2136,10 @@ describe("OpenCode Contract binding", () => {
         reason: "wait for input",
         time: 30_000,
       })
-      yield* bindings.reschedule({
-        contractID,
-        revision: attempt!.revision,
-        promptID: attempt!.promptID,
-        reason: "wait for input",
+      yield* bindings.complete({
+        execution: ProContractOpenCode.execution(attempt!),
+        outcome: { type: "completed", reason: "wait for input" },
         now: 30_000,
-        attempt: "new",
       })
       expect(yield* bindings.get(contractID)).toMatchObject({
         dispatched: false,
@@ -2193,6 +2240,10 @@ describe("OpenCode Contract binding", () => {
       yield* contracts.escalate({ contractID, revision: 1, reason: "manual review", time: 1 })
       yield* contracts.resume(contractID)
       yield* contracts.activate(contractID, 1, 2)
+      expect(yield* bindings.claim(contractID, 2)).toBeUndefined()
+      // A live lease cannot be replaced even after issuer resume; first retire
+      // the old phase after its drain/dispatch has finished.
+      yield* bindings.sweep(new Set(), 2)
       const second = yield* bindings.claim(contractID, 2)
 
       expect(second).toMatchObject({ revision: 1, turnsUsed: 1, actionsUsed: 1 })

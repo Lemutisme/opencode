@@ -98,11 +98,30 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`pro_contract_attempt\` (
+          \`operation_id\` text NOT NULL,
+          \`fingerprint\` text NOT NULL,
+          \`contract_id\` text NOT NULL,
+          \`kind\` text NOT NULL,
+          \`receipt\` text NOT NULL,
+          CONSTRAINT \`pro_contract_attempt_pk\` PRIMARY KEY(\`operation_id\`, \`fingerprint\`)
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`pro_contract_attestation\` (
           \`id\` text PRIMARY KEY,
           \`contract_id\` text NOT NULL,
           \`data\` text NOT NULL,
           \`time_created\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`pro_contract_context\` (
+          \`contract_id\` text NOT NULL,
+          \`version\` integer NOT NULL,
+          \`data\` text NOT NULL,
+          \`time_created\` integer NOT NULL,
+          CONSTRAINT \`pro_contract_context_pk\` PRIMARY KEY(\`contract_id\`, \`version\`)
         );
       `)
       yield* tx.run(`
@@ -114,6 +133,20 @@ export default {
           \`previous_hash\` text NOT NULL,
           \`hash\` text NOT NULL,
           \`time_created\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`pro_contract_job_session\` (
+          \`session_id\` text PRIMARY KEY,
+          \`job_id\` text NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`pro_contract_job\` (
+          \`id\` text PRIMARY KEY,
+          \`contract_id\` text NOT NULL,
+          \`session_id\` text NOT NULL,
+          \`data\` text NOT NULL
         );
       `)
       yield* tx.run(`
@@ -136,6 +169,21 @@ export default {
           \`data\` text NOT NULL,
           \`time_created\` integer NOT NULL,
           \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`pro_contract_operation\` (
+          \`operation_id\` text PRIMARY KEY,
+          \`fingerprint\` text NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`pro_contract_operation_usage\` (
+          \`id\` text PRIMARY KEY,
+          \`contract_id\` text NOT NULL,
+          \`session_id\` text NOT NULL,
+          \`job_id\` text,
+          \`data\` text NOT NULL
         );
       `)
       yield* tx.run(`
@@ -298,11 +346,19 @@ export default {
       yield* tx.run(
         `CREATE INDEX \`pro_contract_event_contract_seq_idx\` ON \`pro_contract_event\` (\`contract_id\`,\`seq\`);`,
       )
+      yield* tx.run(`CREATE INDEX \`pro_contract_job_contract_idx\` ON \`pro_contract_job\` (\`contract_id\`);`)
+      yield* tx.run(`CREATE UNIQUE INDEX \`pro_contract_job_session_idx\` ON \`pro_contract_job\` (\`session_id\`);`)
       yield* tx.run(
         `CREATE INDEX \`pro_contract_opencode_session_contract_idx\` ON \`pro_contract_opencode_session\` (\`contract_id\`);`,
       )
       yield* tx.run(
         `CREATE UNIQUE INDEX \`pro_contract_opencode_session_idx\` ON \`pro_contract_opencode\` (\`session_id\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`pro_contract_operation_usage_contract_idx\` ON \`pro_contract_operation_usage\` (\`contract_id\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`pro_contract_operation_usage_job_idx\` ON \`pro_contract_operation_usage\` (\`job_id\`);`,
       )
       yield* tx.run(`CREATE INDEX \`pro_contract_scope_status_idx\` ON \`pro_contract\` (\`scope\`,\`status\`);`)
       yield* tx.run(

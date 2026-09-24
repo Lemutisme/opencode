@@ -79,91 +79,98 @@ const layer = Layer.effectDiscard(
 
     yield* tools
       .register({
-        [name]: Tool.withSubactions(
-          Tool.make({
-            description:
-              "Apply one patch/edit/write, then run an already-known shell command in the same interaction. Prefer this when creating a probe and running it, or changing code and compiling/testing it. The command runs only after a successful mutation. Each stage uses its original permissions, timeout, output retention and action charge; two executed stages consume two actions. Mutation failure skips the command; command failure keeps the changes. Multi-file patches apply sequentially and may partially fail. Command completion records process exit zero, not semantic test correctness. Results describe working-directory observations, not an isolated snapshot, atomic transaction or Contract settlement. Use separate tools when the command depends on inspecting the mutation result.",
-            input: Input,
-            output: Output,
-            toModelOutput: ({ output }) => [
-              {
-                type: "text",
-                text: `Mutation: ${output.mutation.status}\n${resultText(output.mutation.result)}\n\nCommand: ${output.run.status}\n${resultText(output.run.result)}\n\nChanges are retained. No Contract settlement was recorded.`,
-              },
-            ],
-            execute: (input, context) =>
-              Effect.gen(function* () {
-                yield* deadline(context)
-                yield* permissions
-                  .assert({
-                    action: name,
-                    resources: [input.mutation.tool],
-                    sessionID: context.sessionID,
-                    agent: context.agent,
-                    source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-                  })
-                  .pipe(Effect.mapError((error) => new ToolFailure({ message: String(error) })))
-                const agent = yield* agents.get(context.agent)
-                // Capture the existing canonical leaves once; never bypass their policies or re-resolve between stages.
-                const catalog = yield* registry.materialize(agent?.permissions ?? [])
-                if (
-                  ![input.mutation.tool, "bash"].every((name) => catalog.definitions.some((tool) => tool.name === name))
-                )
-                  return yield* new ToolFailure({
-                    message: "Mutation or Bash tool is unavailable under the current policy",
-                  })
-                const invoke = Effect.fnUntraced(function* (name: string, input: unknown, suffix: string) {
-                  const remaining = (yield* deadline(context)) - (yield* Clock.currentTimeMillis)
-                  const callID = `${context.toolCallID}:${suffix}`
-                  const result = yield* catalog
-                    .settle({
+        [name]: Tool.withCapability(
+          Tool.withSubactions(
+            Tool.make({
+              description:
+                "Apply one patch/edit/write, then run an already-known shell command in the same interaction. Prefer this when creating a probe and running it, or changing code and compiling/testing it. The command runs only after a successful mutation. Each stage uses its original permissions, timeout, output retention and action charge; two executed stages consume two actions. Mutation failure skips the command; command failure keeps the changes. Multi-file patches apply sequentially and may partially fail. Command completion records process exit zero, not semantic test correctness. Results describe working-directory observations, not an isolated snapshot, atomic transaction or Contract settlement. Use separate tools when the command depends on inspecting the mutation result.",
+              input: Input,
+              output: Output,
+              toModelOutput: ({ output }) => [
+                {
+                  type: "text",
+                  text: `Mutation: ${output.mutation.status}\n${resultText(output.mutation.result)}\n\nCommand: ${output.run.status}\n${resultText(output.run.result)}\n\nChanges are retained. No Contract settlement was recorded.`,
+                },
+              ],
+              execute: (input, context) =>
+                Effect.gen(function* () {
+                  yield* deadline(context)
+                  yield* permissions
+                    .assert({
+                      action: name,
+                      resources: [input.mutation.tool],
                       sessionID: context.sessionID,
                       agent: context.agent,
-                      assistantMessageID: context.assistantMessageID,
-                      call: { type: "tool-call", id: callID, name, input },
+                      source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
                     })
-                    .pipe(
-                      Effect.timeoutOrElse({
-                        duration: Duration.millis(Math.max(0, remaining)),
-                        orElse: () =>
-                          Effect.succeed({
-                            result: { type: "error" as const, value: "Contract deadline exhausted during stage" },
-                          }),
-                      }),
+                    .pipe(Effect.mapError((error) => new ToolFailure({ message: String(error) })))
+                  const agent = yield* agents.get(context.agent)
+                  // Capture the existing canonical leaves once; never bypass their policies or re-resolve between stages.
+                  const catalog = yield* registry.materialize(agent?.permissions ?? [])
+                  if (
+                    ![input.mutation.tool, "bash"].every((name) =>
+                      catalog.definitions.some((tool) => tool.name === name),
                     )
-                  return stage(name, callID, result)
-                })
-                const mutation = yield* invoke(input.mutation.tool, input.mutation.input, "mutation")
-                if (mutation.status !== "completed")
-                  return {
-                    mutation,
-                    run: {
-                      tool: "bash",
-                      callID: `${context.toolCallID}:run`,
-                      status: "skipped" as const,
-                      result: "The mutation did not complete successfully; the command was not run.",
-                      outputPaths: [],
-                    },
-                    settled: false as const,
-                  }
-                const run = yield* invoke("bash", input.run, "run").pipe(
-                  Effect.catchTag("LLM.ToolFailure", (error) =>
-                    Effect.succeed({
-                      tool: "bash",
-                      callID: `${context.toolCallID}:run`,
-                      status: "skipped" as const,
-                      result: error.message,
-                      outputPaths: [],
-                    }),
+                  )
+                    return yield* new ToolFailure({
+                      message: "Mutation or Bash tool is unavailable under the current policy",
+                    })
+                  const invoke = Effect.fnUntraced(function* (name: string, input: unknown, suffix: string) {
+                    const remaining = (yield* deadline(context)) - (yield* Clock.currentTimeMillis)
+                    const callID = `${context.toolCallID}:${suffix}`
+                    const result = yield* catalog
+                      .settle({
+                        sessionID: context.sessionID,
+                        agent: context.agent,
+                        assistantMessageID: context.assistantMessageID,
+                        contractExecution: context.contractExecution,
+                        executionPermit: context.executionPermit,
+                        call: { type: "tool-call", id: callID, name, input },
+                      })
+                      .pipe(
+                        Effect.timeoutOrElse({
+                          duration: Duration.millis(Math.max(0, remaining)),
+                          orElse: () =>
+                            Effect.succeed({
+                              result: { type: "error" as const, value: "Contract deadline exhausted during stage" },
+                            }),
+                        }),
+                      )
+                    return stage(name, callID, result)
+                  })
+                  const mutation = yield* invoke(input.mutation.tool, input.mutation.input, "mutation")
+                  if (mutation.status !== "completed")
+                    return {
+                      mutation,
+                      run: {
+                        tool: "bash",
+                        callID: `${context.toolCallID}:run`,
+                        status: "skipped" as const,
+                        result: "The mutation did not complete successfully; the command was not run.",
+                        outputPaths: [],
+                      },
+                      settled: false as const,
+                    }
+                  const run = yield* invoke("bash", input.run, "run").pipe(
+                    Effect.catchTag("LLM.ToolFailure", (error) =>
+                      Effect.succeed({
+                        tool: "bash",
+                        callID: `${context.toolCallID}:run`,
+                        status: "skipped" as const,
+                        result: error.message,
+                        outputPaths: [],
+                      }),
+                    ),
+                  )
+                  return { mutation, run, settled: false as const }
+                }).pipe(
+                  Effect.mapError((error) =>
+                    error instanceof ToolFailure ? error : new ToolFailure({ message: String(error) }),
                   ),
-                )
-                return { mutation, run, settled: false as const }
-              }).pipe(
-                Effect.mapError((error) =>
-                  error instanceof ToolFailure ? error : new ToolFailure({ message: String(error) }),
                 ),
-              ),
-          }),
+            }),
+          ),
+          "compose",
         ),
       })
       .pipe(Effect.orDie)

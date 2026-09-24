@@ -15,6 +15,12 @@ export class ProContractNotFoundError extends Schema.TaggedErrorClass<ProContrac
   { httpApiStatus: 404 },
 ) {}
 
+export class ProContractRecognitionError extends Schema.TaggedErrorClass<ProContractRecognitionError>()(
+  "ProContractRecognitionError",
+  { message: Schema.String, receipt: ProContract.OperationReceipt },
+  { httpApiStatus: 409 },
+) {}
+
 export const Receipt = Schema.Struct({ frontier: NonNegativeInt, hash: Schema.String }).annotate({
   identifier: "ProContract.Receipt",
 })
@@ -90,6 +96,15 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.get", summary: "Get contract" })),
   )
   .add(
+    HttpApiEndpoint.get("proContract.recognition", "/api/contract/:contractID/recognition", {
+      params: { contractID: ProContract.ID },
+      success: ProContract.Recognition,
+      error: ProContractNotFoundError,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.proContract.recognition", summary: "Read exact recognition identities" }),
+    ),
+  )
+  .add(
     HttpApiEndpoint.get("proContract.execution", "/api/contract/:contractID/execution", {
       params: { contractID: ProContract.ID },
       success: OpenCodeExecution,
@@ -101,9 +116,13 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
   .add(
     HttpApiEndpoint.post("proContract.attest", "/api/contract/:contractID/attestation", {
       params: { contractID: ProContract.ID },
-      payload: Schema.Struct({ evidenceHash: Schema.NonEmptyString }),
-      success: Receipt,
-      error: [ConflictError, ProContractNotFoundError],
+      payload: Schema.Struct({
+        evidenceHash: Schema.NonEmptyString,
+        operationID: Schema.NonEmptyString,
+        expected: ProContract.RecognitionTarget,
+      }),
+      success: ProContract.OperationReceipt,
+      error: [ProContractRecognitionError, ProContractNotFoundError],
     })
       .middleware(PrincipalAuthorization)
       .annotateMerge(OpenApi.annotations({ identifier: "v2.proContract.attest", summary: "Attest contract evidence" })),
@@ -112,14 +131,14 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
     HttpApiEndpoint.post("proContract.challenge", "/api/contract/:contractID/challenge", {
       params: { contractID: ProContract.ID },
       payload: Schema.Struct({
-        revision: PositiveInt,
-        subjectHash: Schema.NonEmptyString,
+        operationID: Schema.NonEmptyString,
+        expected: ProContract.RecognitionTarget,
         evidenceHash: Schema.NonEmptyString,
         disclosure: Schema.Literals(["executor", "sealed"]),
         summary: Schema.NonEmptyString.pipe(Schema.optional),
       }),
-      success: Receipt,
-      error: [ConflictError, ProContractNotFoundError],
+      success: ProContract.OperationReceipt,
+      error: [ProContractRecognitionError, ProContractNotFoundError],
     })
       .middleware(PrincipalAuthorization)
       .annotateMerge(
@@ -129,9 +148,13 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
   .add(
     HttpApiEndpoint.post("proContract.decideRevision", "/api/contract/:contractID/revision/decision", {
       params: { contractID: ProContract.ID },
-      payload: Schema.Struct({ accept: Schema.Boolean }),
-      success: Receipt,
-      error: [ConflictError, ProContractNotFoundError],
+      payload: Schema.Struct({
+        accept: Schema.Boolean,
+        operationID: Schema.NonEmptyString,
+        expected: ProContract.RevisionTarget,
+      }),
+      success: ProContract.OperationReceipt,
+      error: [ProContractRecognitionError, ProContractNotFoundError],
     })
       .middleware(PrincipalAuthorization)
       .annotateMerge(

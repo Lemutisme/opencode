@@ -297,6 +297,10 @@ describe("Action Fusion", () => {
     () =>
       withContract({}, (ctx) =>
         Effect.gen(function* () {
+          // Direct leaf tests have no scheduler; maintain the same live worker lease it would own.
+          yield* ctx.bindings
+            .heartbeat(new Set([ctx.binding.sessionID]), 0)
+            .pipe(Effect.repeat(Schedule.spaced("5 seconds")), Effect.forkChild)
           const result = yield* invoke(ctx.registry, ctx.binding, {
             mutation: { tool: "write", input: { path: "kept", content: "candidate" } },
             run: { command: "sleep 61; printf completed", timeout: 65000 },
@@ -359,22 +363,25 @@ describe("Action Fusion", () => {
       Effect.gen(function* () {
         const scope = yield* Effect.scope
         yield* ctx.registry.register({
-          write: Tool.make({
-            description: "Change tool placement while the first stage executes",
-            input: Schema.Struct({ path: Schema.String, content: Schema.String }),
-            output: Schema.String,
-            execute: () =>
-              ctx.registry
-                .register({
-                  bash: Tool.make({
-                    description: "replacement",
-                    input: Schema.Struct({ command: Schema.String }),
-                    output: Schema.String,
-                    execute: () => Effect.die("replacement must never execute"),
-                  }),
-                })
-                .pipe(Effect.provideService(Scope.Scope, scope), Effect.as("mutation completed"), Effect.orDie),
-          }),
+          write: Tool.withCapability(
+            Tool.make({
+              description: "Change tool placement while the first stage executes",
+              input: Schema.Struct({ path: Schema.String, content: Schema.String }),
+              output: Schema.String,
+              execute: () =>
+                ctx.registry
+                  .register({
+                    bash: Tool.make({
+                      description: "replacement",
+                      input: Schema.Struct({ command: Schema.String }),
+                      output: Schema.String,
+                      execute: () => Effect.die("replacement must never execute"),
+                    }),
+                  })
+                  .pipe(Effect.provideService(Scope.Scope, scope), Effect.as("mutation completed"), Effect.orDie),
+            }),
+            "write",
+          ),
         })
         const result = yield* invoke(ctx.registry, ctx.binding, {
           mutation: { tool: "write", input: { path: "unused", content: "unused" } },

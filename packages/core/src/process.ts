@@ -4,6 +4,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { CrossSpawnSpawner } from "./cross-spawn-spawner"
 import { makeGlobalNode } from "./effect/app-node"
+import { ExecutionContext } from "./session/execution-context"
 
 export class AppProcessError extends Schema.TaggedErrorClass<AppProcessError>()("AppProcessError", {
   command: Schema.String,
@@ -140,12 +141,14 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner
+    const spawn: ChildProcessSpawner["Service"]["spawn"] = (command) =>
+      ExecutionContext.check.pipe(Effect.andThen(spawner.spawn(command)))
 
     const runCommand = (command: ChildProcess.Command, options?: RunOptions) => {
       const description = describeCommand(command)
       const collect = Effect.scoped(
         Effect.gen(function* () {
-          const handle = yield* spawner.spawn(command)
+          const handle = yield* spawn(command)
           if (options?.combineOutput) {
             const [output, exitCode] = yield* Effect.all(
               [collectStream(handle.all, options.maxOutputBytes), handle.exitCode],
@@ -219,7 +222,7 @@ const layer = Layer.effect(
       const okExitCodes = options?.okExitCodes
       const built: Stream.Stream<string, AppProcessError | PlatformError> = Stream.unwrap(
         Effect.gen(function* () {
-          const handle = yield* spawner.spawn(command)
+          const handle = yield* spawn(command)
           const stderrFiber = yield* Effect.forkScoped(
             collectStream(handle.stderr, options?.maxErrorBytes).pipe(Effect.map((x) => x.buffer.toString("utf8"))),
           )
@@ -252,7 +255,7 @@ const layer = Layer.effect(
       )
     }
 
-    return Service.of({ ...spawner, run, runStream })
+    return Service.of({ ...spawner, spawn, run, runStream })
   }),
 )
 

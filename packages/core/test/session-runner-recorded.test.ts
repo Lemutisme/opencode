@@ -138,6 +138,10 @@ describe("SessionRunnerLLM recorded", () => {
   it.effect("executes one recorded V2 prompt through the recorded HTTP transport", () =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service
+      // The historical cassette records a neutral text-only request. Keep its bytes intact;
+      // an explicit fixture agent has no build agent's Contract admission system guidance.
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((draft) => draft.update(AgentV2.ID.make("recorded"), () => {}))
       yield* db
         .insert(ProjectTable)
         .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
@@ -153,6 +157,7 @@ describe("SessionRunnerLLM recorded", () => {
           directory: "/project",
           title: "test",
           version: "test",
+          agent: "recorded",
         })
         .onConflictDoNothing()
         .run()
@@ -169,7 +174,7 @@ describe("SessionRunnerLLM recorded", () => {
       const messages = yield* session.context(sessionID)
       expect(messages).toHaveLength(2)
       expect(messages[0]).toMatchObject({ id: prompt.id, type: "user", text: "Say hello in one short sentence." })
-      expect(messages[1]).toMatchObject({ type: "assistant", agent: "build", finish: "stop" })
+      expect(messages[1]).toMatchObject({ type: "assistant", agent: "recorded", finish: "stop" })
       expect(messages[1]?.type === "assistant" ? messages[1].content : []).toMatchObject([
         { type: "text", text: "Hello!" },
       ])

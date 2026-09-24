@@ -18,38 +18,40 @@ export const layer = Layer.effectDiscard(
     const permissions = yield* PermissionV2.Service
     yield* tools
       .register({
-        [SessionObservationPack.toolName]: Tool.make({
-          description:
-            "Read an exact byte page of older tool display text or a canonical structured result from this Session's durable history. Copy messageID, callID, block, source and hash from the observation placeholder; continue using nextOffset until eof. Offsets and lengths are bytes. Encoding is utf8 when the page round-trips exactly, otherwise base64. The recorded value may already contain a capture/truncation notice; recall does not reconstruct bytes that were never recorded. It does not execute a tool again or settle a Contract.",
-          input: SessionObservationPack.ReadInput,
-          output: Schema.Struct({
-            ...SessionObservationPack.ReadInput.fields,
-            bytes: NonNegativeInt,
-            nextOffset: NonNegativeInt,
-            eof: Schema.Boolean,
-            encoding: Schema.Literals(["utf8", "base64"]),
-            data: Schema.String,
-          }),
-          execute: (input, context) =>
-            Effect.gen(function* () {
-              yield* permissions
-                .assert({
-                  action: SessionObservationPack.toolName,
-                  resources: [input.messageID],
-                  sessionID: context.sessionID,
-                  agent: context.agent,
-                  source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-                })
-                .pipe(Effect.mapError((error) => new ToolFailure({ message: String(error) })))
-              const stored = yield* sessions.message(input.messageID)
-              if (!stored || stored.sessionID !== context.sessionID)
-                return yield* new ToolFailure({ message: "Observation is unavailable in this Session" })
-              const page = SessionObservationPack.read(stored.message, input)
-              if (!page)
-                return yield* new ToolFailure({ message: "Observation is unavailable or its hash changed" })
-              return page
+        [SessionObservationPack.toolName]: Tool.withCapability(
+          Tool.make({
+            description:
+              "Read an exact byte page of older tool display text or a canonical structured result from this Session's durable history. Copy messageID, callID, block, source and hash from the observation placeholder; continue using nextOffset until eof. Offsets and lengths are bytes. Encoding is utf8 when the page round-trips exactly, otherwise base64. The recorded value may already contain a capture/truncation notice; recall does not reconstruct bytes that were never recorded. It does not execute a tool again or settle a Contract.",
+            input: SessionObservationPack.ReadInput,
+            output: Schema.Struct({
+              ...SessionObservationPack.ReadInput.fields,
+              bytes: NonNegativeInt,
+              nextOffset: NonNegativeInt,
+              eof: Schema.Boolean,
+              encoding: Schema.Literals(["utf8", "base64"]),
+              data: Schema.String,
             }),
-        }),
+            execute: (input, context) =>
+              Effect.gen(function* () {
+                yield* permissions
+                  .assert({
+                    action: SessionObservationPack.toolName,
+                    resources: [input.messageID],
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                  })
+                  .pipe(Effect.mapError((error) => new ToolFailure({ message: String(error) })))
+                const stored = yield* sessions.message(input.messageID)
+                if (!stored || stored.sessionID !== context.sessionID)
+                  return yield* new ToolFailure({ message: "Observation is unavailable in this Session" })
+                const page = SessionObservationPack.read(stored.message, input)
+                if (!page) return yield* new ToolFailure({ message: "Observation is unavailable or its hash changed" })
+                return page
+              }),
+          }),
+          "observe",
+        ),
       })
       .pipe(Effect.orDie)
   }),

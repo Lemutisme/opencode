@@ -95,13 +95,16 @@ describe("ObservationPack promotion policy", () => {
               }),
             )
             yield* applications.register({
-              read: Tool.make({
-                description: "Produce a deterministic observation",
-                input: Schema.Struct({ text: Schema.String }),
-                output: Schema.String,
-                execute: (input) => Effect.succeed(input.text),
-                toModelOutput: ({ output }) => [{ type: "text", text: output }],
-              }),
+              read: Tool.withCapability(
+                Tool.make({
+                  description: "Produce a deterministic observation",
+                  input: Schema.Struct({ text: Schema.String }),
+                  output: Schema.String,
+                  execute: (input) => Effect.succeed(input.text),
+                  toModelOutput: ({ output }) => [{ type: "text", text: output }],
+                }),
+                "read",
+              ),
             })
             const binding = scenario.contract
               ? yield* Effect.gen(function* () {

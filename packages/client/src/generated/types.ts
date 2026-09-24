@@ -25,6 +25,10 @@ export type InvalidCursorError = { readonly _tag: "InvalidCursorError"; readonly
 export const isInvalidCursorError = (value: unknown): value is InvalidCursorError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidCursorError"
 
+export type ForbiddenError = { readonly _tag: "ForbiddenError"; readonly message: string }
+export const isForbiddenError = (value: unknown): value is ForbiddenError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ForbiddenError"
+
 export type SessionNotFoundError = {
   readonly _tag: "SessionNotFoundError"
   readonly sessionID: string
@@ -108,6 +112,33 @@ export type ProContractNotFoundError = {
 }
 export const isProContractNotFoundError = (value: unknown): value is ProContractNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ProContractNotFoundError"
+
+export type ProContractRecognitionError = {
+  readonly _tag: "ProContractRecognitionError"
+  readonly message: string
+  readonly receipt: {
+    readonly operationID: string
+    readonly fingerprint: string
+    readonly decision: { readonly type: "accepted" } | { readonly type: "rejected"; readonly reason: string }
+    readonly frontier: number
+    readonly hash: string
+    readonly replayed: boolean
+    readonly support?: {
+      readonly contractID: string
+      readonly attestationID: string
+      readonly target: {
+        readonly revision: number
+        readonly specHash: string
+        readonly subjectHash: string
+        readonly handoffID: string
+        readonly contextHash: string
+      }
+      readonly valid: boolean
+    }
+  }
+}
+export const isProContractRecognitionError = (value: unknown): value is ProContractRecognitionError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ProContractRecognitionError"
 
 export type HealthGetOutput = { readonly healthy: true }
 
@@ -2848,7 +2879,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["id"]
   readonly scope: {
     readonly id?: string | null
@@ -2883,7 +2914,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["scope"]
   readonly goal: {
     readonly id?: string | null
@@ -2918,7 +2949,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["goal"]
   readonly executionPolicy?: {
     readonly id?: string | null
@@ -2953,7 +2984,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["executionPolicy"]
   readonly policy?: {
     readonly id?: string | null
@@ -2988,7 +3019,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["policy"]
   readonly brief?: {
     readonly id?: string | null
@@ -3023,7 +3054,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["brief"]
   readonly requires?: {
     readonly id?: string | null
@@ -3058,7 +3089,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["requires"]
   readonly location: {
     readonly id?: string | null
@@ -3093,7 +3124,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["location"]
   readonly model: {
     readonly id?: string | null
@@ -3128,7 +3159,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["model"]
   readonly trigger?: {
     readonly id?: string | null
@@ -3163,7 +3194,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["trigger"]
   readonly authority?: {
     readonly id?: string | null
@@ -3198,7 +3229,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["authority"]
   readonly budget?: {
     readonly id?: string | null
@@ -3233,7 +3264,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["budget"]
   readonly evidence?: {
     readonly id?: string | null
@@ -3268,7 +3299,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["evidence"]
   readonly resolution?: {
     readonly id?: string | null
@@ -3303,7 +3334,7 @@ export type ServerProContractIssueInput = {
         readonly artifacts: ReadonlyArray<string>
       }
     } | null
-    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+    readonly resolution?: { readonly maxAttempts?: number; readonly retryDelay: number } | null
   }["resolution"]
 }
 
@@ -3338,7 +3369,7 @@ export type ServerProContractIssueOutput = {
           readonly artifacts: ReadonlyArray<string>
         }
       }
-      readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+      readonly resolution: { readonly maxAttempts?: number; readonly retryDelay: number }
     }
     readonly issuer: string
     readonly revision: number
@@ -3396,12 +3427,35 @@ export type ServerProContractIssueOutput = {
             readonly artifacts: ReadonlyArray<string>
           }
         }
-        readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+        readonly resolution: { readonly maxAttempts?: number; readonly retryDelay: number }
       }
       readonly specHash: string
       readonly reason: string
     }
     readonly attestationID?: string
+    readonly recognition?: {
+      readonly context?: {
+        readonly target: {
+          readonly revision: number
+          readonly specHash: string
+          readonly version: number
+          readonly phaseID: string
+          readonly handoffID?: string
+        }
+        readonly profile: string
+        readonly referenceHash: string
+        readonly admitted: boolean
+      }
+      readonly handoff?: {
+        readonly revision: number
+        readonly specHash: string
+        readonly subjectHash: string
+        readonly handoffID: string
+        readonly contextHash: string
+      }
+      readonly pending?: { readonly revision: number; readonly specHash: string; readonly petition: number }
+      readonly unavailable?: string
+    }
   }
   readonly execution: {
     readonly contractID: string
@@ -3455,7 +3509,7 @@ export type ServerProContractListOutput = {
           readonly artifacts: ReadonlyArray<string>
         }
       }
-      readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+      readonly resolution: { readonly maxAttempts?: number; readonly retryDelay: number }
     }
     readonly issuer: string
     readonly revision: number
@@ -3513,12 +3567,35 @@ export type ServerProContractListOutput = {
             readonly artifacts: ReadonlyArray<string>
           }
         }
-        readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+        readonly resolution: { readonly maxAttempts?: number; readonly retryDelay: number }
       }
       readonly specHash: string
       readonly reason: string
     }
     readonly attestationID?: string
+    readonly recognition?: {
+      readonly context?: {
+        readonly target: {
+          readonly revision: number
+          readonly specHash: string
+          readonly version: number
+          readonly phaseID: string
+          readonly handoffID?: string
+        }
+        readonly profile: string
+        readonly referenceHash: string
+        readonly admitted: boolean
+      }
+      readonly handoff?: {
+        readonly revision: number
+        readonly specHash: string
+        readonly subjectHash: string
+        readonly handoffID: string
+        readonly contextHash: string
+      }
+      readonly pending?: { readonly revision: number; readonly specHash: string; readonly petition: number }
+      readonly unavailable?: string
+    }
   }>
 }["data"]
 
@@ -3566,7 +3643,7 @@ export type ServerProContractGetOutput = {
           readonly artifacts: ReadonlyArray<string>
         }
       }
-      readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+      readonly resolution: { readonly maxAttempts?: number; readonly retryDelay: number }
     }
     readonly issuer: string
     readonly revision: number
@@ -3624,14 +3701,63 @@ export type ServerProContractGetOutput = {
             readonly artifacts: ReadonlyArray<string>
           }
         }
-        readonly resolution: { readonly maxAttempts: number; readonly retryDelay: number }
+        readonly resolution: { readonly maxAttempts?: number; readonly retryDelay: number }
       }
       readonly specHash: string
       readonly reason: string
     }
     readonly attestationID?: string
+    readonly recognition?: {
+      readonly context?: {
+        readonly target: {
+          readonly revision: number
+          readonly specHash: string
+          readonly version: number
+          readonly phaseID: string
+          readonly handoffID?: string
+        }
+        readonly profile: string
+        readonly referenceHash: string
+        readonly admitted: boolean
+      }
+      readonly handoff?: {
+        readonly revision: number
+        readonly specHash: string
+        readonly subjectHash: string
+        readonly handoffID: string
+        readonly contextHash: string
+      }
+      readonly pending?: { readonly revision: number; readonly specHash: string; readonly petition: number }
+      readonly unavailable?: string
+    }
   }
 }["data"]
+
+export type ServerProContractRecognitionInput = { readonly contractID: { readonly contractID: string }["contractID"] }
+
+export type ServerProContractRecognitionOutput = {
+  readonly context?: {
+    readonly target: {
+      readonly revision: number
+      readonly specHash: string
+      readonly version: number
+      readonly phaseID: string
+      readonly handoffID?: string
+    }
+    readonly profile: string
+    readonly referenceHash: string
+    readonly admitted: boolean
+  }
+  readonly handoff?: {
+    readonly revision: number
+    readonly specHash: string
+    readonly subjectHash: string
+    readonly handoffID: string
+    readonly contextHash: string
+  }
+  readonly pending?: { readonly revision: number; readonly specHash: string; readonly petition: number }
+  readonly unavailable?: string
+}
 
 export type ServerProContractExecutionInput = { readonly contractID: { readonly contractID: string }["contractID"] }
 
@@ -3654,58 +3780,191 @@ export type ServerProContractExecutionOutput = {
 
 export type ServerProContractAttestInput = {
   readonly contractID: { readonly contractID: string }["contractID"]
-  readonly evidenceHash: { readonly evidenceHash: string }["evidenceHash"]
+  readonly evidenceHash: {
+    readonly evidenceHash: string
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
+  }["evidenceHash"]
+  readonly operationID: {
+    readonly evidenceHash: string
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
+  }["operationID"]
+  readonly expected: {
+    readonly evidenceHash: string
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
+  }["expected"]
 }
 
-export type ServerProContractAttestOutput = { readonly frontier: number; readonly hash: string }
+export type ServerProContractAttestOutput = {
+  readonly operationID: string
+  readonly fingerprint: string
+  readonly decision: { readonly type: "accepted" } | { readonly type: "rejected"; readonly reason: string }
+  readonly frontier: number
+  readonly hash: string
+  readonly replayed: boolean
+  readonly support?: {
+    readonly contractID: string
+    readonly attestationID: string
+    readonly target: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
+    readonly valid: boolean
+  }
+}
 
 export type ServerProContractChallengeInput = {
   readonly contractID: { readonly contractID: string }["contractID"]
-  readonly revision: {
-    readonly revision: number
-    readonly subjectHash: string
+  readonly operationID: {
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined
-  }["revision"]
-  readonly subjectHash: {
-    readonly revision: number
-    readonly subjectHash: string
+  }["operationID"]
+  readonly expected: {
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined
-  }["subjectHash"]
+  }["expected"]
   readonly evidenceHash: {
-    readonly revision: number
-    readonly subjectHash: string
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined
   }["evidenceHash"]
   readonly disclosure: {
-    readonly revision: number
-    readonly subjectHash: string
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined
   }["disclosure"]
   readonly summary?: {
-    readonly revision: number
-    readonly subjectHash: string
+    readonly operationID: string
+    readonly expected: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
     readonly evidenceHash: string
     readonly disclosure: "executor" | "sealed"
     readonly summary?: string | undefined
   }["summary"]
 }
 
-export type ServerProContractChallengeOutput = { readonly frontier: number; readonly hash: string }
+export type ServerProContractChallengeOutput = {
+  readonly operationID: string
+  readonly fingerprint: string
+  readonly decision: { readonly type: "accepted" } | { readonly type: "rejected"; readonly reason: string }
+  readonly frontier: number
+  readonly hash: string
+  readonly replayed: boolean
+  readonly support?: {
+    readonly contractID: string
+    readonly attestationID: string
+    readonly target: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
+    readonly valid: boolean
+  }
+}
 
 export type ServerProContractDecideRevisionInput = {
   readonly contractID: { readonly contractID: string }["contractID"]
-  readonly accept: { readonly accept: boolean }["accept"]
+  readonly accept: {
+    readonly accept: boolean
+    readonly operationID: string
+    readonly expected: { readonly revision: number; readonly specHash: string; readonly petition: number }
+  }["accept"]
+  readonly operationID: {
+    readonly accept: boolean
+    readonly operationID: string
+    readonly expected: { readonly revision: number; readonly specHash: string; readonly petition: number }
+  }["operationID"]
+  readonly expected: {
+    readonly accept: boolean
+    readonly operationID: string
+    readonly expected: { readonly revision: number; readonly specHash: string; readonly petition: number }
+  }["expected"]
 }
 
-export type ServerProContractDecideRevisionOutput = { readonly frontier: number; readonly hash: string }
+export type ServerProContractDecideRevisionOutput = {
+  readonly operationID: string
+  readonly fingerprint: string
+  readonly decision: { readonly type: "accepted" } | { readonly type: "rejected"; readonly reason: string }
+  readonly frontier: number
+  readonly hash: string
+  readonly replayed: boolean
+  readonly support?: {
+    readonly contractID: string
+    readonly attestationID: string
+    readonly target: {
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly handoffID: string
+      readonly contextHash: string
+    }
+    readonly valid: boolean
+  }
+}
 
 export type ServerProContractReleaseInput = {
   readonly contractID: { readonly contractID: string }["contractID"]

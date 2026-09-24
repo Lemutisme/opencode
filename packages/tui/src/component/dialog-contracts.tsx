@@ -123,6 +123,9 @@ export function DialogContracts(props: { scope?: string } = {}) {
   }
 
   async function attest(contract: ProContractInfo) {
+    const expected = contract.recognition?.handoff
+    const operationID = crypto.randomUUID()
+    if (!expected) return toast.show({ variant: "error", message: "Handoff identity unavailable; refresh contracts" })
     const evidenceHash = await DialogPrompt.show(dialog, "Evidence hash", {
       placeholder: "Artifact, report, or decision hash",
     })
@@ -130,17 +133,31 @@ export function DialogContracts(props: { scope?: string } = {}) {
     const result = await sdk.client.v2.proContract.attest({
       contractID: contract.id,
       evidenceHash: evidenceHash.trim(),
+      expected,
+      operationID,
     })
     if (result.error) {
       toast.show({ variant: "error", message: errorMessage(result.error) })
       return dialog.replace(() => <DialogContracts {...props} />)
     }
-    toast.show({ variant: "success", message: "Contract discharged" })
+    toast.show({
+      variant: result.data?.support?.valid ? "success" : "warning",
+      message: result.data?.support?.valid
+        ? "Contract discharged"
+        : "Attestation recorded; support is no longer current",
+    })
     dialog.replace(() => <DialogContracts {...props} />)
   }
 
   async function decideRevision(contract: ProContractInfo, accept: boolean) {
-    const result = await sdk.client.v2.proContract.decideRevision({ contractID: contract.id, accept })
+    const expected = contract.recognition?.pending
+    if (!expected) return toast.show({ variant: "error", message: "Revision identity unavailable; refresh contracts" })
+    const result = await sdk.client.v2.proContract.decideRevision({
+      contractID: contract.id,
+      accept,
+      expected,
+      operationID: crypto.randomUUID(),
+    })
     if (result.error) {
       toast.show({ variant: "error", message: errorMessage(result.error) })
       return dialog.replace(() => <DialogContracts {...props} />)

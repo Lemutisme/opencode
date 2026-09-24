@@ -19,6 +19,9 @@ import { PermissionV2 } from "../../permission"
 import { ProviderV2 } from "../../provider"
 import { ProContract } from "../../pro-contract"
 import { ProContractOpenCode } from "../../pro-contract/open-code"
+import { ProContractJob } from "../../pro-contract/job"
+import { ProContractActivity } from "../../pro-contract/activity"
+import { ExecutionPermit } from "../execution-permit"
 import { ProContractContext } from "../../pro-contract/context"
 import { QuestionV2 } from "../../question"
 import { SystemContext } from "../../system-context/index"
@@ -116,9 +119,12 @@ const layer = Layer.effect(
     const snapshots = yield* Snapshot.Service
     const contracts = yield* ProContract.Service
     const contractBindings = yield* ProContractOpenCode.Service
+    const permits = yield* ExecutionPermit.Service
+    const jobs = yield* ProContractJob.Service
+    const activity = yield* ProContractActivity.Service
     const observationPolicy = yield* SessionObservationPack.Policy
     const db = (yield* Database.Service).db
-    const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
+    const compaction = SessionCompaction.make({ events, llm, permits, jobs, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
       if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
@@ -183,14 +189,14 @@ const layer = Layer.effect(
     const continueAfterOverflowCompaction = (step: number) =>
       new TurnTransitionError({ _tag: "ContinueAfterOverflowCompaction", step })
 
-    const loadSystemContext = (agent: AgentV2.Selection, bound: boolean) =>
+    const loadSystemContext = (agent: AgentV2.Selection, controlled: "execution" | "review" | undefined) =>
       Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
         concurrency: "unbounded",
       }).pipe(
         Effect.map((contexts) =>
           SystemContext.combine([
             ...contexts,
-            ProContractContext.make(bound ? "execution" : agent.id === AgentV2.defaultID ? "admission" : undefined),
+            ProContractContext.make(controlled ?? (agent.id === AgentV2.defaultID ? "admission" : undefined)),
           ]),
         ),
       )
@@ -199,8 +205,10 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
+      permit: ExecutionPermit.Permit,
       recoverOverflow?: typeof compaction.compactAfterOverflow,
     ) {
+      yield* permits.check(permit)
       const session = yield* getSession(sessionID)
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
@@ -218,7 +226,7 @@ const layer = Layer.effect(
           : contractBinding.attemptKey !== ProContractOpenCode.attemptKey(contract))
       const initialized = yield* SessionContextEpoch.initialize(
         db,
-        loadSystemContext(agent, contractBinding !== undefined),
+        loadSystemContext(agent, permit.job ? "review" : contractBinding ? "execution" : undefined),
         session.id,
       )
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
@@ -244,12 +252,17 @@ const layer = Layer.effect(
           contractAttemptChanged)
       )
         return { needsContinuation: false, step: currentStep }
+      if (
+        contractBinding &&
+        !(yield* contractBindings.authorize(ProContractOpenCode.execution(contractBinding)).pipe(Effect.isSuccess))
+      )
+        return { needsContinuation: false, step: currentStep }
       const system =
         initialized ??
         (yield* SessionContextEpoch.prepare(
           db,
           events,
-          loadSystemContext(agent, contractBinding !== undefined),
+          loadSystemContext(agent, permit.job ? "review" : contractBinding ? "execution" : undefined),
           session.id,
         ))
       const model = yield* models.resolve(session)
@@ -257,65 +270,72 @@ const layer = Layer.effect(
       const context = entries.map((entry) => entry.message)
       const latest = context.at(-1)
       // A same-Session Contract retry queues a durable scheduler prompt. Its binding ID, not text, identifies it.
-      const previous =
-        latest?.type === "user" && latest.id === contractBinding?.promptID ? context.at(-2) : latest
+      const previous = latest?.type === "user" && latest.id === contractBinding?.promptID ? context.at(-2) : latest
       const inputRecovery =
         previous?.type === "assistant" && previous.content.some(InterruptedToolInput.isUncalledFailure)
           ? RepeatedToolInput.make()
           : undefined
       // An issued Contract without a turn ceiling must not inherit a generic agent step ceiling.
       const isLastStep =
+        !permit.job &&
         !(contract && contract.spec.budget.turns === undefined) &&
         agent.info?.steps !== undefined &&
         currentStep >= agent.info.steps
       const authority = contract?.status === "active" ? contract.spec.authority : []
-      const contractPermissions = contractBinding
+      const contractPermissions = permit.job
         ? [
             { action: "*", resource: "*", effect: "deny" as const },
-            ...(contract?.spec.evidence.replay
-              ? [{ action: "contract_check", resource: "*", effect: "allow" as const }]
-              : []),
-            { action: "contract_report_ready", resource: "*", effect: "allow" as const },
-            { action: "contract_read_observation", resource: "*", effect: "allow" as const },
-            { action: "contract_report_blocked", resource: "*", effect: "allow" as const },
-            { action: "contract_propose_revision", resource: "*", effect: "allow" as const },
-            { action: "todowrite", resource: "*", effect: "allow" as const },
-            { action: SessionObservationPack.toolName, resource: "*", effect: "allow" as const },
-            ...(authority.includes("filesystem.read")
-              ? [
-                  { action: "read", resource: "*", effect: "allow" as const },
-                  { action: "glob", resource: "*", effect: "allow" as const },
-                  { action: "grep", resource: "*", effect: "allow" as const },
-                ]
-              : []),
-            ...(authority.includes("filesystem.write")
-              ? [{ action: "edit", resource: "*", effect: "allow" as const }]
-              : []),
-            ...(authority.includes("process.execute")
-              ? [
-                  { action: "bash", resource: "*", effect: "allow" as const },
-                  ...(authority.includes("filesystem.write")
-                    ? [{ action: "mutate_run", resource: "*", effect: "allow" as const }]
-                    : []),
-                ]
-              : []),
-            ...(authority.includes("reference.run")
-              ? [
-                  { action: "reference_run", resource: "*", effect: "allow" as const },
-                  { action: "reference_read", resource: "*", effect: "allow" as const },
-                ]
-              : []),
+            ...["read", "glob", "grep"].map((action) => ({ action, resource: "*", effect: "allow" as const })),
           ]
-        : [
-            { action: "mutate_run", resource: "*", effect: "deny" as const },
-            { action: "reference_run", resource: "*", effect: "deny" as const },
-            { action: "reference_read", resource: "*", effect: "deny" as const },
-            { action: "contract_check", resource: "*", effect: "deny" as const },
-            { action: "contract_read_observation", resource: "*", effect: "deny" as const },
-            { action: "contract_report_ready", resource: "*", effect: "deny" as const },
-            { action: "contract_report_blocked", resource: "*", effect: "deny" as const },
-            { action: "contract_propose_revision", resource: "*", effect: "deny" as const },
-          ]
+        : contractBinding
+          ? [
+              { action: "*", resource: "*", effect: "deny" as const },
+              ...(contract?.spec.evidence.replay
+                ? [{ action: "contract_check", resource: "*", effect: "allow" as const }]
+                : []),
+              { action: "contract_report_ready", resource: "*", effect: "allow" as const },
+              { action: "contract_request", resource: "*", effect: "allow" as const },
+              { action: "contract_read_observation", resource: "*", effect: "allow" as const },
+              { action: "contract_report_blocked", resource: "*", effect: "allow" as const },
+              { action: "contract_propose_revision", resource: "*", effect: "allow" as const },
+              { action: "todowrite", resource: "*", effect: "allow" as const },
+              { action: SessionObservationPack.toolName, resource: "*", effect: "allow" as const },
+              ...(authority.includes("filesystem.read")
+                ? [
+                    { action: "read", resource: "*", effect: "allow" as const },
+                    { action: "glob", resource: "*", effect: "allow" as const },
+                    { action: "grep", resource: "*", effect: "allow" as const },
+                  ]
+                : []),
+              ...(authority.includes("filesystem.write")
+                ? [{ action: "edit", resource: "*", effect: "allow" as const }]
+                : []),
+              ...(authority.includes("process.execute")
+                ? [
+                    { action: "bash", resource: "*", effect: "allow" as const },
+                    ...(authority.includes("filesystem.write")
+                      ? [{ action: "mutate_run", resource: "*", effect: "allow" as const }]
+                      : []),
+                  ]
+                : []),
+              ...(authority.includes("reference.run")
+                ? [
+                    { action: "reference_run", resource: "*", effect: "allow" as const },
+                    { action: "reference_read", resource: "*", effect: "allow" as const },
+                  ]
+                : []),
+            ]
+          : [
+              { action: "mutate_run", resource: "*", effect: "deny" as const },
+              { action: "reference_run", resource: "*", effect: "deny" as const },
+              { action: "reference_read", resource: "*", effect: "deny" as const },
+              { action: "contract_check", resource: "*", effect: "deny" as const },
+              { action: "contract_read_observation", resource: "*", effect: "deny" as const },
+              { action: "contract_report_ready", resource: "*", effect: "deny" as const },
+              { action: "contract_request", resource: "*", effect: "deny" as const },
+              { action: "contract_report_blocked", resource: "*", effect: "deny" as const },
+              { action: "contract_propose_revision", resource: "*", effect: "deny" as const },
+            ]
       const toolMaterialization = isLastStep
         ? undefined
         : yield* tools.materialize([
@@ -358,11 +378,10 @@ const layer = Layer.effect(
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })
-      const deadline = contract?.spec.budget.deadline
-      if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request, deadline }))
+      const deadline = permit.source?.deadline
+      if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request, deadline, permit }))
         return yield* Effect.die(continueAfterCompaction(currentStep))
-      if (contractBinding && !(yield* contractBindings.reserveTurn(session.id, yield* Clock.currentTimeMillis)))
-        return { needsContinuation: false, step: currentStep }
+      const contractExecution = contractBinding ? ProContractOpenCode.execution(contractBinding) : undefined
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
@@ -379,64 +398,86 @@ const layer = Layer.effect(
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
       if (deadline !== undefined && deadline <= (yield* Clock.currentTimeMillis)) return yield* Effect.interrupt
-      const providerStream = llm.stream(request).pipe(
-        Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
-        Stream.runForEach((event) =>
-          Effect.gen(function* () {
-            if (
-              overflowFailure ||
-              (publisher.hasProviderError() && event.type !== "step-finish" && event.type !== "finish")
-            )
-              return
-            if (LLMEvent.is.providerError(event)) {
-              if (isContextOverflowFailure(event) && !publisher.hasAssistantStarted()) {
-                overflowFailure = event
-                return
-              }
-            }
-            yield* publish(event)
-            // Publish the triggering prefix first; the stream finalizer flushes Input.Ended durably.
-            const repeatedInput = inputRecovery?.observe(event, yield* Clock.currentTimeMillis)
-            if (repeatedInput) return yield* Effect.fail(repeatedInput)
-            if (event.type !== "tool-call" || event.providerExecuted) return
-            if (!toolMaterialization) {
-              yield* withPublication(publisher.failUnsettledTools("Tools are disabled after the maximum agent steps"))
-              return
-            }
-            needsContinuation = true
-            const assistantMessageID = yield* publisher.assistantMessageID(event.id)
-            yield* Effect.uninterruptibleMask((restore) =>
-              restore(
-                toolMaterialization.settle({
-                  sessionID: session.id,
-                  agent: agent.id,
-                  assistantMessageID,
-                  call: event,
-                }),
-              ).pipe(
-                Effect.flatMap((settlement) =>
-                  publish(
-                    LLMEvent.toolResult({
-                      id: event.id,
-                      name: event.name,
-                      result: settlement.result,
-                      output: settlement.output,
+      const providerStream = permits.run(permit, "provider", (operation) =>
+        Effect.suspend(() =>
+          llm.stream(request).pipe(
+            Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
+            Stream.runForEach((event) =>
+              Effect.gen(function* () {
+                if (operation) yield* jobs.observe(operation.id, event)
+                if (
+                  overflowFailure ||
+                  (publisher.hasProviderError() && event.type !== "step-finish" && event.type !== "finish")
+                )
+                  return
+                if (LLMEvent.is.providerError(event)) {
+                  if (isContextOverflowFailure(event) && !publisher.hasAssistantStarted()) {
+                    overflowFailure = event
+                    return
+                  }
+                }
+                yield* publish(event)
+                // Publish the triggering prefix first; the stream finalizer flushes Input.Ended durably.
+                const repeatedInput = inputRecovery?.observe(event, yield* Clock.currentTimeMillis)
+                if (repeatedInput) return yield* Effect.fail(repeatedInput)
+                if (event.type !== "tool-call" || event.providerExecuted) return
+                if (!toolMaterialization) {
+                  yield* withPublication(
+                    publisher.failUnsettledTools("Tools are disabled after the maximum agent steps"),
+                  )
+                  return
+                }
+                needsContinuation = true
+                const assistantMessageID = yield* publisher.assistantMessageID(event.id)
+                yield* Effect.uninterruptibleMask((restore) =>
+                  restore(
+                    toolMaterialization.settle({
+                      sessionID: session.id,
+                      agent: agent.id,
+                      assistantMessageID,
+                      contractExecution,
+                      executionPermit: permit,
+                      call: event,
                     }),
-                    settlement.outputPaths ?? [],
+                  ).pipe(
+                    Effect.flatMap((settlement) =>
+                      publish(
+                        LLMEvent.toolResult({
+                          id: event.id,
+                          name: event.name,
+                          result: settlement.result,
+                          output: settlement.output,
+                        }),
+                        settlement.outputPaths ?? [],
+                      ),
+                    ),
+                    // A controlled job may never resume. Close this exact call after leaf cleanup,
+                    // even when FiberSet observes its interrupted child as already empty.
+                    Effect.onInterrupt(() =>
+                      permit.source
+                        ? publish(
+                            LLMEvent.toolResult({
+                              id: event.id,
+                              name: event.name,
+                              result: { type: "error", value: "Tool execution interrupted" },
+                            }),
+                          )
+                        : Effect.void,
+                    ),
                   ),
-                ),
-              ),
-            ).pipe(FiberSet.run(toolFibers))
-          }),
+                ).pipe(FiberSet.run(toolFibers))
+              }),
+            ),
+            Effect.ensuring(withPublication(publisher.flush())),
+          ),
         ),
-        Effect.ensuring(withPublication(publisher.flush())),
       )
       const providerTurnStartedAt = yield* Clock.currentTimeMillis
       const providerTurnTimeout = Math.max(
         1,
         Math.min(
           MAX_PROVIDER_TURN_MS,
-          contract?.status === "active" ? contract.spec.budget.deadline - providerTurnStartedAt : MAX_PROVIDER_TURN_MS,
+          deadline === undefined ? MAX_PROVIDER_TURN_MS : deadline - providerTurnStartedAt,
         ),
       )
       // Idle timeout does not bound a provider that trickles deltas. One turn must not monopolize a finite Contract.
@@ -457,7 +498,7 @@ const layer = Layer.effect(
             recoverOverflow &&
             !publisher.hasAssistantStarted() &&
             isContextOverflowFailure(overflowFailure ?? failure) &&
-            (yield* restore(recoverOverflow({ sessionID: session.id, entries, model, request, deadline })))
+            (yield* restore(recoverOverflow({ sessionID: session.id, entries, model, request, deadline, permit })))
           )
             return yield* Effect.die(continueAfterOverflowCompaction(currentStep))
           if (overflowFailure) yield* publish(overflowFailure)
@@ -571,31 +612,32 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
+      permit: ExecutionPermit.Permit,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runAfterOverflowCompaction: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step) {
-      return yield* runTurnAttempt(sessionID, promotion, step).pipe(
+    const runAfterOverflowCompaction: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, permit) {
+      return yield* runTurnAttempt(sessionID, promotion, step, permit).pipe(
         Effect.catchDefect(
           Effect.fnUntraced(function* (defect) {
             if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
             if (defect.transition._tag === "ContinueAfterOverflowCompaction")
               return yield* Effect.die("Post-compaction provider attempt cannot recover another overflow")
             yield* Effect.yieldNow
-            return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step)
+            return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, permit)
           }),
         ),
       )
     })
 
-    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step) {
-      return yield* runTurnAttempt(sessionID, promotion, step, compaction.compactAfterOverflow).pipe(
+    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, permit) {
+      return yield* runTurnAttempt(sessionID, promotion, step, permit, compaction.compactAfterOverflow).pipe(
         Effect.catchDefect(
           Effect.fnUntraced(function* (defect) {
             if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
             yield* Effect.yieldNow
             if (defect.transition._tag === "ContinueAfterOverflowCompaction")
-              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step)
-            return yield* runTurn(sessionID, undefined, defect.transition.step)
+              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, permit)
+            return yield* runTurn(sessionID, undefined, defect.transition.step, permit)
           }),
         ),
       )
@@ -604,26 +646,40 @@ const layer = Layer.effect(
     const run = Effect.fn("SessionRunner.run")(function* (input: {
       readonly sessionID: SessionSchema.ID
       readonly force: boolean
+      readonly executionPermit?: ExecutionPermit.Permit
     }) {
-      const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
-      const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
-      if (!input.force && !hasSteer && !hasQueue) return
-      yield* failInterruptedTools(input.sessionID)
-      let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
-      let shouldRun = input.force || hasSteer || hasQueue
-      while (shouldRun) {
-        let needsContinuation = true
-        let step = 1
-        while (needsContinuation) {
-          const result = yield* runTurn(input.sessionID, promotion, step)
-          needsContinuation = result.needsContinuation
-          step = result.step + 1
-          promotion = "steer"
-          if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+      const permit = yield* input.executionPermit
+        ? permits.require(input.sessionID, input.executionPermit)
+        : permits.capture(input.sessionID)
+      if (permit.job && (yield* jobs.authorize(permit.job)).input.kind !== "review")
+        return yield* new ProContractJob.Denied({ message: "Mechanical verification jobs cannot run a model Session" })
+      const drain = Effect.gen(function* () {
+        const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+        const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
+        if (!input.force && !hasSteer && !hasQueue) return
+        yield* failInterruptedTools(input.sessionID)
+        let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
+        let shouldRun = input.force || hasSteer || hasQueue
+        while (shouldRun) {
+          let needsContinuation = true
+          let step = 1
+          while (needsContinuation) {
+            const result = yield* runTurn(input.sessionID, promotion, step, permit)
+            needsContinuation = result.needsContinuation
+            step = result.step + 1
+            promotion = "steer"
+            if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+          }
+          shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
+          promotion = shouldRun ? "queue" : undefined
         }
-        shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
-        promotion = shouldRun ? "queue" : undefined
-      }
+      })
+      return yield* permit.source
+        ? activity.run(
+            permit.source.contractID,
+            permits.run(permit, undefined, () => drain),
+          )
+        : drain
     })
 
     return Service.of({
@@ -651,6 +707,9 @@ export const node = makeLocationNode({
     Database.node,
     ProContract.node,
     ProContractOpenCode.node,
+    ProContractJob.node,
+    ProContractActivity.node,
+    ExecutionPermit.node,
     SessionObservationPack.policyNode,
   ],
 })

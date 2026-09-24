@@ -133,7 +133,7 @@ export const Blocked = Schema.Struct({
 export interface Blocked extends Schema.Schema.Type<typeof Blocked> {}
 
 export const Resolution = Schema.Struct({
-  maxAttempts: PositiveInt,
+  maxAttempts: optional(PositiveInt),
   retryDelay: NonNegativeInt,
 }).annotate({ identifier: "ProContract.Resolution" })
 export interface Resolution extends Schema.Schema.Type<typeof Resolution> {}
@@ -165,6 +165,79 @@ export const Status = Schema.Literals([
 })
 export type Status = typeof Status.Type
 
+export const ContextTarget = Schema.Struct({
+  revision: PositiveInt,
+  specHash: Schema.NonEmptyString,
+  version: PositiveInt,
+  phaseID: Schema.NonEmptyString,
+  handoffID: Schema.NonEmptyString.pipe(optional),
+}).annotate({ identifier: "ProContract.ContextTarget" })
+export interface ContextTarget extends Schema.Schema.Type<typeof ContextTarget> {}
+
+export const RecognitionContext = Schema.Struct({
+  target: ContextTarget,
+  profile: Schema.NonEmptyString,
+  referenceHash: Schema.NonEmptyString,
+  admitted: Schema.Boolean,
+}).annotate({ identifier: "ProContract.RecognitionContext" })
+export interface RecognitionContext extends Schema.Schema.Type<typeof RecognitionContext> {}
+
+export const RecognitionTarget = Schema.Struct({
+  revision: PositiveInt,
+  specHash: Schema.NonEmptyString,
+  subjectHash: Schema.NonEmptyString,
+  handoffID: Schema.NonEmptyString,
+  contextHash: Schema.NonEmptyString,
+}).annotate({ identifier: "ProContract.RecognitionTarget" })
+export interface RecognitionTarget extends Schema.Schema.Type<typeof RecognitionTarget> {}
+
+export const RevisionTarget = Schema.Struct({
+  revision: PositiveInt,
+  specHash: Schema.NonEmptyString,
+  petition: NonNegativeInt,
+}).annotate({ identifier: "ProContract.RevisionTarget" })
+export interface RevisionTarget extends Schema.Schema.Type<typeof RevisionTarget> {}
+
+export const Recognition = Schema.Struct({
+  context: RecognitionContext.pipe(optional),
+  handoff: RecognitionTarget.pipe(optional),
+  pending: RevisionTarget.pipe(optional),
+  unavailable: Schema.String.pipe(optional),
+}).annotate({ identifier: "ProContract.Recognition" })
+export interface Recognition extends Schema.Schema.Type<typeof Recognition> {}
+
+export const OperationReceipt = Schema.Struct({
+  operationID: Schema.NonEmptyString,
+  fingerprint: Schema.NonEmptyString,
+  decision: Schema.Union([
+    Schema.Struct({ type: Schema.Literal("accepted") }),
+    Schema.Struct({ type: Schema.Literal("rejected"), reason: Schema.String }),
+  ]),
+  frontier: NonNegativeInt,
+  hash: Schema.NonEmptyString,
+  replayed: Schema.Boolean,
+  support: Schema.Struct({
+    contractID: ID,
+    attestationID: AttestationID,
+    target: RecognitionTarget,
+    valid: Schema.Boolean,
+  }).pipe(optional),
+}).annotate({ identifier: "ProContract.OperationReceipt" })
+export interface OperationReceipt extends Schema.Schema.Type<typeof OperationReceipt> {}
+
+export const EvaluationReport = Schema.Struct({
+  version: Schema.Literal(2),
+  deliveryContractID: ID,
+  delivery: RecognitionTarget,
+  deliveryAttestationID: AttestationID,
+  evaluation: ContextTarget,
+  evaluatorHash: Schema.NonEmptyString,
+  passed: Schema.Boolean,
+  disclosure: Schema.Literals(["executor", "sealed"]),
+  summary: Schema.NonEmptyString,
+}).annotate({ identifier: "ProContract.EvaluationReport" })
+export interface EvaluationReport extends Schema.Schema.Type<typeof EvaluationReport> {}
+
 export const Info = Schema.Struct({
   id: ID,
   scope: Schema.NonEmptyString,
@@ -179,6 +252,7 @@ export const Info = Schema.Struct({
   challenge: Challenge.pipe(optional),
   pendingRevision: Schema.Struct({ spec: Spec, specHash: Schema.String, reason: Schema.String }).pipe(optional),
   attestationID: AttestationID.pipe(optional),
+  recognition: Recognition.pipe(optional),
 }).annotate({ identifier: "ProContract.Info" })
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 

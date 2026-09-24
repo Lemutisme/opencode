@@ -76,7 +76,7 @@ export const ContractProposeTool = Tool.define<
                 `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
                 `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                 `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
-                `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
+                `Resolution: ${spec.resolution.maxAttempts ?? "no cumulative limit on"} attempts, ${spec.resolution.retryDelay} ms retry delay`,
               ]
                 .filter((item) => item !== undefined)
                 .join("\n"),

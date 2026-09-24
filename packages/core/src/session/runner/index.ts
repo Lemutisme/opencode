@@ -8,7 +8,11 @@ import { SessionRunnerModel } from "./model"
 import type { SystemContext } from "../../system-context/index"
 import type { ToolOutputStore } from "../../tool-output-store"
 
+import type { ProContractJob } from "../../pro-contract/job"
+import type { ExecutionPermit } from "../execution-permit"
+
 export type RunError =
+  | ProContractJob.Denied
   | LLMError
   | SessionRunnerModel.Error
   | MessageDecodeError
@@ -22,6 +26,7 @@ export interface Interface {
   readonly run: (input: {
     readonly sessionID: SessionSchema.ID
     readonly force: boolean
+    readonly executionPermit?: ExecutionPermit.Permit
   }) => Effect.Effect<void, RunError>
 }
 

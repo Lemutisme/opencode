@@ -2,6 +2,7 @@ import "./init-projectors"
 
 import { NodeHttpServer } from "@effect/platform-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import type { ProContractDriver } from "@opencode-ai/core/pro-contract/driver"
 import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { OpenApi } from "effect/unstable/httpapi"
@@ -34,6 +35,7 @@ type ListenOptions = CorsOptions & {
   hostname: string
   mdns?: boolean
   mdnsDomain?: string
+  contractDrivers?: ReadonlyArray<ProContractDriver.Driver>
 }
 type ListenerState = {
   scope: Scope.Scope
@@ -98,7 +100,7 @@ const listenEffect: (opts: ListenOptions) => Effect.Effect<EffectListener, unkno
 )
 
 function listenerLayer(opts: ListenOptions, port: number) {
-  return HttpRouter.serve(HttpApiApp.createRoutes(opts), {
+  return HttpRouter.serve(HttpApiApp.createRoutes(opts, opts.contractDrivers), {
     middleware: disposeMiddleware,
     disableLogger: true,
     disableListenLog: true,

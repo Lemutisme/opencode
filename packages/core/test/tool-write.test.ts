@@ -54,8 +54,10 @@ const filesystem = Layer.effect(
     const fs = yield* FSUtil.Service
     return FSUtil.Service.of({
       ...fs,
-      writeWithDirs: (target, content, mode) =>
-        Effect.sync(() => writes.push(target)).pipe(Effect.andThen(fs.writeWithDirs(target, content, mode))),
+      writeFileString: (target, content, options) =>
+        Effect.sync(() => writes.push(target)).pipe(Effect.andThen(fs.writeFileString(target, content, options))),
+      writeFile: (target, content, options) =>
+        Effect.sync(() => writes.push(target)).pipe(Effect.andThen(fs.writeFile(target, content, options))),
     })
   }),
 ).pipe(Layer.provide(LayerNode.compile(FSUtil.node)))

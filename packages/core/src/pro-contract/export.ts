@@ -19,7 +19,12 @@ export interface Interface {
     readonly contractID: ProContract.ID
     readonly directory: AbsolutePath
   }) => Effect.Effect<
-    { readonly contractID: ProContract.ID; readonly subjectHash: string; readonly directory: AbsolutePath },
+    {
+      readonly contractID: ProContract.ID
+      readonly subjectHash: string
+      readonly directory: AbsolutePath
+      readonly target: ProContract.RecognitionTarget
+    },
     Error | Snapshot.Error
   >
 }
@@ -39,6 +44,9 @@ const layer = Layer.effect(
         if (!contract) return yield* new Error({ message: `Contract not found: ${input.contractID}` })
         const handoff = contract.handoff
         if (!handoff) return yield* new Error({ message: `Contract has no current handoff: ${input.contractID}` })
+        const target = contract.recognition.handoff
+        if (!target)
+          return yield* new Error({ message: contract.recognition.unavailable ?? "Handoff identity unavailable" })
         const binding = yield* bindings.get(input.contractID)
         if (!binding) return yield* new Error({ message: `OpenCode execution not found: ${input.contractID}` })
         yield* Snapshot.Service.use((snapshots) =>
@@ -51,7 +59,7 @@ const layer = Layer.effect(
             ]).pipe(Layer.fresh),
           ),
         )
-        return { contractID: input.contractID, subjectHash: handoff.subjectHash, directory: input.directory }
+        return { contractID: input.contractID, subjectHash: handoff.subjectHash, directory: input.directory, target }
       }),
     })
   }),

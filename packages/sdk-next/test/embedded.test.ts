@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -6,10 +6,17 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { Deferred, Effect, Latch, Option, Schema, Stream } from "effect"
 import type { OpenCodeEvent } from "../src"
 
+// Database.node captures its filename when the SDK is first imported. Keep that
+// database alive for the suite; individual workspace directories remain isolated.
+const database = { previous: Flag.OPENCODE_DB, directory: await mkdtemp(join(tmpdir(), "opencode-embedded-db-")) }
+Flag.OPENCODE_DB = join(database.directory, "opencode.sqlite")
+afterAll(async () => {
+  Flag.OPENCODE_DB = database.previous
+  await rm(database.directory, { recursive: true, force: true })
+})
+
 test("embedded client uses the real router and handlers", async () => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-embedded-"))
-  const database = Flag.OPENCODE_DB
-  Flag.OPENCODE_DB = join(directory, "opencode.sqlite")
   const { AbsolutePath, Agent, Location, Model, OpenCode, Prompt, Provider, Session, Tool } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
   const model = Model.Ref.make({ id: Model.ID.make("embedded"), providerID: Provider.ID.make("test") })
@@ -99,15 +106,12 @@ test("embedded client uses the real router and handlers", async () => {
     })
     await Effect.runPromise(Effect.scoped(program))
   } finally {
-    Flag.OPENCODE_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 })
 
 test("Location-owned runner events reach the ready global client", async () => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-embedded-events-"))
-  const database = Flag.OPENCODE_DB
-  Flag.OPENCODE_DB = join(directory, "opencode.sqlite")
   const { AbsolutePath, Location, OpenCode, Prompt, Session } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
 
@@ -138,15 +142,12 @@ test("Location-owned runner events reach the ready global client", async () => {
     })
     await Effect.runPromise(Effect.scoped(program))
   } finally {
-    Flag.OPENCODE_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 }, 10_000)
 
 test("independent embedded hosts do not share live notifications", async () => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-embedded-hosts-"))
-  const database = Flag.OPENCODE_DB
-  Flag.OPENCODE_DB = join(directory, "opencode.sqlite")
   const { AbsolutePath, Agent, Location, OpenCode, Session } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
 
@@ -181,15 +182,12 @@ test("independent embedded hosts do not share live notifications", async () => {
     })
     await Effect.runPromise(Effect.scoped(program))
   } finally {
-    Flag.OPENCODE_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 }, 10_000)
 
 test("embedded client is available as a Layer service", async () => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-embedded-layer-"))
-  const database = Flag.OPENCODE_DB
-  Flag.OPENCODE_DB = join(directory, "opencode.sqlite")
   const { AbsolutePath, Location, OpenCode, Session } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
 
@@ -206,7 +204,76 @@ test("embedded client is available as a Layer service", async () => {
 
     expect(created.id).toBe(sessionID)
   } finally {
-    Flag.OPENCODE_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test("host driver controls the same scheduler and Location runner used by HTTP", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-driver-host-"))
+  const { AbsolutePath, Model, OpenCode, Provider } = await import("../src")
+  const { ProContract } = await import("@opencode-ai/core/pro-contract")
+  const owners: string[] = []
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const first = yield* OpenCode.create({
+            contractDrivers: [
+              {
+                identity: "test-embedded:1",
+                activate: () => true,
+                claim: () => true,
+                heartbeat: () => true,
+                outcome: (view) => {
+                  owners.push(view.binding.leaseOwner!)
+                  return { type: "wait" }
+                },
+              },
+            ],
+          })
+          const second = yield* OpenCode.create()
+          const request = {
+            id: ProContract.ID.create(),
+            scope: "embedded-driver",
+            driver: "test-embedded:1",
+            spec: {
+              ...ProContract.defaultSpec("Inspect the host", Date.now()),
+              resolution: { maxAttempts: 1, retryDelay: 1 },
+            },
+            location: { directory: AbsolutePath.make(directory) },
+            model: { providerID: Provider.ID.make("missing-provider"), id: Model.ID.make("missing-model") },
+            now: Date.now(),
+          }
+          const issued = yield* first.contractExecution.issue(request)
+          expect(issued.execution?.admission?.open).toBe(false)
+          expect(
+            (yield* second.contractExecution.issue({ ...request, id: ProContract.ID.create() })).decision.type,
+          ).toBe("rejected")
+          const http = first["server.proContract"]
+          expect((yield* http.get({ contractID: request.id })).status).toBe("dormant")
+          const opened = yield* first.contractExecution.setAdmission({
+            expected: issued.execution!,
+            context: issued.contract!.recognition.context!.target,
+            open: true,
+            reason: "Host inputs prepared",
+          })
+          expect(opened.binding).toBeDefined()
+          const waited = yield* Effect.gen(function* () {
+            while (true) {
+              const current = yield* first.contractExecution.get(request.id)
+              if (current?.attempts === 1 && !current.dispatched && current.admission?.open === false) return current
+              yield* Effect.sleep("10 millis")
+            }
+          }).pipe(Effect.timeout("10 seconds"))
+          expect(waited.attempts).toBe(1)
+          expect(owners).toEqual([first.contractExecution.owner])
+          expect(first.contractExecution.owner).not.toBe(second.contractExecution.owner)
+          expect((yield* http.get({ contractID: request.id })).status).toBe("active")
+          expect((yield* http.execution({ contractID: request.id })).dispatched).toBe(false)
+        }),
+      ),
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 20_000)

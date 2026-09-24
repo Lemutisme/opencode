@@ -679,6 +679,13 @@ const scenarios: Scenario[] = [
     }))
     .json(404, object, "status"),
   http.protected
+    .get("/api/contract/{contractID}/recognition", "v2.proContract.recognition")
+    .at((ctx) => ({
+      path: route("/api/contract/{contractID}/recognition", { contractID: "pct_missing" }),
+      headers: ctx.headers(),
+    }))
+    .json(404, object, "status"),
+  http.protected
     .get("/api/contract/{contractID}/execution", "v2.proContract.execution")
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/execution", { contractID: "pct_missing" }),
@@ -707,20 +714,43 @@ const scenarios: Scenario[] = [
     }),
   http.protected
     .post("/api/contract/{contractID}/attestation", "v2.proContract.attest")
+    .mutating()
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/attestation", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { evidenceHash: "missing" },
+      body: {
+        operationID: "missing-attestation",
+        expected: {
+          revision: 1,
+          specHash: "missing",
+          subjectHash: "missing",
+          handoffID: "missing",
+          contextHash: "missing",
+        },
+        evidenceHash: "missing",
+      },
     }))
-    .json(404, object, "status"),
+    .json(409, object, "status"),
   http.protected
     .post("/api/contract/{contractID}/challenge", "v2.proContract.challenge")
+    .mutating()
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/challenge", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { evidenceHash: "missing", disclosure: "sealed" },
+      body: {
+        operationID: "missing-challenge",
+        expected: {
+          revision: 1,
+          specHash: "missing",
+          subjectHash: "missing",
+          handoffID: "missing",
+          contextHash: "missing",
+        },
+        evidenceHash: "missing",
+        disclosure: "sealed",
+      },
     }))
-    .json(404, object, "status"),
+    .json(409, object, "status"),
   http.protected
     .post("/api/contract/{contractID}/release", "v2.proContract.release")
     .at((ctx) => ({
@@ -738,12 +768,17 @@ const scenarios: Scenario[] = [
     .json(404, object, "status"),
   http.protected
     .post("/api/contract/{contractID}/revision/decision", "v2.proContract.decideRevision")
+    .mutating()
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/revision/decision", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { accept: false },
+      body: {
+        operationID: "missing-revision/decision",
+        expected: { revision: 1, specHash: "missing", petition: 0 },
+        accept: false,
+      },
     }))
-    .json(404, object, "status"),
+    .json(409, object, "status"),
   http.protected.get("/api/location", "v2.location.get").json(200, object),
   http.protected.get("/api/agent", "v2.agent.list").json(200, locationData(array)),
   http.protected.get("/api/model", "v2.model.list").json(200, locationData(array)),

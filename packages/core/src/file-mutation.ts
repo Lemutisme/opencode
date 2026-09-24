@@ -5,6 +5,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { dirname } from "path"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { FSUtil } from "./fs-util"
+import { ExecutionContext } from "./session/execution-context"
 
 export interface Target {
   readonly canonical: string
@@ -76,6 +77,11 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const locks = KeyedMutex.makeUnsafe<string>()
+    const writable = Effect.gen(function* () {
+      yield* ExecutionContext.check
+      const current = yield* ExecutionContext.Current
+      if (current?.readOnly) return yield* Effect.interrupt
+    })
     const withTargetLock =
       (target: Target) =>
       <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -95,11 +101,19 @@ const layer = Layer.effect(
       existed,
     })
 
+    const writeContent = (target: string, content: string | Uint8Array) =>
+      Effect.gen(function* () {
+        yield* writable
+        yield* fs.ensureDir(dirname(target))
+        yield* writable
+        yield* typeof content === "string" ? fs.writeFileString(target, content) : fs.writeFile(target, content)
+      })
+
     const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
       withTargetLock(input.target)(
         Effect.gen(function* () {
           const existed = yield* fs.exists(input.target.canonical)
-          yield* fs.writeWithDirs(input.target.canonical, input.content)
+          yield* writeContent(input.target.canonical, input.content)
           return writeResult(input.target, existed)
         }),
       ),
@@ -112,7 +126,7 @@ const layer = Layer.effect(
           const current = yield* fs
             .readFile(input.target.canonical)
             .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
-          yield* fs.writeWithDirs(
+          yield* writeContent(
             input.target.canonical,
             joinBom(next.text, Boolean(current && hasUtf8Bom(current)) || next.bom),
           )
@@ -128,9 +142,10 @@ const layer = Layer.effect(
             typeof input.content === "string"
               ? fs.writeFileString(input.target.canonical, input.content, { flag: "wx" })
               : fs.writeFile(input.target.canonical, input.content, { flag: "wx" })
+          yield* writable
           yield* write.pipe(
             Effect.catchReason("PlatformError", "NotFound", () =>
-              fs.ensureDir(dirname(input.target.canonical)).pipe(Effect.andThen(write)),
+              fs.ensureDir(dirname(input.target.canonical)).pipe(Effect.andThen(writable), Effect.andThen(write)),
             ),
             Effect.catchReason("PlatformError", "AlreadyExists", () =>
               Effect.fail(new TargetExistsError({ path: input.target.canonical })),
@@ -148,6 +163,7 @@ const layer = Layer.effect(
           if (!sameBytes(current, input.expected)) {
             return yield* new StaleContentError({ path: input.target.canonical })
           }
+          yield* writable
           yield* typeof input.content === "string"
             ? fs.writeFileString(input.target.canonical, input.content)
             : fs.writeFile(input.target.canonical, input.content)
@@ -159,6 +175,7 @@ const layer = Layer.effect(
     const remove = Effect.fn("FileMutation.remove")((input: RemoveInput) =>
       withTargetLock(input.target)(
         Effect.gen(function* () {
+          yield* writable
           const existed = yield* fs.remove(input.target.canonical).pipe(
             Effect.as(true),
             Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),

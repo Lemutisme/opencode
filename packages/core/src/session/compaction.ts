@@ -1,3 +1,5 @@
+import { ExecutionPermit } from "./execution-permit"
+import { ProContractJob } from "../pro-contract/job"
 export * as SessionCompaction from "./compaction"
 
 import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@opencode-ai/llm"
@@ -66,6 +68,8 @@ type Settings = {
 }
 
 type Dependencies = {
+  readonly permits?: ExecutionPermit.Interface
+  readonly jobs?: ProContractJob.Interface
   readonly events: EventV2.Interface
   readonly llm: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMError>
@@ -79,6 +83,7 @@ type Input = {
   readonly model: Model
   readonly request: LLMRequest
   readonly deadline?: number
+  readonly permit?: ExecutionPermit.Permit
 }
 
 const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
@@ -367,29 +372,37 @@ export const make = (dependencies: Dependencies) => {
     if (remaining <= 0) return yield* Effect.interrupt
     const chunks: string[] = []
     let failed = false
-    const summarized = yield* dependencies.llm
-      .stream(
-        LLM.request({
-          model: input.model,
-          messages: [Message.user(summaryPrompt)],
-          tools: [],
-          generation: { maxTokens: summaryOutput },
-        }),
+    const summarize = (operation?: ProContractJob.Operation) =>
+      Effect.suspend(() =>
+        dependencies.llm
+          .stream(
+            LLM.request({
+              model: input.model,
+              messages: [Message.user(summaryPrompt)],
+              tools: [],
+              generation: { maxTokens: summaryOutput },
+            }),
+          )
+          .pipe(
+            Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
+            Stream.runForEach((event) => {
+              if (LLMEvent.is.providerError(event)) failed = true
+              if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
+              return operation ? dependencies.jobs!.observe(operation.id, event) : Effect.void
+            }),
+            Effect.timeoutOrElse({
+              duration: Math.min(MAX_SUMMARY_REQUEST_MS, remaining),
+              orElse: () => Effect.interrupt,
+            }),
+            Effect.as(true),
+            Effect.catchTag("LLM.Error", () => Effect.succeed(false)),
+          ),
       )
-      .pipe(
-        Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
-        Stream.runForEach((event) => {
-          if (LLMEvent.is.providerError(event)) failed = true
-          if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
-          return Effect.void
-        }),
-        Effect.timeoutOrElse({
-          duration: Math.min(MAX_SUMMARY_REQUEST_MS, remaining),
-          orElse: () => Effect.interrupt,
-        }),
-        Effect.as(true),
-        Effect.catchTag("LLM.Error", () => Effect.succeed(false)),
-      )
+    if (input.permit?.source && (!dependencies.permits || !dependencies.jobs))
+      return yield* Effect.die("Controlled compaction requires execution accounting")
+    const summarized = yield* input.permit && dependencies.permits
+      ? dependencies.permits.run(input.permit, "compaction", summarize)
+      : summarize()
     const generatedSummary = chunks.join("")
     if (!summarized || failed || !generatedSummary.trim()) return false
     const summary = includeEvidence ? `${generatedSummary.trimEnd()}\n\n${evidence}` : generatedSummary

@@ -36,6 +36,9 @@ import { Snapshot } from "./snapshot"
 import { SessionRevert } from "./session/revert"
 import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
+import { ProContractJob } from "./pro-contract/job"
+import { ProContractRecognition } from "./pro-contract/recognition"
+import { ExecutionPermit } from "./session/execution-permit"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 
 export const RevertState = Revert.State
@@ -112,7 +115,7 @@ export type Error = NotFoundError | MessageDecodeError | OperationUnavailableErr
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
-  readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
+  readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info, ProContractJob.Denied>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
@@ -139,18 +142,21 @@ export interface Interface {
     after?: number
     limit: number
   }) => Effect.Effect<{ events: ReadonlyArray<SessionEvent.DurableEvent>; hasMore: boolean }, NotFoundError>
-  readonly switchAgent: (input: { sessionID: SessionSchema.ID; agent: string }) => Effect.Effect<void, NotFoundError>
+  readonly switchAgent: (input: {
+    sessionID: SessionSchema.ID
+    agent: string
+  }) => Effect.Effect<void, NotFoundError | ProContractJob.Denied>
   readonly switchModel: (input: {
     sessionID: SessionSchema.ID
     model: ModelV2.Ref
-  }) => Effect.Effect<void, NotFoundError>
+  }) => Effect.Effect<void, NotFoundError | ProContractJob.Denied>
   readonly prompt: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
-  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | ProContractJob.Denied>
   readonly shell: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
@@ -173,9 +179,11 @@ export interface Interface {
       sessionID: SessionSchema.ID
       messageID: SessionMessage.ID
       files?: boolean
-    }) => Effect.Effect<Revert.State, NotFoundError | MessageNotFoundError | Snapshot.Error>
-    readonly clear: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | Snapshot.Error>
-    readonly commit: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
+    }) => Effect.Effect<Revert.State, NotFoundError | MessageNotFoundError | Snapshot.Error | ProContractJob.Denied>
+    readonly clear: (
+      sessionID: SessionSchema.ID,
+    ) => Effect.Effect<void, NotFoundError | Snapshot.Error | ProContractJob.Denied>
+    readonly commit: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | ProContractJob.Denied>
   }
 }
 
@@ -190,6 +198,10 @@ const layer = Layer.effect(
     const projects = yield* ProjectV2.Service
     const execution = yield* SessionExecution.Service
     const store = yield* SessionStore.Service
+    const jobs = yield* ProContractJob.Service
+    const permits = yield* ExecutionPermit.Service
+    const atomic = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      db.transaction(() => effect, { behavior: "immediate" }).pipe(Effect.catchTag("SqlError", Effect.die))
     const locations = yield* LocationServiceMap.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
@@ -207,8 +219,17 @@ const layer = Layer.effect(
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
+        yield* jobs.assertCoordinates({ ...input, id: sessionID })
         const recorded = yield* store.get(sessionID)
-        if (recorded) return recorded
+        if (recorded) {
+          yield* jobs.assertCoordinates({
+            id: recorded.id,
+            location: recorded.location,
+            model: recorded.model,
+            agent: recorded.agent,
+          })
+          return recorded
+        }
         const project = yield* projects.resolve(input.location.directory)
         yield* db
           .insert(ProjectTable)
@@ -256,10 +277,18 @@ const layer = Layer.effect(
                 )
             }),
           )
-        if (projected.type === "existing") return projected.session
+        if (projected.type === "existing") {
+          yield* jobs.assertCoordinates({
+            id: projected.session.id,
+            location: projected.session.location,
+            model: projected.session.model,
+            agent: projected.session.agent,
+          })
+          return projected.session
+        }
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         return yield* result.get(sessionID).pipe(Effect.orDie)
-      }),
+      }, atomic),
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
@@ -365,12 +394,26 @@ const layer = Layer.effect(
             const messageID = input.id ?? SessionMessage.ID.create()
             const delivery = input.delivery ?? "steer"
             const expected = { sessionID: input.sessionID, messageID, prompt, delivery }
-            const admitted = yield* SessionInput.admit(db, events, {
-              id: messageID,
-              sessionID: input.sessionID,
-              prompt,
-              delivery,
-            }).pipe(
+            const admitted = yield* atomic(
+              Effect.gen(function* () {
+                yield* permits.capture(input.sessionID)
+                const job = yield* jobs.forSession(input.sessionID)
+                if (
+                  job &&
+                  (job.input.kind !== "review" ||
+                    job.input.promptID !== messageID ||
+                    delivery !== "steer" ||
+                    !ProContractRecognition.same(job.input.prompt, input.prompt))
+                )
+                  return yield* new ProContractJob.Denied({ message: "Controlled job accepts only its frozen prompt" })
+                return yield* SessionInput.admit(db, events, {
+                  id: messageID,
+                  sessionID: input.sessionID,
+                  prompt,
+                  delivery,
+                })
+              }),
+            ).pipe(
               Effect.catchDefect((defect) =>
                 defect instanceof SessionInput.LifecycleConflict
                   ? new PromptConflictError({ sessionID: input.sessionID, messageID })
@@ -392,6 +435,7 @@ const layer = Layer.effect(
       }),
       switchAgent: Effect.fn("V2Session.switchAgent")(function* (input) {
         yield* result.get(input.sessionID)
+        yield* permits.mutable(input.sessionID)
         yield* events.publish(SessionEvent.AgentSwitched, {
           sessionID: input.sessionID,
           messageID: SessionMessage.ID.create(),
@@ -400,6 +444,7 @@ const layer = Layer.effect(
         })
       }),
       switchModel: Effect.fn("V2Session.switchModel")(function* (input) {
+        yield* permits.mutable(input.sessionID)
         const session = yield* result.get(input.sessionID)
         if (
           session.model?.providerID === input.model.providerID &&
@@ -425,6 +470,7 @@ const layer = Layer.effect(
       active: execution.active,
       resume: Effect.fn("V2Session.resume")(function* (sessionID) {
         yield* result.get(sessionID)
+        yield* permits.capture(sessionID)
         yield* execution.resume(sessionID)
       }),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
@@ -433,6 +479,7 @@ const layer = Layer.effect(
       revert: {
         stage: Effect.fn("V2Session.revert.stage")(function* (input) {
           const session = yield* result.get(input.sessionID)
+          yield* permits.mutable(input.sessionID)
           return yield* SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
             Effect.provideService(Database.Service, database),
             Effect.provideService(EventV2.Service, events),
@@ -441,6 +488,7 @@ const layer = Layer.effect(
         }),
         clear: Effect.fn("V2Session.revert.clear")(function* (sessionID) {
           const session = yield* result.get(sessionID)
+          yield* permits.mutable(sessionID)
           yield* SessionRevert.clear(session).pipe(
             Effect.provideService(EventV2.Service, events),
             Effect.provide(locations.get(session.location)),
@@ -448,6 +496,7 @@ const layer = Layer.effect(
         }),
         commit: Effect.fn("V2Session.revert.commit")(function* (sessionID) {
           const session = yield* result.get(sessionID)
+          yield* permits.mutable(sessionID)
           yield* SessionRevert.commit(session).pipe(Effect.provideService(EventV2.Service, events))
         }),
       },
@@ -482,5 +531,7 @@ export const node = makeGlobalNode({
     SessionStore.node,
     LocationServiceMap.node,
     SessionProjector.node,
+    ProContractJob.node,
+    ExecutionPermit.node,
   ],
 })

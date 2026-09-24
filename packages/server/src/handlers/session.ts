@@ -5,6 +5,7 @@ import { Api } from "../api"
 import { SessionsCursor } from "@opencode-ai/protocol/groups/session"
 import {
   ConflictError,
+  ForbiddenError,
   InvalidCursorError,
   MessageNotFoundError,
   ServiceUnavailableError,
@@ -68,12 +69,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.create",
         Effect.fn(function* (ctx) {
           return {
-            data: yield* session.create({
-              id: ctx.payload.id,
-              agent: ctx.payload.agent,
-              model: ctx.payload.model,
-              location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
-            }),
+            data: yield* session
+              .create({
+                id: ctx.payload.id,
+                agent: ctx.payload.agent,
+                model: ctx.payload.model,
+                location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
+              })
+              .pipe(Effect.catchTag("ExecutionDenied", (error) => new ForbiddenError({ message: error.message }))),
           }
         }),
       )
@@ -108,6 +111,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.switchAgent",
         Effect.fn(function* (ctx) {
           yield* session.switchAgent({ sessionID: ctx.params.sessionID, agent: ctx.payload.agent }).pipe(
+            Effect.catchTag("ExecutionDenied", (error) => new ForbiddenError({ message: error.message })),
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
                 new SessionNotFoundError({
@@ -124,6 +128,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.switchModel",
         Effect.fn(function* (ctx) {
           yield* session.switchModel({ sessionID: ctx.params.sessionID, model: ctx.payload.model }).pipe(
+            Effect.catchTag("ExecutionDenied", (error) => new ForbiddenError({ message: error.message })),
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
                 new SessionNotFoundError({
@@ -149,6 +154,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 resume: ctx.payload.resume,
               })
               .pipe(
+                Effect.catchTag("ExecutionDenied", (error) => new ForbiddenError({ message: error.message })),
                 Effect.catchTag("Session.NotFoundError", (error) =>
                   Effect.fail(
                     new SessionNotFoundError({
@@ -222,6 +228,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         Effect.fn(function* (ctx) {
           return {
             data: yield* session.revert.stage({ ...ctx.params, ...ctx.payload }).pipe(
+              Effect.catchTag("ExecutionDenied", (error) => new ForbiddenError({ message: error.message })),
               Effect.catchTag(
                 "Session.NotFoundError",
                 (error) =>
@@ -260,6 +267,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.revert.clear",
         Effect.fn(function* (ctx) {
           yield* session.revert.clear(ctx.params.sessionID).pipe(
+            Effect.catchTag("ExecutionDenied", (error) => new ForbiddenError({ message: error.message })),
             Effect.catchTag(
               "Session.NotFoundError",
               (error) =>
@@ -289,6 +297,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.revert.commit",
         Effect.fn(function* (ctx) {
           yield* session.revert.commit(ctx.params.sessionID).pipe(
+            Effect.catchTag("ExecutionDenied", (error) => new ForbiddenError({ message: error.message })),
             Effect.catchTag(
               "Session.NotFoundError",
               (error) =>

@@ -10,6 +10,7 @@ import { SessionV2 } from "./session"
 import { SessionStore } from "./session/store"
 import { Wildcard } from "./util/wildcard"
 import { PermissionSaved } from "./permission/saved"
+import { ExecutionContext } from "./session/execution-context"
 
 export { Effect, Rule, Ruleset } from "@opencode-ai/schema/permission"
 const missingAgentPermissions: Permission.Ruleset = [{ action: "*", resource: "*", effect: "deny" }]
@@ -203,7 +204,12 @@ const layer = Layer.effect(
     const assert = EffectRuntime.fn("PermissionV2.assert")((input: AssertInput) =>
       EffectRuntime.uninterruptibleMask((restore) =>
         EffectRuntime.gen(function* () {
+          yield* ExecutionContext.check
+          const execution = yield* ExecutionContext.Current
+          if (execution?.readOnly && !["read", "glob", "grep"].includes(input.action))
+            return yield* new BlockedError({ rules: [{ action: input.action, resource: "*", effect: "deny" }] })
           const result = yield* evaluateInput(input)
+          yield* ExecutionContext.check
           if (result.effect === "deny") {
             return yield* new BlockedError({
               rules: relevant(input, result.rules),
@@ -211,7 +217,7 @@ const layer = Layer.effect(
           }
           if (result.effect === "allow") return
           const item = yield* create(request(input), input.agent)
-          return yield* restore(Deferred.await(item.deferred)).pipe(
+          yield* restore(Deferred.await(item.deferred)).pipe(
             EffectRuntime.catchTag("PermissionV2.DeclinedError", (error) => EffectRuntime.die(error)),
             EffectRuntime.ensuring(
               EffectRuntime.sync(() => {
@@ -219,6 +225,7 @@ const layer = Layer.effect(
               }),
             ),
           )
+          yield* ExecutionContext.check
         }),
       ),
     )

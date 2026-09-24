@@ -1,16 +1,20 @@
 export * as Tool from "./tool"
 
 import { ToolDefinition, ToolFailure, ToolOutput, type ToolCall } from "@opencode-ai/llm"
-import { Effect, JsonSchema, Schema } from "effect"
+import { Effect, JsonSchema, Schema, Option } from "effect"
 import type { AgentV2 } from "../agent"
 import type { SessionMessage } from "../session/message"
 import type { SessionSchema } from "../session/schema"
+import type { ProContractOpenCode } from "../pro-contract/open-code"
+import { ExecutionPermit } from "../session/execution-permit"
 
 export interface Context {
   readonly sessionID: SessionSchema.ID
   readonly agent: AgentV2.ID
   readonly assistantMessageID: SessionMessage.ID
   readonly toolCallID: string
+  readonly contractExecution?: ProContractOpenCode.Execution
+  readonly executionPermit?: ExecutionPermit.Permit
 }
 
 export type SchemaType<A> = Schema.Codec<A, any, never, never>
@@ -61,6 +65,7 @@ type Config<
 }
 
 type Runtime = {
+  readonly capability?: ExecutionPermit.Capability
   readonly permission?: string
   readonly subactions?: boolean
   readonly definition: (name: string) => ToolDefinition
@@ -157,7 +162,36 @@ export const withSubactions = <Input extends SchemaType<unknown>, Output extends
 }
 export const hasSubactions = (tool: AnyTool) => runtimeOf(tool).subactions === true
 export const definition = (name: string, tool: AnyTool) => runtimeOf(tool).definition(name)
-export const settle = (tool: AnyTool, call: ToolCall, context: Context) => runtimeOf(tool).settle(call, context)
+/** Internal built-in declaration, bound to the actual implementation rather than its registered name. */
+export const withCapability = <Input extends SchemaType<unknown>, Output extends SchemaType<unknown>>(
+  tool: Definition<Input, Output>,
+  capability: ExecutionPermit.Capability,
+) => {
+  const decorated = Object.freeze({}) as Definition<Input, Output>
+  runtimes.set(decorated, { ...runtimeOf(tool), capability })
+  return decorated
+}
+
+export const settle = (tool: AnyTool, call: ToolCall, context: Context) =>
+  Effect.gen(function* () {
+    const service = yield* Effect.serviceOption(ExecutionPermit.Service)
+    if (Option.isNone(service))
+      return yield* new ToolFailure({ message: "Trusted execution permit service is unavailable" })
+    const permits = service.value
+    const permit = yield* permits.require(context.sessionID, context.executionPermit, context.contractExecution)
+    const runtime = runtimeOf(tool)
+    yield* permits.tool(permit, runtime.capability, context.agent)
+    const environment = yield* permits.context(permit)
+    return yield* permits.run(
+      permit,
+      runtime.subactions ? undefined : "tool",
+      () =>
+        runtime
+          .settle(call, permit.source ? { ...context, executionPermit: permit } : context)
+          .pipe(Effect.provideContext(environment)),
+      call.name,
+    )
+  }).pipe(Effect.catchTag("ExecutionDenied", (error) => Effect.fail(new ToolFailure({ message: error.message }))))
 
 function runtimeOf(tool: AnyTool) {
   const runtime = runtimes.get(tool)

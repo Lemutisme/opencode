@@ -87,17 +87,6 @@ const IssueCommand = effectCmd({
   }),
 })
 
-const EvaluationReport = Schema.Struct({
-  version: Schema.Literal(1),
-  deliveryContractID: ProContract.ID,
-  deliveryRevision: Schema.Int.check(Schema.isGreaterThan(0)),
-  subjectHash: Schema.NonEmptyString,
-  evaluatorHash: Schema.NonEmptyString,
-  passed: Schema.Boolean,
-  disclosure: Schema.Literals(["executor", "sealed"]),
-  summary: Schema.NonEmptyString,
-})
-
 const EvaluationIssueCommand = effectCmd({
   command: "issue <deliveryContractID>",
   describe: "persist evaluation of one exact delivery handoff",
@@ -141,31 +130,30 @@ const EvaluationSettleCommand = effectCmd({
         demandOption: true,
         describe: "Evaluation Contract ID",
       })
+      .option("operation-id", { type: "string", demandOption: true, describe: "stable ID saved before submission" })
       .option("report", { type: "string", demandOption: true, describe: "external evaluation report JSON" }),
   handler: Effect.fn("Cli.contract.evaluation.settle")(function* (args) {
     const source = yield* Effect.promise(() => Bun.file(path.resolve(args.report)).text())
-    const report = Schema.decodeUnknownSync(Schema.fromJsonString(EvaluationReport))(source)
+    const report = Schema.decodeUnknownSync(Schema.fromJsonString(ProContract.EvaluationReport))(source)
     const now = yield* Clock.currentTimeMillis
     const receipt = yield* ProContract.Service.use((service) =>
       service.settleEvaluation({
         contractID: ProContract.ID.make(args.evaluationContractID),
         report,
+        operationID: args.operationId,
         evidenceHash: new Bun.CryptoHasher("sha256").update(source).digest("hex"),
         time: now,
       }),
     )
-    if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
+    if (receipt.decision.type === "rejected") {
+      console.log(JSON.stringify(receipt, null, 2))
+      return yield* fail(receipt.decision.reason)
+    }
     const contract = yield* ProContract.Service.use((service) =>
       service.get(ProContract.ID.make(args.evaluationContractID)),
     )
     if (!contract) return yield* Effect.die("Evaluation Contract was not loaded")
-    console.log(
-      JSON.stringify(
-        { data: ProContract.info(contract), receipt: { frontier: receipt.frontier, hash: receipt.hash } },
-        null,
-        2,
-      ),
-    )
+    console.log(JSON.stringify({ data: ProContract.info(contract), receipt }, null, 2))
     return undefined
   }),
 })
@@ -290,17 +278,28 @@ const AttestCommand = effectCmd({
   instance: false,
   builder: (yargs) =>
     yargs
+      .option("operation-id", { type: "string", demandOption: true, describe: "stable ID saved before submission" })
+      .option("expected", {
+        type: "string",
+        demandOption: true,
+        describe: "JSON file containing the saved exact target",
+      })
       .positional("contractID", { type: "string", demandOption: true, describe: "contract ID" })
       .option("evidence-hash", { type: "string", demandOption: true, describe: "evidence hash" }),
   handler: Effect.fn("Cli.contract.attest")(function* (args) {
+    const expected = Schema.decodeUnknownSync(Schema.fromJsonString(ProContract.RecognitionTarget))(
+      yield* Effect.promise(() => Bun.file(path.resolve(args.expected)).text()),
+    )
     const receipt = yield* ProContract.Service.use((service) =>
       service.principalAttest({
         contractID: ProContract.ID.make(args.contractID),
         evidenceHash: args.evidenceHash,
+        expected,
+        operationID: args.operationId,
       }),
     )
+    console.log(JSON.stringify(receipt, null, 2))
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
-    console.log(JSON.stringify({ frontier: receipt.frontier, hash: receipt.hash }, null, 2))
     return undefined
   }),
 })
@@ -311,15 +310,24 @@ const RevisionDecisionCommand = effectCmd({
   instance: false,
   builder: (yargs) =>
     yargs
+      .option("operation-id", { type: "string", demandOption: true, describe: "stable ID saved before submission" })
+      .option("expected", {
+        type: "string",
+        demandOption: true,
+        describe: "JSON file containing the saved exact target",
+      })
       .positional("contractID", { type: "string", demandOption: true, describe: "contract ID" })
       .option("accept", { type: "boolean", demandOption: true, describe: "accept the pending revision" }),
   handler: Effect.fn("Cli.contract.revision")(function* (args) {
+    const expected = Schema.decodeUnknownSync(Schema.fromJsonString(ProContract.RevisionTarget))(
+      yield* Effect.promise(() => Bun.file(path.resolve(args.expected)).text()),
+    )
     const contractID = ProContract.ID.make(args.contractID)
     const receipt = yield* ProContract.Service.use((service) =>
-      service.decideRevision({ contractID, accept: args.accept }),
+      service.decideRevision({ contractID, accept: args.accept, expected, operationID: args.operationId }),
     )
+    console.log(JSON.stringify(receipt, null, 2))
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
-    console.log(JSON.stringify({ frontier: receipt.frontier, hash: receipt.hash }, null, 2))
     return undefined
   }),
 })

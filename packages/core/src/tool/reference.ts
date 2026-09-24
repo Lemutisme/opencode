@@ -102,85 +102,95 @@ export function nodeWith(configuration: Configuration) {
 
         yield* tools
           .register({
-            reference_run: Tool.make({
-              description: `Run the host-configured reference program directly with argv and stdin. Reference executable SHA-256: ${configured.hash}. Each call is a separate process; cwd is fixed by the host. First use a small probe to establish availability. The reference is separate from the candidate. Process completion does not prove a target statement executed or that behavior is covered. Captured bytes are retained for reference_read; no observation settles an obligation.`,
-              input: Schema.Struct({
-                args: Schema.Array(Schema.String),
-                stdin: Schema.String,
-                timeout: PositiveInt.check(Schema.isLessThanOrEqualTo(600_000)).pipe(Schema.optional),
-              }),
-              output: Schema.Struct({
-                ...ProContractObservation.Recorded.fields,
-                preview: Schema.Struct({
-                  encoding: Schema.Literal("utf8-lossy"),
-                  stdout: Schema.String,
-                  stderr: Schema.String,
-                  truncated: Schema.Boolean,
+            reference_run: Tool.withCapability(
+              Tool.make({
+                description: `Run the host-configured reference program directly with argv and stdin. Reference executable SHA-256: ${configured.hash}. Each call is a separate process; cwd is fixed by the host. First use a small probe to establish availability. The reference is separate from the candidate. Process completion does not prove a target statement executed or that behavior is covered. Captured bytes are retained for reference_read; no observation settles an obligation.`,
+                input: Schema.Struct({
+                  args: Schema.Array(Schema.String),
+                  stdin: Schema.String,
+                  timeout: PositiveInt.check(Schema.isLessThanOrEqualTo(600_000)).pipe(Schema.optional),
                 }),
-              }),
-              execute: (input, context) =>
-                Effect.gen(function* () {
-                  const deadline = yield* authorize(context, "reference_run")
-                  if (!Number.isInteger(configured.timeout) || configured.timeout <= 0 || configured.timeout > 600_000)
-                    return yield* failure("Invalid host reference timeout")
-                  const reference = yield* verifyReference()
-                  const remaining = deadline - (yield* Clock.currentTimeMillis)
-                  if (remaining <= 0) return yield* failure("Contract deadline exhausted")
-                  const argv = [reference.executable, ...input.args]
-                  const result = yield* executor
-                    .run({
+                output: Schema.Struct({
+                  ...ProContractObservation.Recorded.fields,
+                  preview: Schema.Struct({
+                    encoding: Schema.Literal("utf8-lossy"),
+                    stdout: Schema.String,
+                    stderr: Schema.String,
+                    truncated: Schema.Boolean,
+                  }),
+                }),
+                execute: (input, context) =>
+                  Effect.gen(function* () {
+                    const deadline = yield* authorize(context, "reference_run")
+                    if (
+                      !Number.isInteger(configured.timeout) ||
+                      configured.timeout <= 0 ||
+                      configured.timeout > 600_000
+                    )
+                      return yield* failure("Invalid host reference timeout")
+                    const reference = yield* verifyReference()
+                    const remaining = deadline - (yield* Clock.currentTimeMillis)
+                    if (remaining <= 0) return yield* failure("Contract deadline exhausted")
+                    const argv = [reference.executable, ...input.args]
+                    const result = yield* executor
+                      .run({
+                        argv,
+                        cwd: reference.directory,
+                        stdin: input.stdin,
+                        timeout: Math.min(input.timeout ?? configured.timeout, configured.timeout, remaining),
+                      })
+                      .pipe(Effect.catch((error) => Effect.succeed({ error: error.message })))
+                    const recorded = yield* observations.record({
+                      scope: configured.contractID,
+                      subject: { kind: "reference", identity: configured.hash },
                       argv,
                       cwd: reference.directory,
                       stdin: input.stdin,
-                      timeout: Math.min(input.timeout ?? configured.timeout, configured.timeout, remaining),
+                      result,
                     })
-                    .pipe(Effect.catch((error) => Effect.succeed({ error: error.message })))
-                  const recorded = yield* observations.record({
-                    scope: configured.contractID,
-                    subject: { kind: "reference", identity: configured.hash },
-                    argv,
-                    cwd: reference.directory,
-                    stdin: input.stdin,
-                    result,
-                  })
-                  yield* verifyReference()
-                  return {
-                    ...recorded,
-                    preview: {
-                      encoding: "utf8-lossy" as const,
-                      stdout: "error" in result ? "" : result.stdout.subarray(0, 2048).toString("utf8"),
-                      stderr: "error" in result ? "" : result.stderr.subarray(0, 2048).toString("utf8"),
-                      truncated:
-                        "error" in result ||
-                        result.stdoutTruncated ||
-                        result.stderrTruncated ||
-                        result.stdout.length > 2048 ||
-                        result.stderr.length > 2048,
-                    },
-                  }
-                }).pipe(Effect.mapError((error) => failure(error.message))),
-            }),
-            reference_read: Tool.make({
-              description:
-                "Read an exact byte range from this Contract's retained reference observation. Base64 is lossless, offsets and lengths are bytes. Check execution, exit, and capture completeness before using the output as an observation; target execution remains unobserved.",
-              input: ProContractObservation.ReadInput,
-              output: Schema.Struct({
-                receipt: ProContractObservation.Receipt,
-                content: ProContractObservation.ReadOutput,
+                    yield* verifyReference()
+                    return {
+                      ...recorded,
+                      preview: {
+                        encoding: "utf8-lossy" as const,
+                        stdout: "error" in result ? "" : result.stdout.subarray(0, 2048).toString("utf8"),
+                        stderr: "error" in result ? "" : result.stderr.subarray(0, 2048).toString("utf8"),
+                        truncated:
+                          "error" in result ||
+                          result.stdoutTruncated ||
+                          result.stderrTruncated ||
+                          result.stdout.length > 2048 ||
+                          result.stderr.length > 2048,
+                      },
+                    }
+                  }).pipe(Effect.mapError((error) => failure(error.message))),
               }),
-              execute: (input, context) =>
-                Effect.gen(function* () {
-                  yield* authorize(context, "reference_read")
-                  const receipt = yield* observations.get(input.handle)
-                  if (
-                    receipt.scope !== configured.contractID ||
-                    receipt.subject.kind !== "reference" ||
-                    receipt.subject.identity !== configured.hash
-                  )
-                    return yield* failure("Observation is not from this Contract's reference")
-                  return { receipt, content: yield* observations.read(input) }
-                }).pipe(Effect.mapError((error) => failure(error.message))),
-            }),
+              "reference",
+            ),
+            reference_read: Tool.withCapability(
+              Tool.make({
+                description:
+                  "Read an exact byte range from this Contract's retained reference observation. Base64 is lossless, offsets and lengths are bytes. Check execution, exit, and capture completeness before using the output as an observation; target execution remains unobserved.",
+                input: ProContractObservation.ReadInput,
+                output: Schema.Struct({
+                  receipt: ProContractObservation.Receipt,
+                  content: ProContractObservation.ReadOutput,
+                }),
+                execute: (input, context) =>
+                  Effect.gen(function* () {
+                    yield* authorize(context, "reference_read")
+                    const receipt = yield* observations.get(input.handle)
+                    if (
+                      receipt.scope !== configured.contractID ||
+                      receipt.subject.kind !== "reference" ||
+                      receipt.subject.identity !== configured.hash
+                    )
+                      return yield* failure("Observation is not from this Contract's reference")
+                    return { receipt, content: yield* observations.read(input) }
+                  }).pipe(Effect.mapError((error) => failure(error.message))),
+              }),
+              "reference",
+            ),
           })
           .pipe(Effect.orDie)
       }),
