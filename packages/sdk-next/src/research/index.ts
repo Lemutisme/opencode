@@ -51,6 +51,8 @@ export type Bundle = typeof Bundle.Type
 export const driver = ResearchAdapters.driver
 export const plannedDriver = ResearchAdapters.plannedDriver
 export const deliveryNode = ResearchAdapters.deliveryNode
+export const delivery = ResearchAdapters.delivery
+export const deliveryDependencies = ResearchAdapters.deliveryDependencies
 export const validatorNode = ResearchAdapters.validatorNode
 export const node = LayerNode.group([
   ProContractScheduler.liveNode,

@@ -190,6 +190,8 @@ export const contractProcess = Effect.gen(function* () {
     options?: {
       readonly actionFusion?: boolean
       readonly research?: boolean
+      readonly nativeAdvisory?: boolean
+      readonly nativeCheckpoints?: boolean
       readonly checkpoints?: boolean
       readonly sandbox?: ReadonlyArray<string>
     },
@@ -205,10 +207,16 @@ export const contractProcess = Effect.gen(function* () {
             process.execPath,
             path.join(
               import.meta.dir,
-              options?.checkpoints ? "research-checkpoint-process.ts" : "contract-driver-process.ts",
+              options?.nativeCheckpoints
+                ? "native-advisory-checkpoint-process.ts"
+                : options?.checkpoints
+                  ? "research-checkpoint-process.ts"
+                  : "contract-driver-process.ts",
             ),
             loaded ? "loaded" : "missing",
             options?.research ? "research" : "",
+            // Explicit test-run switch exercises legacy Research handlers in the combined SDK graph.
+            options?.nativeAdvisory || process.env.OPENCODE_TEST_NATIVE_ADVISORY === "1" ? "native-advisory" : "",
           ],
           {
             cwd: candidate,

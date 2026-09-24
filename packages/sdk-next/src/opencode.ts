@@ -1,5 +1,6 @@
 import { OpenCode } from "@opencode-ai/client/effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
 import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
@@ -7,6 +8,7 @@ import { ProContractDelivery } from "@opencode-ai/core/pro-contract/delivery"
 import { ProContractRecognition } from "@opencode-ai/core/pro-contract/recognition"
 import { ProContractDriver } from "@opencode-ai/core/pro-contract/driver"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
 import { ProContractJob } from "@opencode-ai/core/pro-contract/job"
 import { ExecutionPermit } from "@opencode-ai/core/session/execution-permit"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -23,14 +25,38 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http"
 export type Options = {
   readonly contractDrivers?: ReadonlyArray<ProContractDriver.Driver>
   readonly research?: boolean
+  /** Optional, single-host native advisory request handling and startup reconciliation. */
+  readonly nativeAdvisory?: boolean
   /** Explicitly enable authenticated principal endpoints for this trusted embedded host. */
   readonly principalPassword?: string
 }
 
 export const create = Effect.fn("OpenCode.create")(function* (options: Options = {}) {
   const researchModule = options.research ? (yield* Effect.promise(() => import("./research"))).Research : undefined
+  const nativeModule = options.nativeAdvisory
+    ? (yield* Effect.promise(() => import("./native-advisory"))).NativeAdvisory
+    : undefined
   const scope = yield* Scope.Scope
   const memoMap = yield* Layer.makeMemoMap
+  // The Location graph cannot depend on a host service that itself needs the
+  // LocationServiceMap. Install its handler once after constructing the host.
+  const advisoryDelivery: { handler?: ProContractDelivery.Handler } = {}
+  const delivery =
+    researchModule || nativeModule
+      ? makeGlobalNode({
+          service: ProContractDelivery.Service,
+          layer: Layer.effect(
+            ProContractDelivery.Service,
+            Effect.gen(function* () {
+              const research = researchModule ? yield* researchModule.delivery : undefined
+              return {
+                get: (profile: string) => (profile === "native" ? advisoryDelivery.handler : research?.get(profile)),
+              }
+            }),
+          ),
+          deps: [LayerNode.group([...(researchModule?.deliveryDependencies ?? [])])],
+        })
+      : undefined
   const base: LayerNode.Replacements = [
     [SessionExecution.node, SessionExecutionLocal.node],
     [
@@ -43,12 +69,8 @@ export const create = Effect.fn("OpenCode.create")(function* (options: Options =
         ]),
       ),
     ],
-    ...(researchModule
-      ? ([
-          [ProContractDelivery.node, researchModule.deliveryNode],
-          [ProContractRecognition.node, researchModule.validatorNode],
-        ] as const)
-      : []),
+    ...(delivery ? [[ProContractDelivery.node, delivery] as const] : []),
+    ...(researchModule ? [[ProContractRecognition.node, researchModule.validatorNode] as const] : []),
   ]
   // Host jobs and HTTP handlers must share the same Location permissions and runner instances.
   const replacements: LayerNode.Replacements = [...base, [LocationServiceMap.node, buildLocationServiceMap(base)]]
@@ -64,6 +86,7 @@ export const create = Effect.fn("OpenCode.create")(function* (options: Options =
         ProContractActivity.node,
         LocationServiceMap.node,
         ...(researchModule ? [researchModule.node] : []),
+        ...(nativeModule ? [nativeModule.node, ProContractScheduler.liveNode] : []),
       ]),
       replacements,
     ),
@@ -75,6 +98,11 @@ export const create = Effect.fn("OpenCode.create")(function* (options: Options =
   const bindings = Context.get(context, ProContractOpenCode.Service)
   const contractJobs = yield* make.pipe(Effect.provideContext(context))
   const research = researchModule ? yield* researchModule.make.pipe(Effect.provideContext(context)) : undefined
+  const native = nativeModule ? Context.get(context, nativeModule.Service) : undefined
+  if (native) {
+    advisoryDelivery.handler = native.handler
+    yield* native.start()
+  }
   const web = yield* Effect.acquireRelease(
     Effect.sync(() =>
       HttpRouter.toWebHandler(
@@ -110,6 +138,15 @@ export const create = Effect.fn("OpenCode.create")(function* (options: Options =
     tools: { register: tools.register },
     contractJobs,
     research,
+    nativeAdvisory: native
+      ? {
+          issue: native.issue,
+          requests: native.requests,
+          attachment: native.attachment,
+          history: native.history,
+          object: native.object,
+        }
+      : undefined,
     contractExecution: {
       owner: bindings.owner,
       issue: bindings.issue,

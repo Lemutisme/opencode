@@ -34,6 +34,7 @@ type Wait = {
 
 type Sse = {
   type: "sse"
+  protocol?: "responses"
   head: unknown[]
   tail: unknown[]
   wait?: PromiseLike<unknown>
@@ -576,6 +577,7 @@ export function httpError(status: number, body: unknown, wait?: PromiseLike<unkn
 }
 
 export function raw(input: {
+  protocol?: "responses"
   chunks?: unknown[]
   head?: unknown[]
   tail?: unknown[]
@@ -586,6 +588,7 @@ export function raw(input: {
 }): Item {
   return {
     type: "sse",
+    protocol: input.protocol,
     head: input.head ?? input.chunks ?? [],
     tail: input.tail ?? [],
     wait: input.wait,
@@ -696,7 +699,7 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
           if (next.wait) yield* Effect.promise(() => Promise.resolve(next.wait))
           return fail(next)
         }
-        if (mode === "responses") return send(responses(next, modelFrom(body)))
+        if (mode === "responses") return send(next.protocol === "responses" ? next : responses(next, modelFrom(body)))
         if (next.reset) {
           yield* reset(next)
           return HttpServerResponse.empty()

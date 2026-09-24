@@ -24,6 +24,16 @@ import {
 
 export type Capability = "read" | "write" | "process" | "reference" | "control" | "observe" | "compose"
 
+export type AdmissionInput = {
+  readonly text: string
+  readonly delivery: "steer" | "queue"
+  readonly once?: {
+    readonly id: SessionMessage.ID
+    readonly sessionID: SessionSchema.ID
+    readonly context: Schema.ContextTarget
+  }
+}
+
 export type Binding = {
   readonly contractID: Schema.ID
   readonly revision: number
@@ -36,7 +46,7 @@ export type Binding = {
     readonly version: number
     readonly reason?: string
     readonly context?: Schema.ContextTarget
-    readonly input?: { readonly text: string; readonly delivery: "steer" | "queue" }
+    readonly input?: AdmissionInput
     readonly capabilities?: ReadonlyArray<Capability>
   }
   readonly context?: Schema.ContextTarget
@@ -119,7 +129,8 @@ export interface Interface {
     readonly context: Schema.ContextTarget
     readonly open: boolean
     readonly reason: string
-    readonly input?: { readonly text: string; readonly delivery: "steer" | "queue" }
+    readonly input?: AdmissionInput
+    readonly session?: "preserve"
     readonly capabilities?: ReadonlyArray<Capability>
   }) => Effect.Effect<{ readonly binding?: Binding; readonly conflict?: string }>
   readonly due: (now: number) => Effect.Effect<ReadonlyArray<Binding>>
@@ -499,6 +510,20 @@ const layer = Layer.effect(
                 now >= row.contract.spec.budget.deadline)
             )
               return { conflict: "Contract admission cannot open while execution is in flight or unavailable" }
+            if (
+              (input.input?.once && input.session !== "preserve") ||
+              (input.session === "preserve" &&
+                (!input.open ||
+                  row.binding.admission?.open !== false ||
+                  row.binding.revision !== row.contract.revision ||
+                  row.binding.attemptKey !== attemptKey(row.contract) ||
+                  !ProContractRecognition.same(row.binding.context, input.context) ||
+                  (input.input !== undefined &&
+                    (!input.input.once ||
+                      input.input.once.sessionID !== row.binding.sessionID ||
+                      !ProContractRecognition.same(input.input.once.context, input.context)))))
+            )
+              return { conflict: "Preserved Session admission requires the same closed execution and input target" }
             const binding: Binding = {
               ...row.binding,
               admission: {
@@ -507,10 +532,14 @@ const layer = Layer.effect(
                 reason: input.reason,
                 context: input.context,
                 input: input.input,
-                capabilities: input.capabilities,
+                capabilities: input.session === "preserve" ? row.binding.admission?.capabilities : input.capabilities,
               },
               ...(input.open
-                ? { sessionID: SessionSchema.ID.create(), promptID: SessionMessage.ID.create(), nextActionAt: now }
+                ? {
+                    sessionID: input.session === "preserve" ? row.binding.sessionID : SessionSchema.ID.create(),
+                    promptID: SessionMessage.ID.create(),
+                    nextActionAt: now,
+                  }
                 : {}),
             }
             yield* save(binding)

@@ -43,108 +43,109 @@ export const policy = ResearchProtocol.policy
 
 export const plannedDriver: ProContractDriver.Driver = { ...driver, identity: ResearchModel.plannedProfile }
 
+export const delivery = Effect.gen(function* () {
+  const state = yield* ResearchStore.Service
+  const contracts = yield* ProContract.Service
+  const bindings = yield* ProContractOpenCode.Service
+  const jobs = yield* ProContractJob.Service
+  const fs = yield* FSUtil.Service
+  const messages = yield* SessionStore.Service
+  const observations = yield* ProContractObservation.Service
+  const handler: ProContractDelivery.Handler = {
+    command: (input) =>
+      Effect.gen(function* () {
+        const run = yield* state.get(input.execution.contractID)
+        if (run && ResearchProtocol.advisory(run.input)) return yield* ResearchAdvisoryControl.command(input)
+        if (input.kind === "review_response") return yield* ResearchFeedbackControl.command(input)
+        if (input.kind === "review_completion" || input.kind === "read_review_evidence")
+          return yield* ResearchFeedbackCompletion.command(input)
+        return yield* ResearchPlanning.command(input)
+      }).pipe(
+        Effect.provideService(ResearchStore.Service, state),
+        Effect.provideService(ProContract.Service, contracts),
+        Effect.provideService(ProContractOpenCode.Service, bindings),
+        Effect.provideService(ProContractJob.Service, jobs),
+        Effect.provideService(FSUtil.Service, fs),
+        Effect.provideService(SessionStore.Service, messages),
+        Effect.provideService(ProContractObservation.Service, observations),
+        Effect.mapError((error) => new ProContractDelivery.Denied({ message: error.message })),
+      ),
+    request: (input) =>
+      state
+        .atomic(
+          Effect.gen(function* () {
+            yield* bindings.authorize(input.execution)
+            const run = yield* state.get(input.execution.contractID)
+            const contract = yield* contracts.get(input.execution.contractID)
+            const binding = yield* bindings.get(input.execution.contractID)
+            if (run && ResearchProtocol.advisory(run.input))
+              return yield* new ResearchModel.Denied({
+                message:
+                  "Use contract_request prepare_candidate with the view returned by research_view; candidate identity cannot be inferred from the latest run",
+              })
+            if (
+              !run ||
+              !contract ||
+              !binding ||
+              run.stage !== "execution" ||
+              contract.recognition.context?.profile !== ResearchProtocol.profile(run.input) ||
+              !ProContractRecognition.same(contract.recognition.context.target, run.context) ||
+              contract.specHash !== run.specHash ||
+              (yield* Clock.currentTimeMillis) >= run.input.spec.budget.deadline
+            )
+              return yield* new ResearchModel.Denied({
+                message: "Research delivery request is no longer admissible",
+              })
+            if (
+              run.input.planning &&
+              (!ResearchProtocol.planAdmitted(run) ||
+                !ResearchProtocol.planAdmission(run) ||
+                !run.experiment ||
+                run.experiment.planHash !== run.plan?.hash ||
+                run.experiment.approvalHash !== ResearchProtocol.planAdmission(run))
+            )
+              return yield* new ResearchModel.Denied({
+                message: "Delivery requires the current approved plan and a successful formal experiment",
+              })
+            const closed = yield* bindings.setAdmission({
+              expected: binding,
+              context: run.context,
+              open: false,
+              reason: "Research delivery requested; waiting for cleanup",
+            })
+            if (!closed.binding) return yield* new ResearchModel.Denied({ message: closed.conflict! })
+            yield* state.save(run, {
+              ...run,
+              stage: "freezing",
+              purpose: undefined,
+              request: input,
+              captureID: crypto.randomUUID(),
+              reason: undefined,
+            })
+          }),
+        )
+        .pipe(Effect.mapError((error) => new ProContractDelivery.Denied({ message: error.message }))),
+  }
+  return {
+    get: (profile: string) =>
+      [ResearchModel.profile, ResearchModel.plannedProfile].includes(profile) ? handler : undefined,
+  }
+})
+
+export const deliveryDependencies = [
+  ResearchStore.node,
+  ProContract.node,
+  ProContractOpenCode.node,
+  ProContractJob.node,
+  FSUtil.node,
+  SessionStore.node,
+  ProContractObservation.node,
+] as const
+
 export const deliveryNode = makeGlobalNode({
   service: ProContractDelivery.Service,
-  layer: Layer.effect(
-    ProContractDelivery.Service,
-    Effect.gen(function* () {
-      const state = yield* ResearchStore.Service
-      const contracts = yield* ProContract.Service
-      const bindings = yield* ProContractOpenCode.Service
-      const jobs = yield* ProContractJob.Service
-      const fs = yield* FSUtil.Service
-      const messages = yield* SessionStore.Service
-      const observations = yield* ProContractObservation.Service
-      const handler: ProContractDelivery.Handler = {
-        command: (input) =>
-          Effect.gen(function* () {
-            const run = yield* state.get(input.execution.contractID)
-            if (run && ResearchProtocol.advisory(run.input)) return yield* ResearchAdvisoryControl.command(input)
-            if (input.kind === "review_response") return yield* ResearchFeedbackControl.command(input)
-            if (input.kind === "review_completion" || input.kind === "read_review_evidence")
-              return yield* ResearchFeedbackCompletion.command(input)
-            return yield* ResearchPlanning.command(input)
-          }).pipe(
-            Effect.provideService(ResearchStore.Service, state),
-            Effect.provideService(ProContract.Service, contracts),
-            Effect.provideService(ProContractOpenCode.Service, bindings),
-            Effect.provideService(ProContractJob.Service, jobs),
-            Effect.provideService(FSUtil.Service, fs),
-            Effect.provideService(SessionStore.Service, messages),
-            Effect.provideService(ProContractObservation.Service, observations),
-            Effect.mapError((error) => new ProContractDelivery.Denied({ message: error.message })),
-          ),
-        request: (input) =>
-          state
-            .atomic(
-              Effect.gen(function* () {
-                yield* bindings.authorize(input.execution)
-                const run = yield* state.get(input.execution.contractID)
-                const contract = yield* contracts.get(input.execution.contractID)
-                const binding = yield* bindings.get(input.execution.contractID)
-                if (run && ResearchProtocol.advisory(run.input))
-                  return yield* new ResearchModel.Denied({
-                    message:
-                      "Use contract_request prepare_candidate with the view returned by research_view; candidate identity cannot be inferred from the latest run",
-                  })
-                if (
-                  !run ||
-                  !contract ||
-                  !binding ||
-                  run.stage !== "execution" ||
-                  contract.recognition.context?.profile !== ResearchProtocol.profile(run.input) ||
-                  !ProContractRecognition.same(contract.recognition.context.target, run.context) ||
-                  contract.specHash !== run.specHash ||
-                  (yield* Clock.currentTimeMillis) >= run.input.spec.budget.deadline
-                )
-                  return yield* new ResearchModel.Denied({
-                    message: "Research delivery request is no longer admissible",
-                  })
-                if (
-                  run.input.planning &&
-                  (!ResearchProtocol.planAdmitted(run) ||
-                    !ResearchProtocol.planAdmission(run) ||
-                    !run.experiment ||
-                    run.experiment.planHash !== run.plan?.hash ||
-                    run.experiment.approvalHash !== ResearchProtocol.planAdmission(run))
-                )
-                  return yield* new ResearchModel.Denied({
-                    message: "Delivery requires the current approved plan and a successful formal experiment",
-                  })
-                const closed = yield* bindings.setAdmission({
-                  expected: binding,
-                  context: run.context,
-                  open: false,
-                  reason: "Research delivery requested; waiting for cleanup",
-                })
-                if (!closed.binding) return yield* new ResearchModel.Denied({ message: closed.conflict! })
-                yield* state.save(run, {
-                  ...run,
-                  stage: "freezing",
-                  purpose: undefined,
-                  request: input,
-                  captureID: crypto.randomUUID(),
-                  reason: undefined,
-                })
-              }),
-            )
-            .pipe(Effect.mapError((error) => new ProContractDelivery.Denied({ message: error.message }))),
-      }
-      return {
-        get: (profile: string) =>
-          [ResearchModel.profile, ResearchModel.plannedProfile].includes(profile) ? handler : undefined,
-      }
-    }),
-  ),
-  deps: [
-    ResearchStore.node,
-    ProContract.node,
-    ProContractOpenCode.node,
-    ProContractJob.node,
-    FSUtil.node,
-    SessionStore.node,
-    ProContractObservation.node,
-  ],
+  layer: Layer.effect(ProContractDelivery.Service, delivery),
+  deps: deliveryDependencies,
 })
 
 export const validatorNode = makeGlobalNode({

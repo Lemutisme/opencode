@@ -12,6 +12,7 @@ await Effect.runPromise(
     Effect.gen(function* () {
       const host = yield* OpenCode.create({
         research: process.argv[3] === "research",
+        nativeAdvisory: process.argv[4] === "native-advisory",
         principalPassword: process.argv[3] === "research" ? "contract-process-test" : undefined,
         contractDrivers:
           process.argv[2] === "loaded"
@@ -34,6 +35,18 @@ await Effect.runPromise(
         readonly input?: unknown
         readonly expected?: Binding
       }) {
+        if (message.action === "native-issue") {
+          const input = message.input as {
+            issue: Parameters<NonNullable<typeof host.nativeAdvisory>["issue"]>[0]
+            configuration: Parameters<NonNullable<typeof host.nativeAdvisory>["issue"]>[1]
+          }
+          return yield* host.nativeAdvisory!.issue(input.issue, input.configuration)
+        }
+        if (message.action === "native-requests") return yield* host.nativeAdvisory!.requests(message.contractID)
+        if (message.action === "native-attachment") return yield* host.nativeAdvisory!.attachment(message.contractID)
+        if (message.action === "native-history") return yield* host.nativeAdvisory!.history(message.contractID)
+        if (message.action === "native-object")
+          return Buffer.from(yield* host.nativeAdvisory!.object(message.contractID)).toString("utf8")
         if (message.action === "research-issue")
           return yield* host.research!.issue(message.input as Parameters<NonNullable<typeof host.research>["issue"]>[0])
         if (message.action === "research-get") return yield* host.research!.get(message.contractID)

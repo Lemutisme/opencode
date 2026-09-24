@@ -8,6 +8,7 @@ import { SessionV2 } from "../session"
 import { SessionExecution } from "../session/execution"
 import { SessionInput } from "../session/input"
 import { ProContractOpenCode } from "./open-code"
+import { ProContractRecognition } from "./recognition"
 
 export interface Interface {
   readonly runOnce: () => Effect.Effect<void>
@@ -83,6 +84,32 @@ const layer = Layer.effect(
                 const contract = yield* bindings.authorize(execution)
                 const existing = Option.getOrUndefined(yield* sessions.get(current.sessionID).pipe(Effect.option))
                 yield* sessions.create({ id: current.sessionID, location: current.location, model: current.model })
+                const input = current.admission?.input
+                if (
+                  input?.once?.sessionID === current.sessionID &&
+                  ProContractRecognition.same(input.once.context, current.context)
+                ) {
+                  // Reconcile the complete input, even if dispatch-failed replaced promptID.
+                  // Exact retries validate content/delivery and wake the existing pending row.
+                  const received = yield* bindings.admit(
+                    execution,
+                    sessions.prompt({
+                      id: input.once.id,
+                      sessionID: current.sessionID,
+                      prompt: { text: input.text },
+                      delivery: input.delivery,
+                      resume: false,
+                    }),
+                  )
+                  if (!received) return
+                  if (received.promotedSeq === undefined) {
+                    yield* sessionExecution.wake(current.sessionID)
+                    return
+                  }
+                }
+                // Untargeted inputs retain the historical host behavior. A consumed or
+                // superseded one-shot must not replace the next attempt's original brief.
+                const legacy = input?.once ? undefined : input
                 const saved = yield* SessionInput.find(database.db, current.promptID)
                 // Shared counters outlive Sessions. Only durable input/history in
                 // this Session can justify omitting the original task material.
@@ -102,7 +129,7 @@ const layer = Layer.effect(
                   sessionID: current.sessionID,
                   prompt: saved?.prompt ?? {
                     text:
-                      current.admission?.input?.text ??
+                      legacy?.text ??
                       (continuing
                         ? "Continue the approved task after a transient execution interruption."
                         : [
@@ -128,7 +155,7 @@ const layer = Layer.effect(
                             "When the task is ready for independent verification, call contract_report_ready. If work is blocked, call contract_report_blocked. If the approved terms must change, call contract_propose_revision.",
                           ].join("\n\n")),
                   },
-                  delivery: saved?.delivery ?? current.admission?.input?.delivery ?? ("queue" as const),
+                  delivery: saved?.delivery ?? legacy?.delivery ?? ("queue" as const),
                 }
                 const admitted = yield* bindings.admit(execution, sessions.prompt({ ...prompt, resume: false }))
                 if (admitted) yield* sessionExecution.wake(current.sessionID)
