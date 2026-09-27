@@ -339,26 +339,34 @@ export async function provider(input: {
 }
 
 function localInput(item: unknown) {
-  if (!item || typeof item !== "object") return false
+  if (!item || typeof item !== "object" || Array.isArray(item)) return false
   if ("type" in item && item.type === "reasoning")
     return "encrypted_content" in item && typeof item.encrypted_content === "string" && !!item.encrypted_content
-  if ("type" in item && item.type === "function_call_output") return "output" in item && typeof item.output === "string"
+  if ("type" in item && item.type === "function_call_output")
+    return (
+      "output" in item &&
+      (typeof item.output === "string" ||
+        (Array.isArray(item.output) && item.output.every((part) => localContent(part))))
+    )
   if ("type" in item && item.type === "function_call") return !("file_id" in item || "image_url" in item)
   if ("type" in item && item.type !== "message") return false
   if (!("content" in item)) return false
   return (
     typeof item.content === "string" ||
-    (Array.isArray(item.content) &&
-      item.content.every(
-        (part: unknown) =>
-          !!part &&
-          typeof part === "object" &&
-          "type" in part &&
-          ["input_text", "output_text"].includes(String(part.type)) &&
-          "text" in part &&
-          typeof part.text === "string",
-      ))
+    (Array.isArray(item.content) && item.content.every((part) => localContent(part, true)))
   )
+}
+
+function localContent(part: unknown, allowOutputText = false) {
+  if (!part || typeof part !== "object" || Array.isArray(part) || Object.keys(part).length !== 2 || !("type" in part))
+    return false
+  if (part.type === "input_text" || (allowOutputText && part.type === "output_text"))
+    return "text" in part && typeof part.text === "string"
+  if (part.type !== "input_image" || !("image_url" in part) || typeof part.image_url !== "string") return false
+  const data = /^data:image\/(?:png|jpeg|gif|webp);base64,(.+)$/s.exec(part.image_url)?.[1]
+  // Buffer's decoder tolerates malformed base64; round-tripping rejects it and
+  // matches the canonical local media bytes emitted by the LLM client.
+  return !!data && Buffer.from(data, "base64").toString("base64") === data
 }
 
 function localChoice(choice: unknown, tools: unknown) {

@@ -227,6 +227,198 @@ test("explicit no-auth local Responses route preserves tools and usage without h
   }
 })
 
+const inlinePNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhN8AAAAASUVORK5CYII="
+
+const contentCases = [
+  {
+    name: "accepts multipart text including bash warnings",
+    content: [
+      { type: "input_text", text: "loss: 13.0\ngradient: [4.0, 6.0]\n" },
+      { type: "input_text", text: "Warnings:\nA local warning.\nCommand exited with code 0." },
+    ],
+    status: 200,
+  },
+  {
+    name: "accepts text and an inline PNG in order",
+    content: [
+      { type: "input_text", text: "Image read successfully" },
+      { type: "input_image", image_url: inlinePNG },
+      { type: "input_text", text: "End of local output" },
+    ],
+    status: 200,
+  },
+  { name: "accepts an empty array", content: [], status: 200 },
+  { name: "accepts empty text", content: [{ type: "input_text", text: "" }], status: 200 },
+  ...["png", "jpeg", "gif", "webp"].map((mime, index) => ({
+    name: `accepts canonical image/${mime} data URL syntax`,
+    content: [
+      { type: "input_image", image_url: `data:image/${mime};base64,${["AA==", "AAE=", "AAEC", "AAECAw=="][index]}` },
+    ],
+    status: 200,
+  })),
+  { name: "rejects a non-array object", content: { type: "input_text", text: "local" }, status: 403 },
+  { name: "rejects null content", content: null, status: 403 },
+  { name: "rejects numeric content", content: 42, status: 403 },
+  { name: "rejects a null part", content: [null], status: 403 },
+  { name: "rejects a string part", content: ["local"], status: 403 },
+  { name: "rejects a nested array", content: [[{ type: "input_text", text: "local" }]], status: 403 },
+  { name: "rejects missing text", content: [{ type: "input_text" }], status: 403 },
+  { name: "rejects non-string text", content: [{ type: "input_text", text: 42 }], status: 403 },
+  { name: "rejects non-string image URL", content: [{ type: "input_image", image_url: null }], status: 403 },
+  { name: "rejects a file ID", content: [{ type: "input_image", file_id: "private" }], status: 403 },
+  {
+    name: "rejects a file ID alongside inline bytes",
+    content: [{ type: "input_image", image_url: inlinePNG, file_id: "private" }],
+    status: 403,
+  },
+  { name: "rejects an item reference", content: [{ type: "item_reference", id: "private" }], status: 403 },
+  { name: "rejects an input file", content: [{ type: "input_file", file_id: "private" }], status: 403 },
+  { name: "rejects an unknown part type", content: [{ type: "unknown", text: "local" }], status: 403 },
+  { name: "rejects extra text fields", content: [{ type: "input_text", text: "local", extra: true }], status: 403 },
+  {
+    name: "rejects a remote URL hidden beside text",
+    content: [{ type: "input_text", text: "local", image_url: "https://example.org/image.png" }],
+    status: 403,
+  },
+  {
+    name: "rejects extra image fields",
+    content: [{ type: "input_image", image_url: inlinePNG, detail: "auto" }],
+    status: 403,
+  },
+  {
+    name: "rejects a mixed array with one remote part",
+    content: [
+      { type: "input_text", text: "local" },
+      { type: "input_image", image_url: "https://example.org/image.png" },
+    ],
+    status: 403,
+  },
+  ...[
+    "http://example.org/image.png",
+    "https://example.org/image.png",
+    "file:///private/image.png",
+    "blob:https://example.org/image",
+    "data:image/png;base64,",
+    "data:image/png,AA==",
+    "data:image/png;base64AA==",
+    "data:image/png;charset=utf-8;base64,AA==",
+    "data:image/png;base64,A",
+    "data:image/png;base64,AA",
+    "data:image/png;base64,AA===",
+    "data:image/png;base64,AB==",
+    "data:image/png;base64,AA*=",
+    "data:image/png;base64,AA-_",
+    "data:image/png;base64, AA==",
+    "data:image/png;base64,AA==\n",
+    "data:image/png;base64,AA==#fragment",
+    "data:image/png;base64,%41%41%3D%3D",
+    "data:image/svg+xml;base64,AA==",
+    "data:image/avif;base64,AA==",
+    "data:image/jpg;base64,AA==",
+    "data:text/plain;base64,AA==",
+  ].map((image_url) => ({
+    name: `rejects image URL ${JSON.stringify(image_url)}`,
+    content: [{ type: "input_image", image_url }],
+    status: 403,
+  })),
+]
+
+for (const sample of [
+  { name: "accepts system text", input: [{ role: "system", content: "Local system instructions" }], status: 200 },
+  {
+    name: "accepts assistant output text",
+    input: [{ role: "assistant", content: [{ type: "output_text", text: "Local response" }] }],
+    status: 200,
+  },
+  {
+    name: "accepts stateless reasoning without an item ID",
+    input: [
+      {
+        type: "reasoning",
+        summary: [{ type: "summary_text", text: "Local summary" }],
+        encrypted_content: "local-state",
+      },
+    ],
+    status: 200,
+  },
+  {
+    name: "accepts a local function call",
+    input: [{ type: "function_call", call_id: "call", name: "read", arguments: '{"filePath":"local.png"}' }],
+    status: 200,
+  },
+  ...["local output", "", "https://example.org is literal text, not an image reference"].map((output) => ({
+    name: `accepts string function output ${JSON.stringify(output)}`,
+    input: [{ type: "function_call_output", call_id: "call", output }],
+    status: 200,
+  })),
+  {
+    name: "rejects output_text in a function output",
+    input: [{ type: "function_call_output", call_id: "call", output: [{ type: "output_text", text: "local" }] }],
+    status: 403,
+  },
+  { name: "rejects a stored item reference", input: [{ type: "item_reference", id: "private" }], status: 403 },
+  ...[undefined, null, ""].map((encrypted_content) => ({
+    name: `rejects reasoning without usable inline state (${String(encrypted_content)})`,
+    input: [{ type: "reasoning", id: "private", summary: [], encrypted_content }],
+    status: 403,
+  })),
+  ...["web_search_call", "file_search_call", "code_interpreter_call", "mcp_call"].map((type) => ({
+    name: `rejects hosted item ${type}`,
+    input: [{ type, id: "private" }],
+    status: 403,
+  })),
+  ...contentCases.flatMap((sample) => [
+    {
+      name: `function output ${sample.name}`,
+      input: [{ type: "function_call_output", call_id: "call", output: sample.content }],
+      status: sample.status,
+    },
+    {
+      name: `user content ${sample.name}`,
+      input: [{ role: "user", content: sample.content }],
+      status: sample.status,
+    },
+  ]),
+])
+  test(`Responses input ${sample.name}`, async () => {
+    const seen: unknown[] = []
+    const upstream = createServer(async (incoming, outgoing) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of incoming) chunks.push(Buffer.from(chunk))
+      seen.push(JSON.parse(Buffer.concat(chunks).toString()))
+      outgoing.writeHead(200, { "content-type": "text/event-stream" })
+      outgoing.end("data: [DONE]\n\n")
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const route = {
+      endpoint: `http://127.0.0.1:${(upstream.address() as { port: number }).port}/v1/responses`,
+      model: "frozen-local-model",
+      parameters: {},
+      credential: null,
+    }
+    const proxy = await provider({
+      mode: "model",
+      routes: { worker: route, reviewer: route },
+      timeout: 2000,
+      signal: new AbortController().signal,
+      identify: async () => ({ identity, role: "worker", deadline: Date.now() + 5000 }),
+      observe: () => {},
+      request: () => {},
+    })
+    try {
+      const body = { model: "worker", stream: true, store: false, input: sample.input }
+      const result = await fetch(proxy.url + "/responses", { method: "POST", body: JSON.stringify(body) })
+      expect(result.status).toBe(sample.status)
+      expect(await result.text()).toBe(sample.status === 200 ? "data: [DONE]\n\n" : "Provider request denied")
+      expect(seen).toEqual(sample.status === 200 ? [{ ...body, model: route.model, background: false }] : [])
+    } finally {
+      proxy.close()
+      upstream.closeAllConnections()
+      upstream.close()
+    }
+  })
+
 test("explicit cancellation and partial request headers cannot leave live sockets", async () => {
   const reached = Promise.withResolvers<void>()
   const closed = Promise.withResolvers<void>()
