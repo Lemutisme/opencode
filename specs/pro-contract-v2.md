@@ -1,5 +1,9 @@
 # ProContract Kernel and RSI on upstream V2
 
+The [three-instance sync regression](./pro-contract-v2-sync.md) records the later
+tested upstream base `bc5ff1cfd9`, source commit, checks and per-task outcomes.
+The source table below preserves the initial migration's provenance.
+
 ## Scope and sources
 
 This is a control-plane migration, not a replacement V2 Session runner or a new
