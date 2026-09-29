@@ -6,6 +6,15 @@
 - Default new branches and worktrees to `v2`, or `origin/v2` when the local `v2` ref is unavailable, and default pull requests to target `v2`. Use another base or target branch when the requester explicitly instructs it.
 - Local `main` ref may not exist; use `v2` or `origin/v2` for diffs.
 
+## ProContract and RSI Migration
+
+- This branch migrates committed ProContract and RSI control-plane code onto upstream V2. See `specs/pro-contract-v2.md` for source revisions, supported entrypoints, and the remaining native execution gate.
+- Preserve all running/frozen cohorts, their source, configuration, budgets, and historical artifacts. Do not point migration tests at a live or historical experiment database.
+- Future performance protocols use separately frozen `performanceRule: "task-pareto"`: compare each task's mean over its fixed repeats, require no task-level regression and at least one strictly positive improvement. All ties reject promotion. Preserve safety, complete development/confirmation evidence, and established full passes. Historical explicit margin protocols keep their old meaning; post-hoc readmission is not preregistered evidence.
+- Future model experiments have a six-hour per-instance deadline only, without cumulative request, model-call, tool-action, or monetary caps unless explicitly requested. Completed work need not remain busy. Keep individual operations bounded, complete accounting, credential/network isolation, cancellation, and infrastructure fault guards.
+- Kernel/RSI unit tests do not qualify a native V2 execution adapter. Before a new cohort, verify admission, every physical model attempt, tool execution, recovery, gateway, and reporting against the same frozen deadline-only protocol. Do not simulate unlimited execution with a finite sentinel.
+- Keep the normative reducer independent of Session execution, strategies, evaluators, and campaign scoring. A comparison report is evidence, not authority to deploy; authority remains issuer-owned and transactionally tied to Kernel standing.
+
 ## Live V2 TUI Testing
 
 - Run `bun run dev:live` from a development worktree to test its TUI against the currently elected `opencode` background server and live sessions.
