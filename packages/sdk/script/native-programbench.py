@@ -60,6 +60,14 @@ def prepare_ripgrep(source, root):
     return target
 
 
+def validate_native_tools(body):
+    # Host admission stays independent of worker configuration. New tools need
+    # explicit qualification here; do not derive this list from candidate code.
+    admitted = {"glob", "grep", "patch", "read", "shell", "contract_delivery"}
+    if any(tool.get("name") not in admitted for tool in body.get("tools", [])):
+        raise ValueError("unqualified_native_tool")
+
+
 def delivery_handoff(path):
     value = json.loads(path.read_text())
     delivery = value.get("delivery", {})
@@ -419,11 +427,7 @@ def main():
 
     class NativeGateway(Gateway):
         def record(self, pid, body):
-            if any(
-                tool.get("name") not in {"glob", "grep", "patch", "read", "shell"}
-                for tool in json.loads(body).get("tools", [])
-            ):
-                raise ValueError("unqualified_native_tool")
+            validate_native_tools(json.loads(body))
             with sqlite3.connect(
                 f"file:{root / 'issuer.sqlite'}?mode=ro", uri=True
             ) as connection:

@@ -81,6 +81,26 @@ class OfficialAggregationTest(unittest.TestCase):
 
 
 class DeliveryAdmissionTest(unittest.TestCase):
+    def test_gateway_admits_the_qualified_profile_and_rejects_extra_tools(self):
+        native.validate_native_tools(
+            {
+                "tools": [
+                    {"name": name}
+                    for name in [
+                        "glob",
+                        "grep",
+                        "patch",
+                        "read",
+                        "shell",
+                        "contract_delivery",
+                    ]
+                ]
+            }
+        )
+        for name in ["execute", "subagent", "contract_attest", "contract_issue"]:
+            with self.assertRaisesRegex(ValueError, "unqualified_native_tool"):
+                native.validate_native_tools({"tools": [{"name": name}]})
+
     def test_idle_or_blocked_worker_cannot_synthesize_report_ready(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ended.json"
