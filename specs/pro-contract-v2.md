@@ -1,198 +1,86 @@
-# ProContract Kernel and RSI on upstream V2
+# ProContract on upstream V2
 
-The [three-instance sync regression](./pro-contract-v2-sync.md) records the later
-tested upstream base `bc5ff1cfd9`, source commit, checks and per-task outcomes.
-The source table below preserves the initial migration's provenance.
+ProContract adds issuer-owned authority and a restricted native execution bridge;
+it does not replace the V2 Session runner. The latest evaluated runtime is
+`bc8af80928` on upstream `74dbc509d7` (2.0.20), on branch `procontract-closure`.
+Documentation-only commits do not change that frozen runtime.
 
-## Scope and sources
+- [Delivery mechanism and current regression](./pro-contract-v2-delivery.md)
+- Historical reports: [single-instance pilot](./pro-contract-v2-native.md),
+  [three-instance sync](./pro-contract-v2-sync.md)
 
-This is a control-plane migration, not a replacement V2 Session runner or a new
-model experiment. It does not import uncommitted work from `strategy-promotion`,
-change frozen cohorts, migrate their databases, or claim a performance gain.
+## Migration provenance
 
-| Component                                                               | Frozen source                                            |
-| ----------------------------------------------------------------------- | -------------------------------------------------------- |
-| Upstream V2 base                                                        | `b30c4d00d15ed20d15a19e5c07534514bc2ee0fe` (`2.0.19`)    |
-| Kernel, Core ledger, strategy settlement and historical comparator      | `0ab4b07a8b071fdb67aa82501c71f242c0763298`               |
-| Deadline-optional Schema, OTA authority, supervisor and offline sandbox | `882e065558bffb98b016f5274f8c63209d9808fb` (`astra-ota`) |
+| Component                                              | Committed source                                    |
+| ------------------------------------------------------ | --------------------------------------------------- |
+| Initial upstream V2 base                               | `b30c4d00d15ed20d15a19e5c07534514bc2ee0fe` (2.0.19) |
+| Kernel, ledger, strategy settlement/comparator         | `0ab4b07a8b071fdb67aa82501c71f242c0763298`          |
+| Deadline-only Schema, OTA authority/supervisor/sandbox | `882e065558bffb98b016f5274f8c63209d9808fb`          |
 
-The normative reducer is identical to the committed source apart from import
-paths. The Schema includes the committed deadline-only and replay-observation
-extensions. Explicit historical limits remain valid and part of the spec hash.
-New `defaultSpec` values contain only a six-hour absolute deadline; no large
-sentinel or cumulative count cap is substituted.
+The normative reducer retains the committed semantics; only import paths changed.
+Uncommitted `strategy-promotion` work and historical cohort databases were not imported.
 
-## Migrated boundaries
+## Code map
 
-- `@opencode/schema/pro-contract`: canonical, browser-safe contracts, also
-  exported by the Schema root.
-- `@opencode/core/pro-contract/kernel`: deterministic authority transitions,
-  obligation conservation, exact evidence coordinates, challenges, dependent
-  support invalidation, and frontier-relative quiescence.
-- `@opencode/core/pro-contract`: the issuer-owned Effect service. Accepted and
-  rejected decisions, attestations, state changes, and the global hash-chain
-  frontier commit through the current V2 SQLite transaction implementation.
-- `src/pro-contract/sql.ts`: only the four institutional tables. No legacy
-  OpenCode Session binding or scheduler table is silently introduced.
-- `script/strategy-kernel.ts`: materializes exact strategy and evidence artifacts,
-  issues and settles ordinary Contracts, supports exact settlement retries, and
-  challenges live support. A dependent selection Contract cannot activate until
-  its performance support is discharged. Negative performance remains negative;
-  research ancestry does not itself establish deployment standing.
-- `script/ota-rsi.ts`: committed OTA authority, exact task-Pareto qualification,
-  full-pass retention, fixed protocol/seed identity, optimistic revision checks,
-  atomic Kernel settlement and active-pair changes, probation, and rollback.
-- `script/ota-supervisor.ts`, `ota-run.ts`, `ota-sandbox.ts`: the generic trusted
-  driver boundary, acknowledged process fencing, cancellation, immutable
-  artifacts, external paired evaluation, and accounting. The deterministic
-  `ota-fixture.ts` is an offline qualification fixture, not a model driver.
+| Location                                                    | Responsibility                                                                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/schema/src/pro-contract.ts`                       | Browser-safe Contract types                                                                                                     |
+| `packages/core/src/pro-contract/kernel.ts`                  | Deterministic transitions, obligation conservation, challenges, dependent-support invalidation and frontier-relative quiescence |
+| `packages/core/src/pro-contract.ts`                         | Issuer service, transactional SQLite ledger and hash-chain frontier                                                             |
+| `packages/core/script/strategy-kernel.ts`                   | Exact strategy/evidence artifacts, settlement, retries and support challenges                                                   |
+| `packages/core/script/ota-rsi.ts`                           | Qualification, atomic selection, probation and rollback                                                                         |
+| `packages/core/script/ota-{supervisor,run,sandbox}.ts`      | Trusted execution, fencing, isolation and accounting                                                                            |
+| `packages/sdk/script/contract-{worker,profile,delivery}.ts` | Native Session execution and public-evidence handoff                                                                            |
+| `packages/sdk/script/native-programbench.py`                | Host gateway, packaging and independent grading                                                                                 |
 
-The original `script/strategy-promotion.ts` comparator retains its historical
-full-pass/mean/cost ordering and explicitly reports `promotion: false`. It is
-not the gate for a new performance cohort. Such a cohort must separately freeze
-OTA's `performanceRule: "task-pareto"`; missing evidence or an all-tied panel
-cannot authorize promotion. No running or previously rejected cohort is
-reinterpreted by this migration.
+## Authority and deployment boundaries
 
-## V2 integration and persistence
+- V2 defaults to an in-memory database. Issuer CLIs require an absolute
+  `OPENCODE_DB`; embedded callers must replace `Database.node` with
+  `Database.configured({ path })`. Otherwise standing disappears on exit.
+- Keep issuer APIs, databases, evidence stores and provider credentials on the
+  trusted host, never in candidate tools or mounts. Hashes establish byte identity,
+  not evaluator authenticity or semantic truth. Session completion is not attestation.
+- The migration adds institutional tables to upstream storage; it does **not**
+  import old fork databases. Preserve historical databases, frozen cohorts and
+  the original meaning of explicit historical budget limits.
+- Native execution uses the V2 SDK/inbox/runner, not the legacy loop. It exposes
+  five leaf tools plus `contract_delivery`; Code Mode, subagents, movement,
+  background shell and implicit restart recovery remain outside the admitted profile.
+- The runtime is pinned and read-only. This is not qualification of candidate-evolved
+  H, a public Contract HTTP API or a server scheduler. Legacy `ota-opencode.ts` and
+  `ota-profile.ts` are not advertised as V2-compatible.
 
-Imports use the current `@opencode/*` packages; shared hashing and LayerNode
-construction come from `@opencode/util`. Database schema, snapshot, and migration
-registry were generated using Core's migration script.
-
-Current V2 defaults `Database.node` to an in-memory database. Consequently the
-strategy CLI explicitly replaces that node with
-`Database.configured({ path: process.env.OPENCODE_DB })` and requires an absolute
-persistent path. Merely retaining the old environment variable would silently
-lose standing at process exit. Embedded callers must likewise supply the host's
-configured Database node when they need persistence.
-
-Run the issuer adapter from `packages/core`:
+From `packages/core`, invoke the host-only issuer adapter with:
 
 ```sh
 OPENCODE_DB=/absolute/path/to/isolated/issuer.sqlite \
   bun script/strategy-kernel.ts request.json result.json
 ```
 
-Only a trusted issuer process may invoke that entrypoint or the OTA authority.
-Do not expose either to candidate tools or mount their databases, evidence,
-credentials, or artifact stores into workers. Hashes establish byte identity,
-not evaluator authenticity or semantic truth. Existing trusted-recorder and
-principal-attestation assumptions remain; no stronger adversarial claim is made.
-
-The new database migration adds institutional tables to ordinary upstream V2
-storage. It is **not** an importer for old fork databases that already contain
-ProContract tables or frozen experiment ledgers. Those require a separately
-reviewed, explicit data migration; do not open them with this branch.
-
-## Native execution: bounded single-allocation profile
-
-The [delivery-closure follow-up](./pro-contract-v2-delivery.md) adds public
-counterexample retention and explicit handoff/continuation. Its local tests do
-not extend the historical cohort results or substitute for pending container
-qualification and real-model re-evaluation.
-
-The real Luna/max single-instance result and the retained aggregation correction
-are documented in [Native V2 qualification](./pro-contract-v2-native.md).
-
-The follow-up adds `packages/sdk/script/contract-worker.ts` and
-`packages/sdk/script/native-programbench.py`. They use the current embedded SDK,
-Session inbox, runner and native model transport, not the legacy execution loop.
-`packages/core/script/contract-authority.ts` runs exclusively on the host with
-its own persistent ledger. A worker's idle/ended state is not an attestation.
-
-The admitted profile exposes only `glob`, `grep`, `patch`, `read` and `shell`.
-Code Mode, subagents, Session movement and background shell mode are disabled.
-Every captured tool checks host-authored standing; shell operations are bounded
-by ten minutes and the original deadline. The model-only Unix transport retains
-caller cancellation and forwards V2 request middleware. The external gateway
-checks exact model/effort, process identity, live Kernel standing and the original
-deadline on every physical request. Credentials and the ledger are never worker
-mounts. Cancellation fences the complete container before any replacement.
-
-The SDK worker rejects an existing Session database: implicit restart recovery
-and first-admission-wins reuse are not silently treated as exact Contract retries.
-The host must explicitly qualify a recovery protocol before enabling them.
-
-No public HTTP endpoint, generated client or server scheduler is added. The
-existing normal V2 execution path remains unchanged. The old `ota-opencode.ts`
-and `ota-profile.ts` are not advertised as V2-compatible. In this pilot the
-runtime is operator-pinned and read-only, not a candidate-evolved H release.
-Do not invoke the host authority adapter from an arbitrary proposed H source.
-Mutable native V2 H admission still needs a separately pinned authority closure
-and release/containment qualification; this pilot does not authorize an RSI
-campaign or canonical strategy promotion.
-
-Before broadening this native profile:
-
-1. Preserve Contract-owned exact prompt/revision identity despite V2 inbox
-   first-admission-wins retries.
-2. Coordinate startup execution-claim recovery with Contract leases, current
-   standing, revocation, and the original deadline.
-3. Check authority at every physical model attempt and every relevant effect
-   boundary, including nested Code Mode calls, subagents, and background work;
-   retain full accounting without adding cumulative caps.
-4. Await interruption settlement before releasing ownership or replacing a
-   worker. An accepted interrupt is not completed cleanup.
-5. Port snapshot/replay and independent evaluation against exact artifacts;
-   prove credential/network isolation and cancellation before a cohort.
-6. Add Protocol/Server surfaces only with the appropriate principal boundary,
-   regenerate Client, and test the assembled API. None is inferred from Core
-   unit-test success.
+RSI code migration is not an RSI performance result. New promotion protocols must
+separately freeze `performanceRule: "task-pareto"`: no task-level mean regression
+and at least one strictly positive improvement across fixed repeats. All ties
+reject promotion. Safety, development/confirmation evidence and established-full-pass
+protections still apply. The historical `strategy-promotion.ts` comparator reports
+`promotion: false`; it is not this admission gate. Never relabel post-hoc readmission
+as preregistered evidence.
 
 ## Validation
 
+Use pinned Bun 1.4.2 and a supported Node version (recorded runs used 24.21.0).
 From `packages/core`:
 
 ```sh
 bun test test/pro-contract.test.ts test/pro-contract-constitution.test.ts \
   test/pro-contract-v2.test.ts script/strategy-kernel.test.ts \
-  script/strategy-promotion.test.ts script/ota-rsi.test.ts \
-  script/ota-supervisor.test.ts
+  script/strategy-promotion.test.ts script/ota-rsi.test.ts script/ota-supervisor.test.ts
 bun script/migration.ts --check
 bun typecheck
 ```
 
-Real-process qualification uses an already-installed immutable Linux image with
-`/usr/bin/python3`, no network, and no provider:
-
-```sh
-OPENCODE_OTA_IMAGE=sha256:<installed-image-id> \
-  bun test script/ota-supervisor.test.ts
-```
-
-Without that explicit image, the six container tests skip rather than pretending
-that unit tests establish isolation. The fixture labels every container with a
-unique temporary-root identity and fences only its own processes.
-
-Schema checks run from `packages/schema` with `bun typecheck` and
-`bun test test/contract-hygiene.test.ts`; the canonical full repository check is
-`bun run check` from the root. These are migration/mechanics checks, not a
-benchmark, statistical superiority result, or qualification of model-driven RSI.
-
-### Recorded migration checks — 2026-09-29
-
-| Check                                                                               | Result                                            |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Kernel, ledger, V2 migration, strategy CLI/comparator, OTA authority and supervisor | 125 passed, 0 failed, 0 skipped                   |
-| Schema package                                                                      | 64 passed                                         |
-| Upstream database migration and Session coordinator regressions                     | 45 passed                                         |
-| Upstream Session prompt/inbox and execution regressions                             | 78 passed                                         |
-| Core and Schema package typechecks                                                  | Passed                                            |
-| Core generated migration consistency                                                | Passed                                            |
-| Root `bun run check`                                                                | Passed: lint and all 35 scheduled typecheck tasks |
-| `git diff --check`                                                                  | Passed                                            |
-
-The final runs used Bun `1.4.2` (the repository's pinned version) and Node
-`24.21.0`, installed only in temporary tool directories; the host's existing
-Bun/Node executables were not replaced. The older host Bun `1.3.14` crashed
-during the initial full check, and Node `20.20.2` did not satisfy Astro's
-`>=22.12.0` requirement. The supported-toolchain rerun completed successfully.
-
-The six real-process isolation tests used the already-installed image
-`sha256:3da9e8f8c580a551b7e5aaa5ee14621af668243ef535b3c60506ae09baf11ae3`.
-They exercised cold boot, rollback, orphan fencing, cancellation, accounting,
-and denial of control-plane/network/socket access without model calls. All
-fixture-owned containers were removed. No production cohort was started or
-changed, and no native V2 model execution or performance claim follows from
-these results.
+Set `OPENCODE_OTA_IMAGE=sha256:<installed-image-id>` to exercise the six offline
+container checks; otherwise they skip, not pass. From `packages/schema`, run
+`bun typecheck` and `bun test test/contract-hygiene.test.ts`; from the repository
+root, run `bun run check` (not tests). Native bridge qualification is documented
+in the [delivery guide](./pro-contract-v2-delivery.md).
