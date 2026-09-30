@@ -19,6 +19,7 @@ export type Job = {
   mutable: Slot
   deadline: number
   pair: { s: string; h: string }
+  source?: { id: string; pair: { s: string; h: string } }
   output: string
   memory: State["active"]["memory"]
   feedback?: {
@@ -199,6 +200,9 @@ export async function supervise(
         mutable: opposite(state.active.slot),
         deadline: state.job!.deadline,
         pair: await artifacts.pair(state.active.pair),
+        ...(state.job!.source
+          ? { source: { id: state.job!.source.id, pair: await artifacts.pair(state.job!.source.pair) } }
+          : {}),
         output,
         memory: state.active.memory,
       }
@@ -335,6 +339,23 @@ export async function supervise(
       const replacement = await artifacts.put(materialization)
       await record(name + "-materialization", { proposed: proposal, materialized: replacement })
       const pair = { ...state.active.pair, [job.mutable]: replacement }
+      if (
+        ota.protocol.expansion &&
+        ota
+          .read()
+          .lineage?.some(
+            (node) => subject(node.root) === subject(state.active.pair) && subject(node.pair) === subject(pair),
+          )
+      ) {
+        ota.rejectPreparation(
+          ota.read().revision,
+          pair,
+          "This exact pair was already evaluated under this incumbent",
+          await record(name + "-duplicate", { pair }),
+          Date.now(),
+        )
+        continue
+      }
       const tables = {
         baseline: [] as { id: string; passed: number; total: number; valid: boolean }[],
         candidate: [] as { id: string; passed: number; total: number; valid: boolean }[],

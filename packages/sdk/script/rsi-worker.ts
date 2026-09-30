@@ -1,0 +1,180 @@
+// Mutable H entrypoint. All deployment/evaluation authority stays outside this process.
+import path from "node:path"
+import fs from "node:fs/promises"
+import { Layer, Schema } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
+import { Plugin } from "@opencode/plugin"
+import { ProviderTransport } from "@opencode/core/effect/provider-transport"
+import { requestExecutor } from "@opencode/core/effect/app-node-platform"
+import { PromiseSdk } from "../src/promise"
+
+const Input = Schema.Struct({
+  id: Schema.String,
+  deadline: Schema.Number,
+  model: Schema.String,
+  effort: Schema.String,
+  goal: Schema.String,
+  artifact: Schema.String,
+})
+const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(await Bun.file("/admission/worker.json").text())
+if (!/^[a-z][a-z0-9_.-]*$/.test(input.artifact)) throw new Error("invalid output artifact")
+const standing = async () => {
+  if (Date.now() >= input.deadline || !(await Bun.file("/admission/active").exists()))
+    throw new Error("execution admission ended")
+}
+while (!(await Bun.file("/admission/ready").exists())) {
+  await standing()
+  await Bun.sleep(25)
+}
+if (await Bun.file("/state/session.sqlite").exists()) throw new Error("implicit execution recovery is not qualified")
+const disposition = { digest: "", summary: "", blocked: "" }
+const artifact = path.join("/candidate", input.artifact)
+const snapshot = async () => {
+  const info = await fs.lstat(artifact)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size <= 0 || info.size > 16 * 1024 * 1024)
+    throw new Error("one bounded regular artifact required")
+  return Bun.SHA256.hash(await Bun.file(artifact).bytes(), "hex")
+}
+const plugin = Plugin.define({
+  id: "rsi.worker",
+  async setup(context) {
+    await context.tool.transform((editor) => {
+      for (const tool of editor.list()) {
+        if (!["glob", "grep", "read", "patch", "shell"].includes(tool.name)) {
+          editor.remove(tool.id)
+          continue
+        }
+        editor.update(tool.id, (current) => {
+          current.options = { ...current.options, codemode: false, pinned: undefined }
+          const execute = current.execute
+          current.execute = async (value, call) => {
+            await standing()
+            call.signal.throwIfAborted()
+            return execute(
+              tool.name === "shell"
+                ? {
+                    ...value,
+                    background: false,
+                    timeout: Math.min(value.timeout || 600000, 600000, input.deadline - Date.now()),
+                  }
+                : value,
+              call,
+            )
+          }
+        })
+      }
+      editor.add({
+        name: "rsi_handoff",
+        description:
+          "Submit the output artifact for independent host verification. This does not certify performance or authorize promotion.",
+        input: Schema.Struct({ summary: Schema.String }),
+        options: { codemode: false },
+        execute: async (value) => {
+          await standing()
+          disposition.digest = await snapshot()
+          disposition.summary = value.summary
+          return { content: JSON.stringify({ submitted: disposition.digest, authoritativeCompletion: false }) }
+        },
+      })
+      editor.add({
+        name: "rsi_blocked",
+        description: "Stop this allocation with a concrete unresolved reason.",
+        input: Schema.Struct({ reason: Schema.String }),
+        options: { codemode: false },
+        execute: async (value) => {
+          await standing()
+          disposition.blocked = value.reason
+          return { content: "Blocked; not a successful proposal." }
+        },
+      })
+    })
+  },
+})
+const host = await PromiseSdk.create(
+  {
+    app: { name: "native-rsi-worker" },
+    database: { path: "/state/session.sqlite" },
+    events: { persist: true },
+    models: { fetch: false },
+    fs: { filewatcher: false, fff: false },
+    config: {
+      directory: "/state/config",
+      project: false,
+      content: JSON.stringify({
+        model: `openai/${input.model}`,
+        permissions: [
+          { action: "*", resource: "*", effect: "allow" },
+          { action: "execute", resource: "*", effect: "deny" },
+        ],
+        providers: {
+          openai: {
+            package: "@opencode/ai/providers/openai",
+            canonical: "openai",
+            env: [],
+            settings: {
+              baseURL: "http://programbench-provider.invalid/v1",
+              apiKey: "no-credential",
+              transport: "http",
+              timeout: 900000,
+              chunkTimeout: 900000,
+            },
+            models: {
+              [input.model]: {
+                limit: { context: 272000, output: 128000 },
+                capabilities: { tools: true, reasoning: true, input: ["text"], output: ["text"] },
+                body: { reasoning: { effort: input.effort }, store: false },
+                variants: [{ id: input.effort, body: { reasoning: { effort: input.effort } } }],
+              },
+            },
+          },
+        },
+      }),
+    },
+    plugins: [plugin],
+  },
+  {
+    overrides: [
+      requestExecutor.replace(
+        ProviderTransport.layerWith("/channel/provider.sock").pipe(Layer.provide(FetchHttpClient.layer)),
+      ),
+    ],
+  },
+)
+const session = await host.sessions.create({
+  id: input.id,
+  title: "RSI allocation",
+  location: { directory: "/candidate" },
+  model: { providerID: "openai", id: input.model, variant: input.effort },
+})
+const abort = () => {
+  void host.sessions.interrupt({ sessionID: session.id }).catch(() => undefined)
+}
+process.on("SIGTERM", abort)
+process.on("SIGINT", abort)
+const timer = setTimeout(abort, Math.max(0, input.deadline - Date.now()))
+try {
+  await host.sessions.prompt({
+    sessionID: session.id,
+    text: `${await Bun.file("/strategy").text()}\n\n${input.goal}\n\nDeliver /candidate/${input.artifact} using rsi_handoff with an honest summary. If unable, use rsi_blocked. Host verification and promotion are independent; never self-certify.`,
+  })
+  while (true) {
+    await host.sessions.wait({ sessionID: session.id })
+    await standing()
+    const events = await Array.fromAsync(host.sessions.log({ sessionID: session.id }))
+    await Bun.write("/state/events.json", JSON.stringify(events))
+    if (events.some((e) => e.type === "session.execution.failed")) throw new Error("native Session failed")
+    if (disposition.blocked) throw new Error(disposition.blocked)
+    if (disposition.digest && disposition.digest === (await snapshot())) break
+    await host.sessions.prompt({
+      sessionID: session.id,
+      text: "No valid artifact handoff is recorded. Finish and call rsi_handoff, or explicitly report rsi_blocked. The original deadline is unchanged.",
+    })
+  }
+  await Bun.write(
+    "/state/handoff.json",
+    JSON.stringify({ ...disposition, deadline: input.deadline, authoritativeCompletion: false }),
+  )
+} finally {
+  clearTimeout(timer)
+  await host.close()
+}

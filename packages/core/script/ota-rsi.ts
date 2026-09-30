@@ -12,6 +12,8 @@ export type Protocol = {
   // Pin the external issuer/containment/evaluator closure, NOT the mutable
   // OpenCode worker runtime. That runtime belongs to H and changes with H.
   trusted: string
+  // Width one is linear; larger widths explore a breadth-first source tree.
+  expansion?: { width: number }
   scope: "mechanics" | "performance"
   performanceRule?: "panel-margin" | "task-pareto"
   minimumMeanGainBps?: number
@@ -42,6 +44,13 @@ type Boot = {
   memory: { id: string; parent?: string; origin?: string; checkpoint?: string }
   support?: string
 }
+export type Lineage = {
+  id: string
+  root: Pair
+  parent: string
+  pair: Pair
+  outcome: "selected" | "rejected"
+}
 export type State = {
   revision: number
   protocol: string
@@ -59,10 +68,12 @@ export type State = {
     heartbeat: number
     sequence: number
     phase: "running" | "evaluating"
+    source?: { id: string; pair: Pair }
   }
   stopped?: string
   quarantine: string[]
   retainedFull: string[]
+  lineage?: Lineage[]
   clock: number
 }
 
@@ -83,6 +94,8 @@ export class OTA {
 
   constructor(path: string, protocol: Protocol, seed: Pair) {
     requireHash(protocol.trusted)
+    if (protocol.expansion && (!Number.isSafeInteger(protocol.expansion.width) || protocol.expansion.width < 1))
+      throw new Error("expansion width must be a positive integer")
     requirePair(seed)
     if (
       !Number.isInteger(protocol.evaluationConcurrency ?? 1) ||
@@ -210,6 +223,7 @@ export class OTA {
         heartbeat: now,
         sequence: -1,
         phase: "running",
+        ...(this.protocol.expansion ? { source: expansionParent(state, this.protocol.expansion.width) } : {}),
       }
     })
   }
@@ -248,6 +262,13 @@ export class OTA {
       if (state.job.id !== evidence.job) throw new Error("evidence names another job")
       requireStanding(state, state.active)
       requirePair(pair)
+      if (
+        this.protocol.expansion &&
+        state.lineage?.some(
+          (node) => subject(node.root) === subject(state.active.pair) && subject(node.pair) === subject(pair),
+        )
+      )
+        throw new Error("this exact pair was already evaluated under this incumbent")
       const target = opposite(state.active.slot)
       if (
         pair[state.active.slot] !== state.active.pair[state.active.slot] ||
@@ -258,6 +279,16 @@ export class OTA {
       if (evidence.baseline.subject !== subject(state.active.pair)) throw new Error("baseline is not the current pair")
       const decision = qualify(this.protocol, this.digest, pair, evidence, state.retainedFull)
       const passed = decision.eligible
+      if (state.job.source) {
+        state.lineage ??= []
+        state.lineage.push({
+          id: hash(JSON.stringify([state.protocol, state.job.id, subject(pair)])),
+          root: state.active.pair,
+          parent: state.job.source.id,
+          pair,
+          outcome: passed ? "selected" : "rejected",
+        })
+      }
       if (decision.safety) state.retainedFull = [...new Set([...state.retainedFull, ...decision.baselineFull])]
       const id = ProContract.ID.make(`pct_ota_${hash(JSON.stringify([this.digest, state.job.id, subject(pair)]))}`)
       const spec = ProContract.Spec.make({
@@ -430,6 +461,7 @@ export class OTA {
         state.job.heartbeat = now
         state.job.sequence = -1
         state.job.phase = "running"
+        if (this.protocol.expansion) state.job.source = expansionParent(state, this.protocol.expansion.width)
       }
       return { reason }
     })
@@ -572,6 +604,19 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
     allFull: panels.length > 0 && safety && panels.every((panel) => panel.full.length === panel.totalTasks),
     scope: protocol.scope,
   }
+}
+
+/** Source ancestry is not execution standing. Only the active pair runs the
+ * proposer; rejected, materialized children may supply inactive source bytes.
+ * A promotion starts a new root with the newly fixed active partition.
+ */
+export function expansionParent(state: State, width: number) {
+  const root = subject(state.active.pair)
+  const nodes = (state.lineage ?? []).filter((node) => subject(node.root) === root)
+  const candidates = [{ id: root, pair: state.active.pair }, ...nodes]
+  const parent = candidates.find((candidate) => nodes.filter((node) => node.parent === candidate.id).length < width)
+  if (!parent) throw new Error("no expandable source parent")
+  return { id: parent.id, pair: parent.pair }
 }
 
 function add(left: readonly [bigint, bigint], right: readonly [bigint, bigint]): readonly [bigint, bigint] {

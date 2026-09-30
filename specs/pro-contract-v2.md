@@ -1,11 +1,12 @@
 # ProContract on upstream V2
 
 ProContract adds issuer-owned authority and a restricted native execution bridge;
-it does not replace the V2 Session runner. The latest evaluated runtime is
+it does not replace the V2 Session runner. The latest ProgramBench-evaluated runtime is
 `bc8af80928` on upstream `74dbc509d7` (2.0.20), on branch `procontract-closure`.
 Documentation-only commits do not change that frozen runtime.
 
 - [Delivery mechanism and current regression](./pro-contract-v2-delivery.md)
+- [Native RSI: linear/tree source expansion and successor execution](./native-rsi.md)
 - Historical reports: [single-instance pilot](./pro-contract-v2-native.md),
   [three-instance sync](./pro-contract-v2-sync.md)
 
@@ -58,7 +59,8 @@ OPENCODE_DB=/absolute/path/to/isolated/issuer.sqlite \
   bun script/strategy-kernel.ts request.json result.json
 ```
 
-RSI code migration is not an RSI performance result. New promotion protocols must
+The [native RSI driver](./native-rsi.md) is separate from the read-only task bridge.
+RSI implementation/qualification is not an RSI performance result. New promotion protocols must
 separately freeze `performanceRule: "task-pareto"`: no task-level mean regression
 and at least one strictly positive improvement across fixed repeats. All ties
 reject promotion. Safety, development/confirmation evidence and established-full-pass
