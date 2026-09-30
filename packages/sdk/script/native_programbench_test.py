@@ -4,6 +4,8 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import os
+import shutil
 import unittest
 
 spec = importlib.util.spec_from_file_location(
@@ -76,6 +78,68 @@ class OfficialAggregationTest(unittest.TestCase):
         self.assertEqual(result.error_code, "setup-failed")
         self.assertEqual(result.n_system_errors, 1)
         self.assertEqual(result.warnings, ["incomplete evidence"])
+
+
+class DeliveryAdmissionTest(unittest.TestCase):
+    def test_idle_or_blocked_worker_cannot_synthesize_report_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ended.json"
+            for disposition in [
+                {},
+                {"state": "open"},
+                {"state": "blocked", "reason": "unresolved public behavior"},
+            ]:
+                path.write_text(
+                    json.dumps(
+                        {"authoritativeCompletion": False, "delivery": disposition}
+                    )
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError, "No explicit delivery handoff"
+                ):
+                    native.delivery_handoff(path)
+            handoff = {
+                "state": "ready",
+                "snapshot": "fixture-hash",
+                "summary": "public cases only",
+                "probes": 2,
+            }
+            path.write_text(
+                json.dumps({"authoritativeCompletion": False, "delivery": handoff})
+            )
+            self.assertEqual(native.delivery_handoff(path), handoff)
+            path.write_text(
+                json.dumps({"authoritativeCompletion": True, "delivery": handoff})
+            )
+            with self.assertRaisesRegex(RuntimeError, "must not assert"):
+                native.delivery_handoff(path)
+
+    def test_incomplete_handoff_cannot_be_admitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ended.json"
+            path.write_text(
+                json.dumps(
+                    {"authoritativeCompletion": False, "delivery": {"state": "ready"}}
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "Incomplete"):
+                native.delivery_handoff(path)
+
+    def test_ripgrep_is_copied_qualified_and_content_bound(self):
+        source = shutil.which("rg")
+        self.assertIsNotNone(
+            source, "offline qualification requires an actual ripgrep binary"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = native.prepare_ripgrep(Path(source), root)
+            self.assertNotEqual(os.path.realpath(source), str(target))
+            self.assertEqual(native.sha(Path(source)), native.sha(target))
+            self.assertEqual(
+                json.loads((root / "TOOLS.json").read_text())["rg"]["sha256"],
+                native.sha(target),
+            )
+            self.assertFalse((root / "rg-probe").exists())
 
 
 if __name__ == "__main__":

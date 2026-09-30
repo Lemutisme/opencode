@@ -1,7 +1,8 @@
 // Native V2 worker. This process cannot attest, issue, or change the host ledger.
 import { Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { Plugin } from "@opencode/plugin"
+import { ContractDelivery } from "./contract-delivery"
+import { contractProfile, drainDelivery } from "./contract-profile"
 import { ProviderTransport } from "@opencode/core/effect/provider-transport"
 import { requestExecutor } from "@opencode/core/effect/app-node-platform"
 import { PromiseSdk } from "../src/promise"
@@ -13,6 +14,7 @@ const Input = Schema.Struct({
   promptID: Schema.String,
   deadline: Schema.Number,
   directory: Schema.String,
+  reference: Schema.String,
   state: Schema.String,
   standing: Schema.String,
   socket: Schema.String,
@@ -47,37 +49,18 @@ await assertStanding()
 // A fresh worker does not silently adopt V2 startup claims from another allocation.
 if (await Bun.file(`${input.state}/session.sqlite`).exists())
   throw new Error("Explicit recovery qualification is required")
-const guard = Plugin.define({
-  id: "procontract.native-worker",
-  async setup(context) {
-    await context.tool.transform((editor) => {
-      for (const tool of editor.list()) {
-        if (!["glob", "grep", "patch", "read", "shell"].includes(tool.name)) {
-          editor.remove(tool.id)
-          continue
-        }
-        editor.update(tool.id, (current) => {
-          // This first native profile exposes the shipped leaf tools directly.
-          // Code Mode and independent subagents need separate execution qualification.
-          current.options = { ...current.options, codemode: false, pinned: undefined }
-          const execute = current.execute
-          current.execute = async (value, call) => {
-            await assertStanding()
-            return execute(
-              tool.name === "shell"
-                ? {
-                    ...value,
-                    background: false,
-                    timeout: Math.min(value.timeout || 600000, 600000, input.deadline - Date.now()),
-                  }
-                : value,
-              call,
-            )
-          }
-        })
-      }
-    })
-  },
+const controller = new AbortController()
+const stop = () => controller.abort()
+process.on("SIGTERM", stop)
+process.on("SIGINT", stop)
+const timer = setTimeout(stop, Math.max(0, input.deadline - Date.now()))
+const delivery = await ContractDelivery.create({
+  directory: input.directory,
+  state: input.state,
+  reference: input.reference,
+  deadline: input.deadline,
+  signal: controller.signal,
+  assertStanding,
 })
 const host = await PromiseSdk.create(
   {
@@ -119,7 +102,7 @@ const host = await PromiseSdk.create(
         },
       }),
     },
-    plugins: [guard],
+    plugins: [contractProfile(delivery, input.deadline)],
   },
   {
     overrides: [
@@ -127,11 +110,6 @@ const host = await PromiseSdk.create(
     ],
   },
 )
-const controller = new AbortController()
-const stop = () => controller.abort()
-process.on("SIGTERM", stop)
-process.on("SIGINT", stop)
-const timer = setTimeout(stop, Math.max(0, input.deadline - Date.now()))
 try {
   const session = await host.sessions.create({
     id: input.sessionID,
@@ -145,8 +123,25 @@ try {
   controller.signal.addEventListener("abort", interrupt, { once: true })
   await assertStanding()
   if (controller.signal.aborted) throw new Error("Contract was cancelled before execution")
-  await host.sessions.prompt({ id: input.promptID, sessionID: session.id, text: input.prompt })
-  await host.sessions.wait({ sessionID: session.id })
+  await host.sessions.prompt({
+    id: input.promptID,
+    sessionID: session.id,
+    text: input.prompt + "\n\n" + ContractDelivery.instructions,
+  })
+  const disposition = await drainDelivery({
+    wait: async () => {
+      await host.sessions.wait({ sessionID: session.id })
+      const log = await Array.fromAsync(host.sessions.log({ sessionID: session.id }))
+      await Bun.write(`${input.state}/events.json`, JSON.stringify(log, null, 2))
+      if (log.some((event) => event.type === "session.execution.failed")) throw new Error("Native V2 execution failed")
+    },
+    prompt: (text) => host.sessions.prompt({ sessionID: session.id, text }),
+    status: delivery.status,
+    assertActive: async () => {
+      controller.signal.throwIfAborted()
+      await assertStanding()
+    },
+  })
   const messages = await host.message.list({ sessionID: session.id })
   await Bun.write(`${input.state}/messages.json`, JSON.stringify(messages, null, 2))
   const log = await Array.fromAsync(host.sessions.log({ sessionID: session.id }))
@@ -163,6 +158,7 @@ try {
       deadline: input.deadline,
       ended: Date.now(),
       authoritativeCompletion: false,
+      delivery: disposition,
     }),
   )
 } finally {

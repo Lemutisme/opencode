@@ -15,6 +15,7 @@ const Input = Schema.Struct({
   evidenceHash: Schema.optional(Schema.String),
   passed: Schema.optional(Schema.Boolean),
   reason: Schema.optional(Schema.String),
+  summary: Schema.optional(Schema.String),
 })
 const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(await Bun.file(process.argv[2]).text())
 const database = process.env.OPENCODE_DB
@@ -59,7 +60,7 @@ const result = await Effect.runPromise(
           contractID: input.id,
           revision: contract.revision,
           subjectHash: input.subjectHash,
-          summary: "Worker stopped; the host archived its candidate for independent verification.",
+          summary: input.summary ?? "Worker stopped; the host archived its candidate for independent verification.",
           uncertainties: ["The worker cannot certify official task correctness."],
           time: Date.now(),
         }),

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import shlex
 import sqlite3
 import subprocess
@@ -36,6 +37,48 @@ def command(argv, timeout=60, env=None):
     return result.stdout
 
 
+def prepare_ripgrep(source, root):
+    """Freeze an explicit offline executable; workers never download tools."""
+    target = root / "tools" / "rg"
+    target.parent.mkdir()
+    shutil.copyfile(source.resolve(strict=True), target)
+    target.chmod(0o555)
+    version = command([str(target), "--version"]).strip()
+    fixture = root / "rg-probe"
+    fixture.mkdir()
+    (fixture / "needle.txt").write_text("offline-ripgrep-qualified\n")
+    try:
+        listing = command([str(target), "--files", "--glob", "*.txt", str(fixture)])
+        matching = command(
+            [str(target), "--fixed-strings", "offline-ripgrep-qualified", str(fixture)]
+        )
+        if "needle.txt" not in listing or "offline-ripgrep-qualified" not in matching:
+            raise RuntimeError("Offline ripgrep smoke test failed")
+    finally:
+        shutil.rmtree(fixture)
+    write(root / "TOOLS.json", {"rg": {"sha256": sha(target), "version": version}})
+    return target
+
+
+def delivery_handoff(path):
+    value = json.loads(path.read_text())
+    delivery = value.get("delivery", {})
+    if delivery.get("state") != "ready":
+        raise RuntimeError(
+            "No explicit delivery handoff: "
+            + delivery.get("reason", "obligations remain open")
+        )
+    if (
+        not delivery.get("snapshot")
+        or not delivery.get("summary")
+        or not delivery.get("probes", 0)
+    ):
+        raise RuntimeError("Incomplete public-evidence handoff")
+    if value.get("authoritativeCompletion") is not False:
+        raise RuntimeError("Worker must not assert authoritative completion")
+    return delivery
+
+
 def official_result(path, instance):
     """Use the scorer's canonical scope; raw eval JSON retains ignored tests."""
     from programbench.eval.eval import EvaluationResult
@@ -59,7 +102,7 @@ def official_result(path, instance):
 
 def main():
     parser = argparse.ArgumentParser()
-    for key in ["root", "runtime", "bun", "runner", "python", "wheelhouse"]:
+    for key in ["root", "runtime", "bun", "rg", "runner", "python", "wheelhouse"]:
         parser.add_argument("--" + key, type=Path, required=True)
     parser.add_argument("--instance", default="altdesktop__i3-style.f93821b")
     parser.add_argument("--model", default="gpt-5.6-luna")
@@ -76,6 +119,7 @@ def main():
         )
     root = args.root.resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    ripgrep = prepare_ripgrep(args.rg, root)
     sys.path[:0] = [str(args.runner), str(args.runner / "src")]
     from scripts.campaign_provider_gateway import Gateway, process_identity
     from scripts.campaign_vanilla_http import ORIGINAL_TASK
@@ -169,6 +213,7 @@ def main():
             "sessionID": "ses_" + identity,
             "promptID": "msg_" + identity,
             "directory": "/candidate",
+            "reference": "/workspace/executable",
             "state": "/state",
             "standing": "/admission/standing.json",
             "socket": "/channel/provider.sock",
@@ -185,6 +230,8 @@ def main():
         class Fixture(http.server.BaseHTTPRequestHandler):
             calls = 0
             tools = 0
+            qualification = 0
+            stopped = False
 
             def log_message(self, *_):
                 pass
@@ -234,6 +281,56 @@ def main():
                                 "timeout": 10000,
                             }
                         ),
+                        "status": "completed",
+                    }
+                elif not Fixture.stopped:
+                    Fixture.stopped = True
+                    item = {
+                        "type": "message",
+                        "id": "msg_premature_stop",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Finished.",
+                                "annotations": [],
+                            }
+                        ],
+                    }
+                elif Fixture.qualification < 5:
+                    actions = [
+                        ("glob", {"pattern": "native-v2-marker.txt"}),
+                        (
+                            "grep",
+                            {"pattern": "native-v2-ok", "path": "native-v2-marker.txt"},
+                        ),
+                        (
+                            "patch",
+                            {
+                                "patchText": "*** Begin Patch\n*** Add File: /candidate/native-tools.txt\n+qualified\n*** End Patch"
+                            },
+                        ),
+                        ("read", {"path": "/candidate/native-tools.txt"}),
+                        (
+                            "contract_delivery",
+                            {
+                                "action": "blocked",
+                                "reason": "Scripted qualification finished, not a task submission",
+                            },
+                        ),
+                    ]
+                    name, arguments = actions[Fixture.qualification]
+                    selected = next(
+                        t["name"] for t in body["tools"] if t["name"].endswith(name)
+                    )
+                    Fixture.qualification += 1
+                    item = {
+                        "type": "function_call",
+                        "id": f"fc_qualification_{Fixture.qualification}",
+                        "call_id": f"call_qualification_{Fixture.qualification}",
+                        "name": selected,
+                        "arguments": json.dumps(arguments),
                         "status": "completed",
                     }
                 else:
@@ -412,12 +509,14 @@ def main():
             (root / "admission", "/admission", "readonly"),
             (root / "channel", "/channel", "readonly"),
             (args.bun, "/runtime-bun", "readonly"),
+            (ripgrep, "/runtime-tools/rg", "readonly"),
         ]:
             argv += [
                 "--mount",
                 f"type=bind,src={source},dst={target}" + ("," + mode if mode else ""),
             ]
         for key, value in {
+            "PATH": "/runtime-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "HOME": "/state/home",
             "XDG_CONFIG_HOME": "/state/config",
             "XDG_DATA_HOME": "/state/data",
@@ -470,6 +569,35 @@ def main():
         gateway.checkpoint_shutdown()
         gateway.server_close()
         if args.fixture:
+            events = json.loads((root / "state/events.json").read_text())
+            if any(event["type"] == "session.tool.failed" for event in events):
+                raise RuntimeError("Native tool qualification failed; see events.json")
+            for call_id, marker in [
+                ("call_qualification_1", "native-v2-marker.txt"),
+                ("call_qualification_2", "native-v2-ok"),
+                ("call_qualification_4", "qualified"),
+            ]:
+                success = next(
+                    (
+                        event["data"]
+                        for event in events
+                        if event["type"] == "session.tool.success"
+                        and event["data"]["id"] == call_id
+                    ),
+                    None,
+                )
+                if success is None or marker not in json.dumps(
+                    success.get("content", [])
+                ):
+                    raise RuntimeError(
+                        f"Native tool returned no expected evidence: {call_id}"
+                    )
+            if (root / "candidate/native-tools.txt").read_text() != "qualified\n":
+                raise RuntimeError("Native patch/read qualification did not complete")
+            if sum(event["type"] == "session.inbox.enqueued" for event in events) < 2:
+                raise RuntimeError(
+                    "Premature stop did not produce durable continuation"
+                )
             if (
                 root / "candidate/native-v2-marker.txt"
             ).read_text() != "native-v2-ok\n":
@@ -481,6 +609,8 @@ def main():
                     "fixture": True,
                     "modelCalls": False,
                     "nativeV2Shell": True,
+                    "allLeafTools": True,
+                    "durableContinuation": True,
                     "syntheticPriorRequests": 3001,
                     "credentialAndNetworkProbe": True,
                     "nativeFixtureRequests": Fixture.calls,
@@ -488,6 +618,8 @@ def main():
                 },
             )
             return
+        handoff = delivery_handoff(root / "state/worker-ended.json")
+        write(root / "HANDOFF.json", handoff)
         archive = package_workspace(
             root / "candidate", root / "submission", args.instance
         )
@@ -495,7 +627,7 @@ def main():
         if not (root / "candidate/validate.sh").is_file():
             raise RuntimeError("Required independent self-check missing")
         subject = sha(archive)
-        authority("ready", subjectHash=subject)
+        authority("ready", subjectHash=subject, summary=handoff["summary"])
         checked = preflight_candidate(
             archive,
             args.instance,

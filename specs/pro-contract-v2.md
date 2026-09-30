@@ -87,6 +87,11 @@ reviewed, explicit data migration; do not open them with this branch.
 
 ## Native execution: bounded single-allocation profile
 
+The [delivery-closure follow-up](./pro-contract-v2-delivery.md) adds public
+counterexample retention and explicit handoff/continuation. Its local tests do
+not extend the historical cohort results or substitute for pending container
+qualification and real-model re-evaluation.
+
 The real Luna/max single-instance result and the retained aggregation correction
 are documented in [Native V2 qualification](./pro-contract-v2-native.md).
 
