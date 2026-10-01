@@ -102,6 +102,7 @@ for (const mode of ["disabled", "enabled", "corrupt-archive"] as const)
             ? {
                 issue: input,
                 configuration: {
+                  nodes: { version: 1, submission: false },
                   reviewer: {
                     model: { providerID: "local", id: "researcher" },
                     agent: "build",

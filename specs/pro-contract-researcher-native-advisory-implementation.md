@@ -137,3 +137,150 @@ G1 的修复前后日志为 [before](/workspace/opencode-native-advisory-review-
 - 固定消息 ID 或完整输入发生冲突时，派发拒绝并写入错误日志，`requests()` 的 inbox 状态显示 conflict；没有单独的升级处理，仍按原派发失败规则在同一 attempt 内重试，受原 deadline 约束。随机 ID 不能代替冲突检查。
 
 上述增量仍只做本地确定性工程验证，没有启动真实研究、真实模型校准、66 例评测、历史重评或外部认可。
+
+## 2026-10-01：重要节点与 reviewer 强度
+
+本轮以 `native-advisory` 的 `dfa8721c08e58d4c42775ad9b799d5ccd346b0d9` 为基线，落实[重要节点定稿](pro-contract-researcher-native-advisory-nodes.md)第 8 节。开工时唯一未跟踪文件为该设计；已保存 HEAD、分支、状态、index/worktree patch、6,689 个文件及符号链接的哈希与完整归档，见[修改前基线](/workspace/opencode-native-advisory-nodes-baseline-20261001T011248626697Z)。设计 SHA-256 仍为 `76b40eea75b7eebf6a079d86835431452efa93d2018cda1706671953f6847b28`，没有编辑设计或此前的实施记录。
+
+| 改动位置                                                    | 本轮内容                                                                                                                                                                                                             |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core `pro-contract/delivery.ts`、`tool/contract-control.ts` | 增加可选 `Handler.node`。native 交付在授权和分支确认后、action 预留与 replay 前调用；check 在 replay 报告与观察结果持久化后调用。输入副本包含执行身份、可信调用身份及节点材料，返回值只有 `intercept` / `continue`。 |
+| SDK `native-advisory-store.ts`                              | 登记增加带版本的 `nodes` 与强度记录；请求增加 trigger、attempt 及交付声明／check 引用。新增 SDK 自有的 attempt 表，键为 contract/revision/attempt，保存首次观察时间及已接纳的交付节点请求。                          |
+| SDK `native-advisory.ts`                                    | 共用方案 A 接纳路径，识别三个发起工具；节点记录与 admission CAS 同事务。落实时机、机会消耗、缓存放行、按触发类型恢复及附件。既有宿主循环记录启用中途节点的 attempt 首次观察时间。guidance 增加一句交付前审阅说明。   |
+| SDK `native-advisory-materials.ts`                          | 交付节点缓存键加入 canonical JSON 执行者声明；材料清单附上 `untrusted-executor-statement`，保留 summary 的原文本和 uncertainties 的原顺序。主动／中途审阅仍沿用无交付声明的键。                                      |
+| 新增 SDK `native-advisory-strength.ts`                      | 复用实际 `SessionRunnerModel.resolve` 解析模型默认值、variant 与 credential metadata；只读配置，不创建 Session、admit 或 provider 请求。比较双方有效模型与配置，记录可确认的 effort 或未确认原因。                   |
+| 测试及 fixture                                              | Core 增加 13 项边界测试，SDK 增加 11 项节点测试及 10 项强度测试，新增 12 项真实进程节点测试。旧原生测试明确选用主动请求策略。fixture 的断点与 replay 报告读取仅用于测试，没有向生产代码加入检查点。                  |
+
+新签发 API 默认写入显式 `nodes: { version: 1, submission: true }`，midcourse 默认关闭。旧登记缺少 `nodes` 时保持只有主动请求，不迁移、不重新配置。节点机会以 attempt 为单位，Session 更换或 generation 增长不重置；仅成功接纳消耗交付机会，缓存、忙、时间不足及接纳前错误都不消耗，接纳后意见不可用仍消耗。原生 completed 产生的新 attempt 获得新机会。
+
+中途计时使用 attempt 首次观察时间与最近一次被接纳审阅开始时间的较晚值；记录持久化，重启不重置。最近接纳查询只选有 pause 的记录，缓存和未接纳请求不能推迟计时。到时后仍须 check 通过、快照变化和方案 A 接纳检查全部成立；没有新增累计上限、等待队列或自动重审。
+
+缺失钩子直接继续。钩子的预期宿主错误记录日志并继续，Core 在继续前重新核验执行授权；中断、授权失效和 Effect defect 不被转换为成功。接纳已提交后丢失返回值时，关闭的 admission 阻止原交付继续，持久请求按既有暂停／恢复路径处理。交付节点本身不做 replay、不消耗 action，也不产生 report-ready 命令。check 已执行的 action 和证据不回滚；中断工具回执不会删除持久报告。
+
+同 Session 恢复消息区分主动请求、任务设置的交付前审阅与中途审阅。交付消息补送原 summary／uncertainties，说明交付尚未记录、可以原样重新调用且无需回应意见；中途消息补送 check 结论、证据 hash 与所查 subject。按既有崩溃规则更换 Session 时仍从原 brief 继续，旧意见与声明只留宿主记录，不跨 Session 注入。`sameTask`、暂停归属、权限、清理、原 deadline 和预算检查保持原样。
+
+强度检查不把 variant 名称当作档位。默认／省略 variant 使用模型本身默认配置；相同有效模型且解析出双方 effort 时按 `none < minimal < low < medium < high < xhigh < max` 比较，确定更低则拒绝 review 登记。更换模型必须显式选择并记录理由，不跨模型自动判断强弱。解析失败、不支持的配置或无法确认共同路由时，回执和附件记为 `unconfirmed` 并附原因；旧登记缺少评估也如此。`confirmed` 的范围是已解析 SDK 配置，部署网关最终覆盖仍须在启动方案中另行核对和冻结。
+
+本轮 Change gate 限于执行适配层：
+
+| Change gate           | 说明                                                                                                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 不变量与定位          | 不新增 kernel 不变量。认可仍由原 kernel 决定，精确执行授权、证据身份及原预算继续生效。节点只给可选宿主一个建议性审阅的调度入口。                                         |
+| 缺少钩子的反例        | 宿主只能在 check／交付发生后轮询，无法在交付 action、replay 与 report-ready 之前安排暂停；主动请求入口不能替代任务设置的节点。                                           |
+| 为什么不只在 SDK 组合 | 两个原生工具原先不经过 delivery handler。只有工具内部能提供这个调用时点；策略、计数、缓存、强度检查与节点表全部留在 SDK，Core 不读取 SDK 表。                            |
+| Pure-kernel 验证      | kernel、reducer、Research 严格状态机均未改动；constitution 与全部 Core ProContract 回归继续通过。                                                                        |
+| 实际边界验证          | 钩子输入突变不能改写原交付／replay；接纳前故障继续；提交后返回丢失、授权失效与中断不能产生错误交付。实际 provider 流、replay、job、Session inbox 和 SIGKILL 验证见下表。 |
+| 增删概念              | 增加可选钩子、SDK trigger／版本策略／attempt 记录／强度摘要。共用既有接纳路径，没有新增 kernel 命令、研究状态机、回应或 completion 门槛、恢复平台或累计上限。            |
+
+验收证据对应关系：
+
+| 设计验收项                        | 确定性验证                                                                                                                                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 首次交付暂停、恢复后原样交付      | 进程用例 `native node submission`：reviewer 真实读取 `materials.json` 和 `candidate/answer.txt`；意见回原 Session；唯一交付经过真实 replay，总 action 仅为最终交付的 1 次。                   |
+| 四种接纳前放行，不用掉机会        | 忙时直接交付、review 时间不足、接纳前宿主错误，以及新 attempt 的相同声明缓存命中均实际交付。SDK 另验证机会未消耗及精确重试不改变原决定。                                                      |
+| 先放行、replay 失败、修复后再交付 | Responses 流先启动真实长 bash，再释放交付工具；忙时执行失败 replay，修复后成功接纳审阅，恢复后原样交付。按实际工作计 4 actions，没有增加 attempt。                                            |
+| 同 attempt 换 Session／新 attempt | SDK 使用真实 lease 退役、claim 与 completed，验证换 Session 不重置机会而新 attempt 重置；进程用例也经过真实 completed 后的新 attempt。                                                        |
+| 接纳提交后返回丢失                | fixture 在真实接纳提交之后注入 typed failure；旧调用不能记录交付，持久请求恢复后只有再次调用产生一次交付。                                                                                    |
+| 同代码不同声明不命中缓存          | 两个进程用例对比同一 subject：相同声明命中；改变 summary 时材料键不同并真实运行第二次 review。                                                                                                |
+| 中断与授权失效                    | Core 两个工具均覆盖中断和 Unauthorized；SDK 覆盖 lease 过期及同可信调用内容冲突，不能伪装成继续或新增请求。                                                                                   |
+| 中途计时、快照与缓存              | SDK TestClock 覆盖时间未到、失败 check、相同快照、接纳失败、不可用意见和重建宿主。进程用例实际命中缓存后修改材料并通过 check，在距缓存不足一个 afterMs、距最近接纳已满 afterMs 时接纳新审阅。 |
+| check 回执前中断                  | 进程断点使工具回执中断；通过真实 `ProContractReplay.report` 重新读取并核验 retained evidence，恢复消息补送 passed 与 hash。                                                                   |
+| 崩溃后节点状态                    | 新增 actual 快照后的真实 SIGKILL，重启保留 Session、attempt 起点、已用机会与原声明；旧七个崩溃断点全部回归。                                                                                  |
+| 旧登记与强度                      | 恢复无 nodes 的历史登记形状，验证只有主动请求；默认 check 不暂停。真实配置解析覆盖任意 variant 名、default／省略、凭证覆盖、别名、较弱拒绝、跨模型理由及无法确认。                            |
+
+最终验证使用 Bun 1.3.14，所有测试与 `bun typecheck` 都从相应 package 目录执行。测试 provider 为本地确定性服务，没有调用真实模型；测试的 replay、文件读取、快照、数据库、暂停和恢复使用实际实现。完整命令、环境覆盖、退出码和日志 SHA-256 见[验证汇总](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/verification.json)。
+
+| 验证组                                                       | 结果与日志                                                                                                                           |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Core 全部 ProContract（12 个文件，含新增 13 项工具边界测试） | 190 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/core-regression-final.log)    |
+| SDK 全套（含 44 项 native 与 10 项强度测试）                 | 119 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/sdk-all-final.log)            |
+| 原生 advisory 进程组（旧 21 项与新增 12 项）                 | 33 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/native-process-final.log)      |
+| 显式 required 与 native 共存                                 | 4 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/required-coexistence-final.log) |
+| 历史严格模式回归组                                           | 3 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/research-historical-final.log)  |
+| job 权限与实际 read/glob/grep                                | 5 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/job-permissions-final.log)      |
+| 评测网关原有测试（源码未改）                                 | 117 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/gateway-final.log)            |
+| Core `bun typecheck`                                         | 通过；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/core-typecheck-final.log)                   |
+| SDK `bun typecheck`                                          | 通过；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/sdk-typecheck-final.log)                    |
+| opencode `bun typecheck`                                     | 通过；[日志](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/opencode-typecheck-final.log)               |
+
+以上最终回归合计 **471 项通过、0 失败**，三个 package 类型检查全部通过；未把前面的定向重跑重复计入总数。
+
+全部中间失败日志保留。实施中修正了强度解析依赖未在 service 构造时捕获的问题；也修正了测试文件路径品牌类型、错误读取 replay 证据存储，以及新 Responses 场景误用会输出 null token-detail 的 Chat 转换器。新场景改用合法的原始 Responses 事件，未改动产品 LLM 协议或共享转换器，也没有放宽计数断言。最终结果以 `*-final` 日志为准。
+
+相对基线修改 11 个已有文件，新增 3 个 TypeScript 文件；[补丁](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/baseline-delta.patch)不包含用户原有的未跟踪设计。其余基线路径、设计原文及本报告此前内容保持不变，HEAD、分支及 index 也未改变。详见[保留核验](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/baseline-preservation.json)与[受测源码哈希](/workspace/opencode-native-advisory-nodes-validation-20261001T011248626697Z/tested-sources.json)。未改评测网关、公共 Protocol 或 Server HttpApi，因此没有生成客户端，也没有提交或推送。
+
+本轮已授权的实现范围内没有已知设计偏离或未完成项。既有的单宿主、确切文件清单、context 改变后 review 失效、换 Session 不移绑旧意见等限制继续适用。`afterMs` 从宿主首次观察到 attempt 的时刻起算，不声称记录了进程尚未观察到的更早起点。
+
+设计第 10 节的部署路由冻结、两条部署演练及真实试运行，按本次明确范围留待 Claude 把关后另行安排，未计入本轮验证。届时须重新批准两份 brief，并分别冻结 `worker: low`、`reviewer: high`、整个 reviewer job 的 reviewMs 与单次网关请求的 15 分钟时限。本轮未修改运行中或冻结实验，没有真实研究、模型校准、66 例评测、历史重评或外部认可。
+
+## 2026-10-01：Claude 复核修复 S1、S2 与 M1–M5
+
+本节覆盖上一节中对应的错误表述；此前报告保留原文。本轮从 Claude 审查过的未提交工作树继续，HEAD 仍为 `dfa8721c08e58d4c42775ad9b799d5ccd346b0d9`，分支仍为 `native-advisory`。开工前核对上轮送审的 13 个 TypeScript 文件及报告哈希，逐字节一致；再次保存了 6,692 个路径的完整归档、哈希、模式、状态与 index/worktree 补丁，见[本轮基线](/workspace/opencode-native-advisory-nodes-review-baseline-20261001T051109638851Z)。定稿设计没有修改。
+
+| 修复                 | 本轮增量                                                                                                                                                                                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S1：可选节点故障放行 | Core `contract-control.ts` 与 SDK `native-advisory.ts` 在节点边界记录并捕获非中断、非授权失效的 failure／defect，包括 SQLite 错误经 `orDie` 产生的 defect。接纳前失败时继续原生工具；SDK 尝试保存未发生原因，连该记录也失败时保留警告并继续。含中断的混合 cause，以及 fail／die 中的 `Unauthorized` 仍传播。 |
+| S1：已提交接纳       | SDK 错误处理仍先重新授权，Core 放行后也保留原有的重新授权。已关闭 admission 的旧调用不能产生交付，持久请求继续暂停与恢复；不撤销接纳、重开权限或额外消耗节点机会。                                                                                                                                           |
+| S2：循环容错         | 主循环分别保护 timed registration 读取、每个合同的 attempt 观察事务、unfinished 请求读取；单次错误记录后下一轮重试，某个合同的失败不跳过其余合同和请求。同步异常也进入相同边界；含中断的 cause 仍终止相应执行。没有增加独立循环、队列或累计上限。                                                            |
+| S2：观察范围         | 仅对 `active`、无 pending revision、未到原 deadline、已有 attempt 且 `sameTask` 仍通过的合同观察 attempt。未结束的暂停请求仍进入既有 `advance` 授权核验和取消／清理路径，不能因为登记失效就直接遗漏清理。初始启动恢复阶段的错误传播规则未改。                                                                |
+| M1：提前检查时间     | 节点通过资格检查后，在环境校验和预查询快照之前检查原有 operation／cleanup／resume 时间需求。不足则持久保存 `not-started` 并放行，不读取材料、不暂停、不消耗交付节点机会。接纳提交前的第二次时间检查仍保留。主动请求路径和时间参数未改。                                                                      |
+| 测试                 | Core 增加 6 项，SDK 净增 9 项，进程组增加 7 项。所有故障注入位于测试或 fixture 的真实服务包装中，生产代码没有新增检查点。                                                                                                                                                                                    |
+
+相对本轮基线，生产代码只改上述两个文件；另改 Core 测试、SDK 测试、节点进程测试及其 checkpoint fixture，并在本报告追加本节，共 7 个已有路径，无新增文件。
+
+文档更正与保留限制：
+
+| 项目                     | 准确行为                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M2：强度解析的副作用     | “只读配置”不准确。`NativeAdvisoryStrength.check` 经 `LocationServiceMap` 构建／取得 Location 服务并调用真实 `SessionRunnerModel.resolve`，会等待插件初始化、解析有效凭证；过期 OAuth 凭证可经 `Integration.connection.resolve` 刷新并写回 credential 存储。服务初始化也可能写入持久状态。强度检查本身不创建持久 Session、不 admit prompt、不调用模型推理，但不能称为严格只读或无网络副作用。 |
+| M3：已接纳调用的精确重试 | 已成功接纳后 admission 已关闭，重试同一可信调用会先在授权处失败，不能返回原来的成功回执。未接纳且授权仍有效的精确重试才重用既有决定；持久化的已接纳请求仍负责恢复，没有第二次接纳或交付。设计第 4 节“精确重试返回同一个决定”的字面表述在这一边界上与实际不一致，本轮依照复核意见明确记录，未放宽授权、未改设计。                                                                             |
+| M4：损坏缓存             | 交付节点选中完整意见缓存后才检查归档完整性。损坏时标记本次记录和缓存源的 `archiveFault`，这次节点继续放行，不在同一次调用重新审阅，也不消耗节点机会；后续新调用不再选择这个损坏源。若本次原生交付成功，该 attempt 就可能没有发生新的交付前审阅。                                                                                                                                             |
+| M5：较弱 reviewer        | 能确定 reviewer 的有效强度更低时拒绝的是 review 登记。`issue` 仍按原生规则签发合同，签发可返回 accepted，同时 `review.available=false` 并附较弱原因。调用方须检查 review 回执，不能把合同签发成功等同于 review 可用。                                                                                                                                                                        |
+
+本节也更正上一节“Effect defect 不被转换为成功”的表述：依据本轮明确的 S1 指令，可选节点的普通 defect 现在会放行，中断与授权失效仍传播。这是对 [Core tool AGENTS.md](../packages/core/src/tool/AGENTS.md) 中通常规则 “do not use `catchCause`, because interruption and defects must survive” 的局部例外，仅用于已授权的可选节点边界。
+
+本轮 Change gate：
+
+| 项目                 | 说明                                                                                                                                                              |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 不变量与定位         | 不增加 kernel 语义；维持精确执行授权和已关闭 admission 的屏障，避免可选宿主故障成为原生工具的额外门槛。                                                           |
+| 不修复的反例         | 接纳前 SQLite defect 可使本应放行的 check／交付失败；一次 attempt／request 读取错误可终止宿主循环，遗留已暂停请求。                                               |
+| 为什么需要 Core 边界 | SDK 无法捕获 delivery handler 查找／调用层本身的 defect，Core 必须在可选回调处执行约定的放行规则；真实授权复核仍由原工具承担。调度策略和持久状态继续由 SDK 负责。 |
+| Pure-kernel 验证     | kernel、reducer、Research 严格状态机保持不变，全部 Core ProContract 回归包含既有 constitution 验证。                                                              |
+| 真实边界验证         | SQLite 接纳事务回滚；提交后丢返回／defect；混合中断与授权失效；实际 native replay；主循环三处一次性 SQLite 故障后的同 Session 恢复；默认两次暂停与唯一最终交付。  |
+| 增删概念             | 无新协议、表、工具或执行平台；仅扩大节点约定的故障捕获范围、保护既有循环和提前执行既有时间判断。                                                                  |
+
+新增验收证据：
+
+| 场景               | 结果                                                                                                                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 接纳前 defect      | 两个 Core 工具继续原路径，check 有持久 replay 证据，交付有真实 handoff；SDK 在实际 admission CAS 后、外层提交前制造 SQLite 错误，验证事务与节点 slot 回滚，后续新调用仍可接纳。                                              |
+| 接纳后 defect      | SDK 在真实事务提交后注入 defect，授权失败且请求保持 accepted，之后恢复原 Session；进程用例完成 reviewer 实际读取、意见投递与恢复，仅重新交付产生一次 handoff。                                                               |
+| 循环单次失败       | 在 actual 快照已保存、admission 已关闭时，分别注入 attempt scan、attempt observe 和 request scan 的一次 SQLite 错误；三个用例都完成 review、原 Session inbox 投递与最终 replay 交付。                                        |
+| 观察范围与时间前置 | 用真实 release、petition、Principal resume 和 TestClock deadline 排除无效合同，只记录仍有效的 active attempt。两类节点时间不足时，FS 服务包装记录到零次 realPath 调用，且不存在 prequery 或 pause。                          |
+| 默认策略的连续审阅 | 省略 nodes 配置签发；主动请求成功后第一次交付再暂停，两个 reviewer 都读取材料，第二次交付原样成功。两条请求同 subject、不同材料键，attempt 仍为 1、generation 为 3、最终只有 1 个交付 action 和 1 条 accepted report-ready。 |
+
+新增 7 个进程用例的精确归档路径、文件哈希、provider 调用次数与恢复结果见[证据索引](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/review-fix-evidence.json)。
+
+最终验证仍使用 Bun 1.3.14，各测试及 `bun typecheck` 从相应 package 目录执行。provider 为本地确定性服务，replay、SQLite、job、工具读取、inbox 和恢复使用真实实现；没有调用真实模型。
+
+| 验证组                             | 结果与日志                                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core 全部 ProContract（12 个文件） | 196 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/core-regression-final.log)    |
+| SDK 全套（独立测试数据库）         | 128 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/sdk-all-isolated-final.log)   |
+| 原生 advisory 进程组（4 个文件）   | 40 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/native-process-final.log)      |
+| 显式 required 与 native 共存       | 4 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/required-coexistence-final.log) |
+| 历史严格模式回归组                 | 3 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/research-historical-final.log)  |
+| job 权限与实际 read/glob/grep      | 5 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/job-permissions-final.log)      |
+| 评测网关原有测试（源码与测试未改） | 117 项通过，0 失败；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/gateway-final.log)            |
+| Core `bun typecheck`               | 通过；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/core-typecheck-final.log)                   |
+| SDK `bun typecheck`                | 通过；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/sdk-typecheck-final.log)                    |
+| opencode `bun typecheck`           | 通过；[日志](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/opencode-typecheck-final.log)               |
+
+本轮最终回归合计 **493 项通过、0 失败**，三个 package 的类型检查全部通过；定向验证未重复计入总数。
+
+SDK 全套首次执行在既有 embedded 测试中遇到持续的 SQLite 锁等待，已终止该测试进程，原日志及退出码保留，未作为通过结果计数。源码核对确认 `Database.node` 在 module import 时固定路径，而 embedded 测试较晚修改 `Flag.OPENCODE_DB`，首次执行实际打开了已有默认测试数据库；只读核查其中的 binding 模型均为 `test/test` 或 `missing-provider/missing-model`。重跑时在 Bun 启动前设置独立 `OPENCODE_DB`，执行同一条 SDK 全套命令，未修改此范围外的测试或数据库实现，也未删除原数据库。过程见[数据库诊断记录](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/sdk-test-database-diagnosis.json)。
+
+完整命令、退出码、日志哈希及保留核验见[本轮验证汇总](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/VERIFICATION.md)和[机器可读记录](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/verification.json)。[增量补丁](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/baseline-delta.patch)相对本轮保存的送审工作树生成，不能当作相对 HEAD 的完整实现补丁；已在独立基线副本验证正向应用，并在当前工作树验证反向检查。新增进程场景的 provider 输入、请求、合同／binding、job 操作及宿主日志在[进程证据目录](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/process-artifacts-final)。
+
+本轮要求的修复和补测均已完成。除上表明确的 M2–M5 行为边界外，没有新增设计差异；既有单宿主、确切文件清单、context 变化后 review 失效和换 Session 不补送旧意见的限制保持原样。持续性存储故障仍可能阻止原生执行或恢复；本次保证单次循环故障不会永久终止循环，不承诺在底层存储持续不可用时仍可完成工作。定稿设计、历史材料、kernel/reducer、Research 严格状态机、`sameTask`、评测网关及其测试未改。HEAD、分支、index 保持不变，未提交、未推送；未开展演练或试运行。停在本轮送审状态，等待 Claude 复核。

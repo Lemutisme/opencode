@@ -50,6 +50,9 @@ export const nativeAdvisoryProcess = Effect.fnUntraced(function* (checkpoints = 
       time?: Partial<NativeAdvisoryStore.Configuration["time"]>
       reviewerModel?: { providerID: string; id: string }
       materials?: ReadonlyArray<string>
+      nodes?: NativeAdvisoryStore.Configuration["nodes"]
+      defaultNodes?: boolean
+      replay?: NativeAdvisoryStore.Registration["task"]["evidence"]["replay"]
     },
   ) {
     const deadline = Date.now() + 6 * 60 * 60 * 1000
@@ -66,7 +69,7 @@ export const nativeAdvisoryProcess = Effect.fnUntraced(function* (checkpoints = 
         requires: [],
         authority: ["filesystem.read", "filesystem.write", "process.execute"],
         budget: { deadline },
-        evidence: { type: "principal" },
+        evidence: { type: "principal", ...(options?.replay ? { replay: options.replay } : {}) },
         resolution: { retryDelay: 10 },
       },
     }
@@ -80,9 +83,14 @@ export const nativeAdvisoryProcess = Effect.fnUntraced(function* (checkpoints = 
             configuration: {
               reviewer: {
                 model: options?.reviewerModel ?? input.model,
+                ...(options?.reviewerModel
+                  ? { reason: "Explicit alternative for the unavailable-reviewer fixture" }
+                  : {}),
                 agent: "build",
                 instructions: "Read the captured answer.txt and return concrete independent advice as ordinary text.",
               },
+              // Existing regressions exercise the voluntary-only policy explicitly.
+              ...(options?.defaultNodes ? {} : { nodes: options?.nodes ?? { version: 1, submission: false } }),
               materials: options?.materials ?? ["answer.txt"],
               evidence: [],
               time: { operationMs: 30_000, reviewMs: 10_000, cleanupMs: 60_000, resumeMs: 10_000, ...options?.time },

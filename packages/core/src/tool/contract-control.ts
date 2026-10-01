@@ -1,7 +1,7 @@
 export * as ContractControlTools from "./contract-control"
 
 import { ToolFailure } from "@opencode-ai/llm"
-import { Clock, Effect, Fiber, Layer, Schema, Scope } from "effect"
+import { Cause, Clock, Effect, Fiber, Layer, Schema, Scope } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
@@ -40,6 +40,29 @@ const layer = Layer.effectDiscard(
         .pipe(Effect.mapError((error) => new ToolFailure({ message: error.message })))
       return { execution: context.contractExecution, contract }
     })
+
+    const node = (input: ProContractDelivery.Node) =>
+      Effect.suspend(
+        () => delivery.get("native")?.node?.(structuredClone(input)) ?? Effect.succeed("continue" as const),
+      ).pipe(
+        // This optional hook is a fail-open boundary for host defects, too. The
+        // caller reauthorizes before continuing, including after a committed pause.
+        Effect.catchCause((cause) => {
+          if (
+            Cause.hasInterrupts(cause) ||
+            cause.reasons.some(
+              (reason) =>
+                (Cause.isFailReason(reason)
+                  ? reason.error
+                  : Cause.isDieReason(reason)
+                    ? reason.defect
+                    : undefined) instanceof ProContractOpenCode.Unauthorized,
+            )
+          )
+            return Effect.failCause(cause)
+          return Effect.logWarning("Native contract node unavailable", cause).pipe(Effect.as("continue" as const))
+        }),
+      )
 
     yield* tools
       .register({
@@ -173,6 +196,7 @@ const layer = Layer.effectDiscard(
               replay: ProContract.ReplayResult,
               observations: Schema.Array(ProContractObservation.Recorded),
               settled: Schema.Literal(false),
+              advisory: Schema.optional(Schema.String),
             }),
             toModelOutput: ({ output }) => [
               {
@@ -180,6 +204,7 @@ const layer = Layer.effectDiscard(
                 text: JSON.stringify({
                   passed: output.replay.passed,
                   settled: false,
+                  ...(output.advisory ? { advisory: output.advisory } : {}),
                   checks: output.observations.length,
                   unavailable: output.observations.filter((item) => item.receipt.execution !== "completed").length,
                   unmatchedPredicates: output.observations
@@ -222,13 +247,29 @@ const layer = Layer.effectDiscard(
                   }),
                 )
                 yield* authorize(context)
+                const recorded = yield* replayVerifier.read({
+                  contractID: contract.id,
+                  evidenceHash: replay.evidenceHash,
+                })
+                const decision =
+                  (yield* contracts.get(contract.id))?.recognition.context?.profile === "native"
+                    ? yield* node({
+                        type: "check",
+                        execution: authorized.execution,
+                        call: { messageID: context.assistantMessageID, callID: context.toolCallID },
+                        replay,
+                      })
+                    : "continue"
+                // A failed callback may have committed admission closure. Never return
+                // ordinary success under a revoked execution, or spend another action.
+                if (decision === "continue") yield* authorize(context)
                 return {
                   replay,
-                  observations: yield* replayVerifier.read({
-                    contractID: contract.id,
-                    evidenceHash: replay.evidenceHash,
-                  }),
+                  observations: recorded,
                   settled: false as const,
+                  ...(decision === "intercept"
+                    ? { advisory: "Task settings started an independent review; execution will pause." }
+                    : {}),
                 }
               }).pipe(
                 Effect.mapError((error) =>
@@ -275,7 +316,11 @@ const layer = Layer.effectDiscard(
               summary: Schema.NonEmptyString,
               uncertainties: Schema.Array(Schema.NonEmptyString),
             }),
-            output: Schema.Struct({ recorded: Schema.Boolean, requested: Schema.optional(Schema.Literal(true)) }),
+            output: Schema.Struct({
+              recorded: Schema.Boolean,
+              requested: Schema.optional(Schema.Literal(true)),
+              advisory: Schema.optional(Schema.String),
+            }),
             execute: (input, context) =>
               Effect.gen(function* () {
                 const authorized = yield* authorize(context)
@@ -292,6 +337,21 @@ const layer = Layer.effectDiscard(
                   })
                   return { recorded: false, requested: true as const }
                 }
+                if (
+                  (yield* node({
+                    type: "submission",
+                    execution: authorized.execution,
+                    call: { messageID: context.assistantMessageID, callID: context.toolCallID },
+                    summary: input.summary,
+                    uncertainties: [...input.uncertainties],
+                  })) === "intercept"
+                )
+                  return {
+                    recorded: false,
+                    advisory:
+                      "Delivery has not been recorded. Task settings started an independent review; execution will pause. After resuming, call contract_report_ready again if you still wish to deliver. No changes or response to the advice are required.",
+                  }
+                yield* authorize(context)
                 const now = yield* Clock.currentTimeMillis
                 const policy = contract.spec.evidence.replay
                 if (policy && !(yield* bindings.reserveAction(context.sessionID, now, authorized.execution)))

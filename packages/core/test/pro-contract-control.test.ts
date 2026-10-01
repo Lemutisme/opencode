@@ -8,6 +8,7 @@ import { TestClock } from "effect/testing"
 import { AgentV2 } from "../src/agent"
 import { Database } from "../src/database/database"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
+import { makeGlobalNode } from "../src/effect/app-node"
 import { LayerNode } from "../src/effect/layer-node"
 import { EventV2 } from "../src/event"
 import { Location } from "../src/location"
@@ -17,11 +18,12 @@ import { PermissionV2 } from "../src/permission"
 import { ProContract } from "../src/pro-contract"
 import { ProContractOpenCode } from "../src/pro-contract/open-code"
 import { ProContractDelivery } from "../src/pro-contract/delivery"
+import { ProContractReplay } from "../src/pro-contract/replay"
 import { ProContractOpenCodeTable } from "../src/pro-contract/sql"
 import { ProjectV2 } from "../src/project"
 import { ProjectTable } from "../src/project/sql"
 import { ProviderV2 } from "../src/provider"
-import { AbsolutePath } from "../src/schema"
+import { AbsolutePath, RelativePath } from "../src/schema"
 import { SessionTable } from "../src/session/sql"
 import { ToolRegistry } from "../src/tool/registry"
 import { tmpdir } from "./fixture/tmpdir"
@@ -488,3 +490,177 @@ describe("Contract control authorization", () => {
     )
   })
 })
+
+const nodeCalls: ProContractDelivery.Node[] = []
+const nodes = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([Database.node, EventV2.node, ProContract.node, ProContractOpenCode.node, LocationServiceMap.node]),
+    [
+      [
+        ProContractDelivery.node,
+        makeGlobalNode({
+          service: ProContractDelivery.Service,
+          deps: [ProContract.node, ProContractOpenCode.node],
+          layer: Layer.effect(
+            ProContractDelivery.Service,
+            Effect.gen(function* () {
+              const contracts = yield* ProContract.Service
+              const bindings = yield* ProContractOpenCode.Service
+              return {
+                get: () => ({
+                  request: () => Effect.void,
+                  node: (input) =>
+                    Effect.gen(function* () {
+                      nodeCalls.push(structuredClone(input))
+                      const contract = (yield* contracts.get(input.execution.contractID))!
+                      const mode = contract.spec.goal
+                      if (mode === "interrupt") return yield* Effect.interrupt
+                      if (mode === "mixed-interrupt")
+                        return yield* Effect.failCause(
+                          Cause.combine(Cause.die(new Error("Fixture interrupted defect")), Cause.interrupt()),
+                        )
+                      if (mode === "unauthorized")
+                        return yield* bindings
+                          .authorize({ ...input.execution, generation: input.execution.generation + 1 })
+                          .pipe(Effect.as("continue" as const))
+                      if (mode === "closed-error" || mode === "closed-defect") {
+                        const binding = (yield* bindings.get(contract.id))!
+                        yield* bindings.setAdmission({
+                          expected: binding,
+                          context: contract.recognition.context!.target,
+                          open: false,
+                          reason: "Fixture committed pause before losing the return",
+                        })
+                      }
+                      if (mode === "host-error" || mode === "closed-error")
+                        return yield* new ProContractDelivery.Denied({ message: "Fixture callback failed" })
+                      if (mode === "host-defect" || mode === "closed-defect")
+                        return yield* Effect.die(new Error("Fixture callback defect"))
+                      if (mode === "intercept") return "intercept" as const
+                      // Exercise the read-only payload boundary against a misbehaving callback.
+                      if (input.type === "submission")
+                        (input.uncertainties as string[]).push("Callback must not add this")
+                      if (input.type === "check")
+                        (input.replay as { summary: string }).summary = "Callback must not replace replay"
+                      return "continue" as const
+                    }),
+                }),
+              }
+            }),
+          ),
+        }),
+      ],
+    ],
+  ),
+)
+
+for (const name of ["contract_report_ready", "contract_check"] as const)
+  for (const mode of [
+    "intercept",
+    "continue",
+    "host-error",
+    "host-defect",
+    "closed-error",
+    "closed-defect",
+    "unauthorized",
+    "interrupt",
+    "mixed-interrupt",
+  ] as const)
+    nodes.live(`native ${name} node ${mode} preserves tool ordering and execution authority`, () =>
+      Effect.gen(function* () {
+        nodeCalls.length = 0
+        const base = ProContract.defaultSpec(mode, yield* Clock.currentTimeMillis)
+        const state = yield* setup({
+          ...base,
+          budget: { deadline: base.budget.deadline },
+          authority: ["filesystem.read", "process.execute"],
+          evidence: {
+            type: "principal",
+            replay: {
+              checks: [{ argv: [process.execPath, "-e", "process.stdout.write('verified')"], timeout: 5000, exit: 0 }],
+              protected: [],
+              artifacts: [RelativePath.make("candidate.txt")],
+            },
+          },
+        })
+        yield* Effect.promise(async () => {
+          await Bun.write(path.join(state.directory, "candidate.txt"), "unchanged candidate")
+          await $`git init`.cwd(state.directory).quiet()
+        })
+        yield* Effect.gen(function* () {
+          const registry = yield* ToolRegistry.Service
+          const materialized = yield* registry.materialize()
+          const input = { summary: "Original submission", uncertainties: ["Original uncertainty"] }
+          const exit = yield* materialized
+            .settle({
+              sessionID: state.binding.sessionID,
+              ...toolIdentity,
+              contractExecution: state.execution,
+              call: { type: "tool-call", id: "native-node", name, input: name === "contract_check" ? {} : input },
+            })
+            .pipe(Effect.exit)
+          expect(nodeCalls).toHaveLength(1)
+          expect(nodeCalls[0].call).toEqual({ messageID: toolIdentity.assistantMessageID, callID: "native-node" })
+          expect(nodeCalls[0].execution).toEqual(state.execution)
+          const current = (yield* state.contracts.get(state.binding.contractID))!
+          const binding = (yield* state.bindings.get(state.binding.contractID))!
+          if (mode === "interrupt") {
+            expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+          }
+          if (mode === "mixed-interrupt") {
+            expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause) && Cause.hasDies(exit.cause)).toBe(true)
+          }
+          if (mode === "closed-error" || mode === "closed-defect" || mode === "unauthorized") {
+            expect(Exit.isSuccess(exit) && exit.value.result.type === "error").toBe(true)
+          }
+          const continued = mode === "continue" || mode === "host-error" || mode === "host-defect"
+          const delivered = name === "contract_report_ready" && continued
+          expect(current.handoff !== undefined).toBe(delivered)
+          expect(binding.actionsUsed).toBe(name === "contract_check" || delivered ? 1 : 0)
+          expect(binding.turnsUsed).toBe(0)
+          if (delivered) {
+            expect(current.handoff).toMatchObject({ ...input, replay: { passed: true } })
+            expect(input.uncertainties).toEqual(["Original uncertainty"])
+          }
+          if (Exit.isSuccess(exit) && (continued || mode === "intercept")) {
+            expect(exit.value.result.type).not.toBe("error")
+            const text = JSON.stringify(exit.value.output)
+            if (mode === "intercept") expect(text).toContain("execution will pause")
+            expect(text).not.toContain("Callback must not")
+          }
+          if (name === "contract_check") {
+            expect(nodeCalls[0]).toMatchObject({ type: "check", replay: { passed: true } })
+            const call = nodeCalls[0]
+            if (call.type !== "check") return yield* Effect.die("Missing check result")
+            const verifier = yield* ProContractReplay.Service
+            const recorded = yield* verifier.read({ contractID: current.id, evidenceHash: call.replay.evidenceHash })
+            expect(recorded).toHaveLength(1)
+            expect(recorded[0].receipt.execution).toBe("completed")
+          }
+        }).pipe(Effect.provide(LocationServiceMap.Service.get(state.location)))
+      }),
+    )
+
+nodes.effect("historical delivery profiles do not invoke the native node hook", () =>
+  Effect.gen(function* () {
+    nodeCalls.length = 0
+    const state = yield* setup(undefined, "historical-required-profile")
+    yield* Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const materialized = yield* registry.materialize()
+      const result = yield* materialized.settle({
+        sessionID: state.binding.sessionID,
+        ...toolIdentity,
+        contractExecution: state.execution,
+        call: {
+          type: "tool-call",
+          id: "required-delivery",
+          name: "contract_report_ready",
+          input: { summary: "Original", uncertainties: [] },
+        },
+      })
+      expect(result.result.type).not.toBe("error")
+      expect(nodeCalls).toHaveLength(0)
+    }).pipe(Effect.provide(LocationServiceMap.Service.get(state.location)))
+  }),
+)

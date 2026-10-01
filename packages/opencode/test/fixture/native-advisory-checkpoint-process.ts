@@ -9,6 +9,7 @@ import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractDelivery } from "@opencode-ai/core/pro-contract/delivery"
 import { ProContractJob } from "@opencode-ai/core/pro-contract/job"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ProContractReplay } from "@opencode-ai/core/pro-contract/replay"
 import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
@@ -31,8 +32,20 @@ await Effect.runPromise(
         NativeAdvisoryStore.Service,
         Effect.gen(function* () {
           const real = yield* NativeAdvisoryStore.Service
+          const failOnce = (name: string) =>
+            Effect.suspend(() => {
+              const gate = gates.get(name)
+              if (!gate || gate.reached) return Effect.void
+              gate.reached = true
+              return real.db.run("SELECT * FROM injected_loop_failure").pipe(Effect.orDie)
+            })
           return {
             ...real,
+            timedRegistrations: () =>
+              failOnce("loop-attempt-scan").pipe(Effect.andThen(() => real.timedRegistrations())),
+            observe: (...args: Parameters<typeof real.observe>) =>
+              failOnce("loop-attempt-observe").pipe(Effect.andThen(() => real.observe(...args))),
+            unfinished: () => failOnce("loop-request-scan").pipe(Effect.andThen(() => real.unfinished())),
             put: (value: unknown) =>
               Effect.gen(function* () {
                 if (
@@ -128,7 +141,38 @@ await Effect.runPromise(
       const contracts = Context.get(context, ProContract.Service)
       const sessions = Context.get(context, SessionV2.Service)
       const jobs = Context.get(context, ProContractJob.Service)
-      delivery.handler = native.handler
+      const locations = Context.get(context, LocationServiceMap.Service)
+      delivery.handler = {
+        ...native.handler,
+        node: (input) =>
+          Effect.gen(function* () {
+            const before = gates.get("node-error-before")
+            if (before) {
+              before.reached = true
+              return yield* new ProContractDelivery.Denied({ message: "Fixture node failed before admission" })
+            }
+            const beforeDefect = gates.get("node-defect-before")
+            if (beforeDefect) {
+              beforeDefect.reached = true
+              return yield* Effect.die(new Error("Fixture node defect before admission"))
+            }
+            const result = yield* native.handler.node!(input)
+            const after = gates.get("node-error-after")
+            if (after && result === "intercept") {
+              after.reached = true
+              return yield* new ProContractDelivery.Denied({
+                message: "Fixture lost the return after committed admission",
+              })
+            }
+            const afterDefect = gates.get("node-defect-after")
+            if (afterDefect && result === "intercept") {
+              afterDefect.reached = true
+              return yield* Effect.die(new Error("Fixture node defect after committed admission"))
+            }
+            if (result === "intercept") yield* pause("node-return")
+            return result
+          }),
+      }
       yield* native.start()
       const command = Effect.fnUntraced(function* (message: {
         id: string
@@ -161,7 +205,20 @@ await Effect.runPromise(
         if (message.action === "session-context")
           return yield* sessions.context((message.input as { sessionID: SessionV2.ID }).sessionID)
         const id = ProContract.ID.make(message.contractID)
+        if (message.action === "replay-report") {
+          const binding = yield* bindings.get(id)
+          if (!binding) return yield* Effect.die("Missing replay binding")
+          return yield* Effect.gen(function* () {
+            const replay = yield* ProContractReplay.Service
+            return yield* replay.report({ contractID: id, evidenceHash: (message.input as { hash: string }).hash })
+          }).pipe(Effect.provide(locations.get(binding.location)))
+        }
         if (message.action === "native-requests") return yield* native.requests(id)
+        if (message.action === "native-attempt") {
+          const state = Context.get(context, NativeAdvisoryStore.Service)
+          const binding = yield* bindings.get(id)
+          return binding ? yield* state.attempt(id, binding.revision, binding.attempts) : undefined
+        }
         if (message.action === "native-attachment") return yield* native.attachment(id)
         if (message.action === "root-info") return yield* contracts.get(id)
         if (message.action === "get") return yield* bindings.get(id)

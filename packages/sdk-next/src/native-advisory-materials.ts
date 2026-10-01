@@ -15,7 +15,11 @@ import { Hash } from "@opencode-ai/core/util/hash"
 import { NativeAdvisoryStore } from "./native-advisory-store"
 import { ResearchReviewer } from "./research/reviewer"
 
-export function key(registration: NativeAdvisoryStore.Registration, subjectHash: string) {
+export function key(
+  registration: NativeAdvisoryStore.Registration,
+  subjectHash: string,
+  trigger?: NativeAdvisoryStore.Trigger,
+) {
   return ProContractRecognition.fingerprint({
     contractID: registration.contractID,
     revision: registration.revision,
@@ -25,6 +29,7 @@ export function key(registration: NativeAdvisoryStore.Registration, subjectHash:
     configuration: registration.hash,
     materials: registration.configuration.materials,
     evidence: registration.configuration.evidence,
+    ...(trigger?.type === "submission" ? { executorStatement: trigger.statement } : {}),
   })
 }
 
@@ -59,14 +64,17 @@ export const make = Effect.gen(function* () {
       missing: names.filter((_, index) => files[index] === undefined),
     }
   })
-  const capture = Effect.fnUntraced(function* (registration: NativeAdvisoryStore.Registration) {
+  const capture = Effect.fnUntraced(function* (
+    registration: NativeAdvisoryStore.Registration,
+    trigger?: NativeAdvisoryStore.Trigger,
+  ) {
     // Snapshot.capture skips absent force-included paths. Do not pause when all
     // approved material is absent; actual missing-path claims come from the snapshot.
     yield* inventory(registration.location.directory, registration.configuration.materials)
     const snapshots = yield* Snapshot.Service.pipe(Effect.provide(locations.get(registration.location)))
     const subjectHash = yield* snapshots.capture({ include: registration.configuration.materials })
     if (!subjectHash) return yield* new ProContractDelivery.Denied({ message: "Review snapshot is unavailable" })
-    return { subjectHash, key: key(registration, subjectHash) }
+    return { subjectHash, key: key(registration, subjectHash, trigger) }
   })
   const prepare = Effect.fnUntraced(function* (request: NativeAdvisoryStore.Request) {
     const registration = request.registration
@@ -117,6 +125,9 @@ export const make = Effect.gen(function* () {
       evidence: registration.configuration.evidence,
       reviewer: registration.configuration.reviewer,
       environment,
+      ...(request.trigger?.type === "submission"
+        ? { executorStatement: { trust: "untrusted-executor-statement", ...request.trigger.statement } }
+        : {}),
     }
     const hash = yield* state.put(materials)
     yield* fs.writeWithDirs(path.join(directory, "materials.json"), ProContractRecognition.canonical(materials), 0o400)
