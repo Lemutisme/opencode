@@ -51,6 +51,44 @@ describe("OTA artifact boundary", () => {
     expect(seen).toEqual([0, 1])
     expect(completed).toEqual([1])
   })
+
+  test("a later worker's original fault survives earlier workers' cancellation", async () => {
+    const original = new Error("cleanroom reference is execute-only")
+    const seen: number[] = []
+    const drained: number[] = []
+    await expect(
+      evaluationWorkers([0, 1, 2, 3], 3, async (value, signal) => {
+        seen.push(value)
+        if (value === 2) {
+          await Bun.sleep(20)
+          throw original
+        }
+        while (!signal.aborted) await Bun.sleep(5)
+        expect(signal.reason).toBe(original)
+        await Bun.sleep(10)
+        drained.push(value)
+        throw new Error("evaluation cancelled")
+      }),
+    ).rejects.toBe(original)
+    expect(seen).toEqual([0, 1, 2])
+    expect(drained.sort()).toEqual([0, 1])
+  })
+
+  test("a synchronous evaluator fault aborts peers and is retained", async () => {
+    const original = new Error("synchronous preparation failure")
+    const drained: number[] = []
+    await expect(
+      evaluationWorkers([0, 1, 2], 2, (value, signal) => {
+        if (value === 1) throw original
+        return (async () => {
+          while (!signal.aborted) await Bun.sleep(5)
+          drained.push(value)
+          throw new Error("evaluation cancelled")
+        })()
+      }),
+    ).rejects.toBe(original)
+    expect(drained).toEqual([0])
+  })
   test("only one bounded regular inactive artifact can be imported", async () => {
     const root = await directory()
     const store = new Artifacts(path.join(root, "objects"))

@@ -5,8 +5,14 @@ import path from "node:path"
 import { Schema } from "effect"
 import { RSIRuntime } from "./rsi-runtime"
 import type { Pair } from "../../core/script/ota-rsi"
+import { bridgeTools } from "./rsi-bridge"
+import type { NativeBridge } from "./rsi-bridge"
 
 export namespace RSINative {
+  // The official reference can be execute-only. Never read/copy it into the
+  // mutable workspace; preserve the black-box boundary with a symlink instead.
+  export const workspaceCommand =
+    "mkdir /candidate/workspace; if test -f /task/workspace.tar; then tar --no-same-owner --no-same-permissions -xf /task/workspace.tar -C /candidate/workspace; else find /workspace -mindepth 1 -maxdepth 1 ! -name executable ! -name reference -exec cp -a -t /candidate/workspace -- {} +; fi; rm -f /candidate/workspace/reference; ln -s /workspace/executable /candidate/workspace/reference"
   const Handoff = Schema.Struct({
     digest: Schema.String,
     summary: Schema.String,
@@ -52,7 +58,8 @@ export namespace RSINative {
     source?: RSIRuntime.Release
     files?: Record<string, RSIRuntime.File>
     image?: string
-    mode?: "programbench"
+    mode?: "programbench" | "bridge" | "tau"
+    bridge?: NativeBridge
     allowRevise?: boolean
   }
   export class Process {
@@ -66,6 +73,7 @@ export namespace RSINative {
     private launching: Promise<void> = Promise.resolve()
     private controller = new AbortController()
     private expiry?: ReturnType<typeof setTimeout>
+    private bridge?: NativeBridge
     constructor(
       readonly root: string,
       readonly provider: Provider,
@@ -85,15 +93,39 @@ export namespace RSINative {
     }
     private async boot(input: Input) {
       this.controller.signal.throwIfAborted()
+      if (!!input.bridge !== (input.mode === "bridge" || input.mode === "tau"))
+        throw new Error("external task mode requires a host environment lease")
+      if (input.bridge && input.allowRevise) throw new Error("external task continuation is not qualified")
+      this.bridge = input.bridge
       if (Date.now() >= input.deadline) throw new Error("original allocation deadline reached")
       const volume = await RSIRuntime.materialize(this.root, input.release, this.controller.signal)
       if (this.stopped) throw new Error("startup cancelled")
       await RSIRuntime.checked(this.provider.gateway)
       for (const dir of ["control", "admission", "channel", "candidate", "state"])
         await fs.mkdir(path.join(this.directory, dir), { recursive: true, mode: dir === "control" ? 0o700 : 0o755 })
+      const bridge = await input.bridge?.prepare({
+        run: this.directory,
+        deadline: input.deadline,
+        signal: this.controller.signal,
+      })
+      const external = bridge
+        ? bridgeTools(await Bun.file(await RSIRuntime.checked(bridge.tools)).json(), input.mode as "bridge" | "tau")
+        : undefined
+      if (bridge) {
+        if (!path.isAbsolute(bridge.directory) || (await fs.realpath(bridge.directory)) !== bridge.directory)
+          throw new Error("benchmark mount must be an absolute, resolved directory")
+        if (!(await fs.lstat(path.join(bridge.directory, "tools.sock"))).isSocket())
+          throw new Error("benchmark tools socket unavailable")
+        if (input.files?.["bridge-tools.json"]) throw new Error("reserved benchmark tools mount")
+      }
       await Bun.write(
         path.join(this.directory, "control/scope.json"),
-        JSON.stringify({ ...input.scope, mode: input.mode, allowRevise: input.allowRevise }),
+        JSON.stringify({
+          ...input.scope,
+          mode: input.mode,
+          allowRevise: input.allowRevise,
+          benchmarkTools: external?.tools.map((tool) => tool.name),
+        }),
       )
       await Bun.write(
         path.join(this.directory, "EXECUTION.json"),
@@ -106,6 +138,7 @@ export namespace RSINative {
           deadline: input.deadline,
           mode: input.mode ?? "proposal",
           files: input.files,
+          bridge: bridge ? { directory: bridge.directory, tools: bridge.tools } : undefined,
         }),
       )
       await Bun.write(path.join(this.directory, "control/active"), "active")
@@ -117,7 +150,7 @@ export namespace RSINative {
           deadline: input.deadline,
           model: this.provider.model,
           effort: this.provider.effort,
-          goal: input.goal,
+          goal: [input.goal, bridge?.goal].filter(Boolean).join("\n\n"),
           artifact: input.artifact,
           mode: input.mode,
           allowRevise: input.allowRevise,
@@ -220,7 +253,11 @@ export namespace RSINative {
         await RSIRuntime.checked(input.source.source)
         argv.push("--mount", `type=bind,src=${input.source.source.path},dst=/parent-source.tar,readonly`)
       }
-      for (const [name, file] of Object.entries(input.files ?? {})) {
+      if (bridge) argv.push("--mount", `type=bind,src=${bridge.directory},dst=/benchmark,readonly`)
+      for (const [name, file] of Object.entries({
+        ...input.files,
+        ...(bridge ? { "bridge-tools.json": bridge.tools } : {}),
+      })) {
         if (!/^[a-z][a-z0-9_.-]*$/.test(name)) throw new Error("invalid task mount")
         argv.push("--mount", `type=bind,src=${await RSIRuntime.checked(file)},dst=/task/${name},readonly`)
       }
@@ -302,7 +339,7 @@ export namespace RSINative {
             this.name,
             "/bin/sh",
             "-ec",
-            "mkdir /candidate/workspace; if test -f /task/workspace.tar; then tar --no-same-owner --no-same-permissions -xf /task/workspace.tar -C /candidate/workspace; else cp -a /workspace/. /candidate/workspace/; rm -f /candidate/workspace/executable; fi; rm -f /candidate/workspace/reference; ln -s /workspace/executable /candidate/workspace/reference",
+            workspaceCommand,
           ],
           { timeout: 120_000, signal: this.controller.signal },
         )
@@ -351,6 +388,10 @@ export namespace RSINative {
         ["control/active", "admission/active"].map((file) => fs.rm(path.join(this.directory, file), { force: true })),
       )
       await this.launching.catch(() => undefined)
+      // Revocation must complete before the FENCED receipt, but must not prevent
+      // native/provider teardown if the external environment itself fails.
+      const revocation = this.bridge?.revoke({ run: this.directory }) ?? Promise.resolve()
+      void revocation.catch(() => undefined)
       const exists = (await RSIRuntime.run(["docker", "ps", "-aq", "--filter", `name=^/${this.name}$`])).trim()
       if (exists) {
         await RSIRuntime.run(["docker", "logs", this.name], { output: path.join(this.directory, "worker.log") }).catch(
@@ -369,6 +410,7 @@ export namespace RSINative {
       }
       if ((await RSIRuntime.run(["docker", "ps", "-aq", "--filter", `name=^/${this.name}$`])).trim())
         throw new Error("worker fence unacknowledged")
+      await revocation
       await Bun.write(path.join(this.directory, "FENCED.json"), JSON.stringify({ name: this.name, time: Date.now() }))
     }
     async artifact(name: string, digest: string) {

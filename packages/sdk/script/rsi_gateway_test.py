@@ -137,12 +137,30 @@ class AdmissionTest(unittest.TestCase):
         self.save()
         with self.assertRaisesRegex(ValueError, "audit_source"):
             gateway.standing(scope)
+
         state["assignments"][0]["status"] = "closed"
         with closing(sqlite3.connect(audit)) as db:
             db.execute("UPDATE rsi_audit SET value=? WHERE id=1", (json.dumps(state),))
             db.commit()
         with self.assertRaisesRegex(ValueError, "audit_admission"):
             gateway.standing(scope)
+
+    def test_external_modes_require_host_tools_and_deny_local_authority(self):
+        body = lambda name: json.dumps({"tools": [{"name": name}]})
+        terminal = {"mode": "bridge", "benchmarkTools": ["terminal"]}
+        tau = {"mode": "tau", "benchmarkTools": ["tau_turn"]}
+        for scope, tool in [(terminal, "terminal"), (terminal, "task_handoff"),
+                            (terminal, "task_blocked"), (tau, "tau_turn")]:
+            gateway.validate_tools(scope, body(tool))
+        for scope in [terminal, tau]:
+            for tool in ["shell", "read", "patch", "rsi_handoff", "rsi_revise", "contract_delivery"]:
+                with self.assertRaisesRegex(ValueError, "tool_not_admitted"):
+                    gateway.validate_tools({**scope, "allowRevise": True, "purpose": "continuation"}, body(tool))
+        for scope in [{"mode": "bridge"}, {"mode": "tau", "benchmarkTools": ["shell"]}]:
+            with self.assertRaisesRegex(ValueError, "admission_missing"):
+                gateway.validate_tools(scope, body("shell"))
+        with self.assertRaisesRegex(ValueError, "mode_not_admitted"):
+            gateway.validate_tools({"mode": "untrusted"}, body("shell"))
 
 
 if __name__ == "__main__":

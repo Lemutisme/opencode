@@ -17,7 +17,7 @@ const Input = Schema.Struct({
   effort: Schema.String,
   goal: Schema.String,
   artifact: Schema.String,
-  mode: Schema.optional(Schema.Literal("programbench")),
+  mode: Schema.optional(Schema.Literals(["programbench", "bridge", "tau"])),
   allowRevise: Schema.optional(Schema.Boolean),
 })
 const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(await Bun.file("/admission/worker.json").text())
@@ -34,6 +34,18 @@ if (await Bun.file("/state/session.sqlite").exists()) throw new Error("implicit 
 const disposition = { digest: "", summary: "", blocked: "" }
 const controller = new AbortController()
 const revisionRequest = { reason: undefined as string | undefined }
+if (input.allowRevise && (input.mode === "bridge" || input.mode === "tau"))
+  throw new Error("external task-local revision is not qualified")
+const external = await (async () => {
+  if (input.mode === "tau") {
+    const { tauProfile } = await import("./rsi-tau-worker")
+    return tauProfile({ deadline: input.deadline, standing })
+  }
+  if (input.mode === "bridge") {
+    const { bridgeProfile } = await import("./rsi-bridge-worker")
+    return bridgeProfile({ deadline: input.deadline, standing })
+  }
+})()
 const delivery =
   input.mode === "programbench"
     ? await ContractDelivery.create({
@@ -163,7 +175,7 @@ const host = await PromiseSdk.create(
                 }
               : undefined,
           )
-        : plugin,
+        : (external?.plugin ?? plugin),
     ],
   },
   {
@@ -197,7 +209,8 @@ try {
           (input.allowRevise
             ? "\nIf the execution strategy or harness prevents further progress, use rsi_revise with a concrete diagnosis. The host may evaluate a replacement; your task checkpoint and original deadline are retained. Do not use this merely to edit task source."
             : "")
-        : `Deliver /candidate/${input.artifact} using rsi_handoff with an honest summary. If unable, use rsi_blocked. Host verification and promotion are independent; never self-certify.`),
+        : (external?.instructions ??
+          `Deliver /candidate/${input.artifact} using rsi_handoff with an honest summary. If unable, use rsi_blocked. Host verification and promotion are independent; never self-certify.`)),
   })
   const wait = async () => {
     await host.sessions.wait({ sessionID: session.id })
@@ -224,7 +237,30 @@ try {
       ("summary" in result ? result.summary : "reason" in result ? result.reason : undefined) ??
       "Task artifact submitted"
   }
-  while (!delivery) {
+  if (external) {
+    while (true) {
+      await wait()
+      const result = external.status()
+      if (result.state !== "open") {
+        await Bun.write(
+          artifact,
+          JSON.stringify({
+            kind: input.mode === "tau" ? "tau-handoff" : "bridge-handoff",
+            result,
+            authoritativeCompletion: false,
+          }),
+        )
+        disposition.digest = await snapshot()
+        disposition.summary = ("summary" in result ? result.summary : undefined) ?? "Official conversation ended"
+        break
+      }
+      await host.sessions.prompt({
+        sessionID: session.id,
+        text: "No benchmark handoff is recorded. Continue using the admitted benchmark tools until the official conversation ends, or explicitly submit task_handoff/task_blocked if those tools are available. The original deadline is unchanged.",
+      })
+    }
+  }
+  while (!delivery && !external) {
     await wait()
     if (disposition.blocked) throw new Error(disposition.blocked)
     if (disposition.digest && disposition.digest === (await snapshot())) break

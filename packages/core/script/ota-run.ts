@@ -32,7 +32,13 @@ if (locked !== "--locked") {
 const { configure } = (await import(pathToFileURL(profile).href)) as {
   configure(
     root: string,
-  ): Promise<{ protocol: Protocol; seed: { s: Uint8Array; h: Uint8Array }; driver: Driver; readmission?: Readmission }>
+  ): Promise<{
+    protocol: Protocol
+    seed: { s: Uint8Array; h: Uint8Array }
+    driver: Driver
+    readmission?: Readmission
+    dispose?(): Promise<void>
+  }>
 }
 const config = await configure(root)
 const artifacts = new Artifacts(path.join(root, "objects"))
@@ -52,4 +58,5 @@ try {
       : 1
 } finally {
   ota.db.close()
+  await config.dispose?.()
 }

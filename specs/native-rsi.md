@@ -13,8 +13,8 @@ source snapshots; merging upstream does not renew them.
 
 | Scope           | Implemented                                                                                                                                                                    | Not established                                                                                   |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| Within-task RSI | Task-scoped S/H selection, public checkpoints, same-task successor execution, one original deadline and Kernel task completion; scripted native/container qualification passed | Real-model performance is untested. Ordinary task-source repair alone is not RSI.                 |
-| Across-task RSI | Native proposals/releases, paired selection, finite closure, ProgramBench adapter and independent audit; scripted native/container qualification passed                        | No real-model RSI result exists; the official scorer was not exercised by the mechanical fixture. |
+| Within-task RSI | ProgramBench task-scoped S/H selection, checkpoints, same-task continuation, original deadline and Kernel completion; scripted container qualification passed | Real-model gains are unproven; τ/TB environment forks are not qualified and fail closed. |
+| Across-task RSI | Native proposals/releases, paired selection, finite closure, independent audit and ProgramBench/τ³/TB4 adapters | Real proposals have run, but no completed real-model paired result or RSI gain is established here. |
 
 The RSI worker composes the existing ProgramBench delivery tools instead of
 launching the old fixed worker. Qualification ran real SDK/Session, builds,
@@ -178,6 +178,30 @@ required before making that stronger claim. Task-local use additionally requires
 comparison is feedback, not blind benchmark evaluation. Final ready submissions
 with partial official scores terminate the task as blocked, not another solve retry.
 
+### External benchmark environments
+
+Profiles choose exactly one of `grader`, `programbench`, `tau` or `terminal`.
+The last two also require explicit top-level `safety` IDs. A host-owned environment
+lease exposes public tools over a peer-bound Unix socket; H still runs the native
+V2 Session. Revocation fences actions before grading, while final disposal happens
+after grading. Native local filesystem/shell tools are not exposed in these modes.
+
+- **τ³ v1.0.1 text:** official Orchestrator, private user simulator, business state
+  and deterministic ALL grader remain on the host. `tau_turn` batches official
+  business calls or delivers speech; customer messages enter the durable inbox.
+  Official termination stops further solver admission. This custom wrapper fixes
+  **100 interaction steps**, unlike the official CLI's default 200; it is not an
+  identical leaderboard harness. User-simulator requests have a separate ledger.
+- **Terminal-Bench 4.0:** Harbor retains the original task container's user,
+  filesystem, services and guarded network; official artifact collection and a
+  separate verifier determine reward. Agent/verifier images and Docker Compose
+  are pinned. The new **six-hour outer allocation** includes setup and grading;
+  it is not the historical eight-hour agent budget.
+
+Both adapters have native Docker/script-provider qualifications, including
+official grading and cleanup. These validate integration, not model intelligence
+or RSI improvement. Task-local private-state forks are deliberately unsupported.
+
 From `packages/core`, launch using the existing OS-locked supervisor:
 
 ```sh
@@ -229,7 +253,7 @@ NEW_FIXTURE_RELEASE GATEWAY PINNED_TASK_IMAGE [delivery|closure]`. Use a fresh
   requires the final prepared H2 proposal and keeps the unfinished task escalated.
   Both use scripted responses/mechanical scores, never real-model performance.
 
-Qualification scores are deterministic mechanics fixtures, not ProgramBench scores.
+Earlier qualification scores are deterministic mechanics fixtures, not ProgramBench scores.
 The previous [task-level regression](./pro-contract-v2-delivery.md) remains unchanged.
 
 The 2026-10-02 scoped qualification includes original-task delivery after both S/H

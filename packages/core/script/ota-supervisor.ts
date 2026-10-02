@@ -818,18 +818,23 @@ export async function evaluationWorkers<T>(
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) throw new Error("invalid concurrency")
   const queue = { next: 0 }
   const abort = new AbortController()
-  const results = await Promise.allSettled(
+  const failures: unknown[] = []
+  await Promise.allSettled(
     Array.from({ length: Math.min(concurrency, items.length) }, async () => {
       while (!abort.signal.aborted) {
         const index = queue.next++
         if (index >= items.length) return
-        await execute(items[index], abort.signal).catch((error) => {
-          abort.abort()
-          throw error
-        })
+        await Promise.resolve()
+          .then(() => execute(items[index], abort.signal))
+          .catch((error) => {
+            // Capture causal order before aborting peers: array order can otherwise
+            // replace the original fault with an earlier worker's cancellation.
+            failures.push(error)
+            abort.abort(error)
+            throw error
+          })
       }
     }),
   )
-  const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
-  if (failed) throw failed.reason
+  if (failures.length) throw failures[0]
 }

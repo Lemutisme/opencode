@@ -78,13 +78,29 @@ def audit_standing(scope):
 
 
 def validate_tools(scope, body):
+    mode = scope.get("mode")
+    if mode in {"bridge", "tau"}:
+        tools = scope.get("benchmarkTools")
+        if (not isinstance(tools, list) or not tools
+            or any(not isinstance(name, str) for name in tools)
+            or len(set(tools)) != len(tools)
+            or (mode == "tau" and tools != ["tau_turn"])):
+            raise ValueError("benchmark_tool_admission_missing")
+        allowed = set(tools)
+        if mode == "bridge":
+            allowed.update({"task_handoff", "task_blocked"})
+        if any(tool.get("name") not in allowed for tool in json.loads(body).get("tools", [])):
+            raise ValueError("tool_not_admitted")
+        return
     allowed = {"glob", "grep", "read", "patch", "shell"}
-    if scope.get("mode") == "programbench":
+    if mode == "programbench":
         allowed.add("contract_delivery")
         if scope.get("allowRevise") and scope.get("purpose") == "continuation":
             allowed.add("rsi_revise")
-    else:
+    elif mode is None:
         allowed.update({"rsi_handoff", "rsi_blocked"})
+    else:
+        raise ValueError("execution_mode_not_admitted")
     if any(tool.get("name") not in allowed for tool in json.loads(body).get("tools", [])):
         raise ValueError("tool_not_admitted")
 
@@ -120,6 +136,8 @@ def main():
             standing(scope)
             if not (Path(args.scope).parent / "active").exists():
                 raise ValueError("allocation_closed")
+            if (Path(args.scope).parent / "provider-ended").exists():
+                raise ValueError("official_environment_ended")
             validate_tools(scope, body)
             return super().record(pid, body)
 

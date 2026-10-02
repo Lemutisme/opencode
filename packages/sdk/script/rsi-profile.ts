@@ -13,6 +13,9 @@ const Profile = Schema.Struct({
   strategy: RSIRuntime.File,
   grader: Schema.optional(RSIRuntime.File),
   programbench: Schema.optional(RSIRuntime.File),
+  terminal: Schema.optional(RSIRuntime.File),
+  tau: Schema.optional(RSIRuntime.File),
+  safety: Schema.optional(Schema.Array(Schema.String)),
   authority: Schema.Array(RSIRuntime.File),
   development: Schema.optional(
     Schema.Struct({ goal: Schema.String, files: Schema.Record(Schema.String, RSIRuntime.File) }),
@@ -62,24 +65,40 @@ export async function configure(root: string) {
   const input = Schema.decodeUnknownSync(Schema.fromJsonString(Profile))(await Bun.file(profile.path).text(), {
     onExcessProperty: "error",
   })
-  if (!!input.grader === !!input.programbench)
-    throw new Error("freeze exactly one trusted grader or ProgramBench manifest")
+  if ([input.grader, input.programbench, input.terminal, input.tau].filter(Boolean).length !== 1)
+    throw new Error("freeze exactly one trusted grader or benchmark manifest")
   if (
     input.development &&
     (!input.development.goal.trim() ||
       Object.keys(input.development.files).some(
         (name) =>
-          !/^[a-z][a-z0-9_.-]*$/.test(name) || ["parent-strategy", "workspace.tar", "obligations.json"].includes(name),
+          !/^[a-z][a-z0-9_.-]*$/.test(name) ||
+          ["parent-strategy", "workspace.tar", "obligations.json", "bridge-tools.json"].includes(name),
       ))
   )
     throw new Error("development context requires a goal and non-reserved public file names")
+  const safety = new Set(input.safety ?? [])
+  if (
+    safety.size !== (input.safety?.length ?? 0) ||
+    [...safety].some((id) => {
+      const test = input.tests.find((test) => test.id === id)
+      return !test || test.performance !== undefined || test.total !== 1 || input.audit?.some((test) => test.id === id)
+    }) ||
+    ((input.terminal || input.tau) && !safety.size)
+  )
+    throw new Error("external benchmark safety IDs must name fixed non-performance selection tests, never audit")
+  const safetyAdapter = await (async () => {
+    if (!safety.size) return
+    const { containmentTask, containmentScore } = await import("./rsi-safety")
+    return { task: containmentTask, grade: containmentScore }
+  })()
   const references = [
     input.harness,
     input.strategy,
     input.gateway,
     ...input.authority,
     ...Object.values(input.development?.files ?? {}),
-    ...[input.grader, input.programbench, input.deployment?.checkpoint].filter(
+    ...[input.grader, input.programbench, input.terminal, input.tau, input.deployment?.checkpoint].filter(
       (file): file is RSIRuntime.File => file !== undefined,
     ),
   ]
@@ -88,16 +107,26 @@ export async function configure(root: string) {
   const key = process.env.OPENAI_API_KEY
   if (!key) throw new Error("missing host-only credential")
   // Only the operator-pinned grader is imported here; never a proposed H module.
-  const adapter = await (async () => {
+  const adapter: Pick<NativeConfiguration, "task" | "grade" | "continuation" | "dispose"> & {
+    authority: RSIRuntime.File[]
+  } = await (async () => {
     if (input.programbench) {
       const { programBench } = await import("./rsi-programbench")
       return programBench(root, input.programbench)
+    }
+    if (input.terminal) {
+      const { terminalBench } = await import("./rsi-terminal")
+      return terminalBench(root, input.terminal)
+    }
+    if (input.tau) {
+      const { tauBench } = await import("./rsi-tau")
+      return tauBench(root, input.tau)
     }
     // Operator-pinned module, never an import from H.
     return {
       ...((await import(pathToFileURL(input.grader!.path).href)) as Pick<
         NativeConfiguration,
-        "task" | "grade" | "continuation"
+        "task" | "grade" | "continuation" | "dispose"
       >),
       authority: [input.grader!],
     }
@@ -109,9 +138,10 @@ export async function configure(root: string) {
     root,
     provider: { gateway: input.gateway, model: input.model, effort: input.effort, upstream: input.upstream, key },
     authority: [profile, ...references, ...adapter.authority, await RSIRuntime.ref(import.meta.path)],
-    task: adapter.task,
-    grade: adapter.grade,
+    task: (test, task) => (safety.has(test.id) ? safetyAdapter!.task(test) : adapter.task(test, task)),
+    grade: (input) => (safety.has(input.test.id) ? safetyAdapter!.grade(input) : adapter.grade(input)),
     continuation: adapter.continuation,
+    dispose: adapter.dispose,
     development: input.development
       ? { goal: input.development.goal, files: { ...input.development.files } }
       : undefined,
@@ -143,6 +173,7 @@ export async function configure(root: string) {
     driver,
     protocol,
     native,
+    dispose: adapter.dispose,
     audit: input.audit,
     seed: { s: await Bun.file(input.strategy.path).bytes(), h: await Bun.file(input.harness.path).bytes() },
   }

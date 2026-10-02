@@ -7,6 +7,7 @@ import type { Protocol, State } from "../../core/script/ota-rsi"
 import type { Continuation, Driver, Job } from "../../core/script/ota-supervisor"
 import { RSIRuntime } from "./rsi-runtime"
 import { RSINative } from "./rsi-native"
+import type { NativeBridge } from "./rsi-bridge"
 
 export type NativeTask = {
   identity?: string
@@ -14,7 +15,8 @@ export type NativeTask = {
   artifact: string
   files?: Record<string, RSIRuntime.File>
   image?: string
-  mode?: "programbench"
+  mode?: "programbench" | "bridge" | "tau"
+  bridge?: NativeBridge
   allowRevise?: boolean
 }
 export type NativeObservation = {
@@ -29,6 +31,7 @@ export type NativeConfiguration = {
   root: string
   provider: RSINative.Provider
   authority: RSIRuntime.File[]
+  dispose?(): Promise<void>
   development?: { goal: string; files: Record<string, RSIRuntime.File> }
   task(test: Protocol["tests"][number], task?: Job["task"]): NativeTask | Promise<NativeTask>
   grade(
@@ -78,6 +81,8 @@ export function nativeDriver(config: NativeConfiguration): Driver {
         "rsi-native.ts",
         "rsi-runtime.ts",
         "rsi-gateway.py",
+        "rsi-bridge.ts",
+        "rsi-safety.ts",
         "rsi-files.py",
         "rsi-task.ts",
         "contract-delivery.ts",
@@ -321,7 +326,14 @@ export async function evaluateNative(
     }
   } finally {
     input.signal.removeEventListener("abort", cancel)
-    await worker.close()
-    await worker.accounting()
+    try {
+      await worker.close()
+    } finally {
+      try {
+        await worker.accounting()
+      } finally {
+        await task.bridge?.finish()
+      }
+    }
   }
 }

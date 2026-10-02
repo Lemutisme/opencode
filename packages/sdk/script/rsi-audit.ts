@@ -640,6 +640,7 @@ async function main() {
     await Bun.write(path.join(root, "RESULT.json"), JSON.stringify(audit.report(), null, 2))
     process.exitCode = audit.report().valid ? 0 : 1
     audit.db.close()
+    await config.native.dispose?.()
   }
 }
 
