@@ -5,6 +5,21 @@ paired evaluation, Kernel-authorized selection and successor execution. Linear
 and tree search use the same mechanism. This is an execution implementation;
 scripted qualification is **not evidence of real-model performance improvement**.
 
+## Implementation status
+
+Integration base: upstream V2 **2.0.22**, `41516c78c8387a86e998a90043265a33a870276d`
+(merged on 2026-10-02). Historical qualifications remain bound to their original
+source snapshots; merging upstream does not renew them.
+
+| Scope | Implemented | Not established |
+| --- | --- | --- |
+| Within-task delivery | Public counterexample retention, repair, replay and explicit delivery in `contract-worker.ts` | This repairs the task artifact, not S/H. Within-task S/H replacement and continuation of the same task are not implemented. |
+| Across-task RSI | Native S/H proposals, isolated releases, independent evaluation, Kernel selection and successor execution; scripted linear/tree qualification | The ProgramBench task/grader adapter, finite two-selection closure and independent final-audit entrypoint remain unconnected. No real-model RSI result exists. |
+
+The ordinary ProgramBench worker and the RSI worker are separate entrypoints.
+Their individual tests do not establish a combined task-level and cross-task
+RSI experiment. No model-weight self-training is implemented or claimed.
+
 ## One source graph, one admission gate
 
 Set `expansionWidth` in the operator profile:
