@@ -41,7 +41,7 @@ export namespace RSINative {
   export type Scope =
     | OTAScope
     | {
-        kind: "audit"
+        kind: "audit" | "evaluation"
         database: string
         protocol: string
         assignment: string

@@ -19,6 +19,8 @@ def standing(scope):
         raise ValueError("campaign_cancelled")
     if scope.get("kind") == "audit":
         return audit_standing(scope)
+    if scope.get("kind") == "evaluation":
+        return evaluation_standing(scope)
     with closing(sqlite3.connect(f"file:{scope['database']}?mode=ro", uri=True)) as db:
         state = json.loads(
             db.execute("SELECT value FROM ota_state WHERE id=1").fetchone()[0]
@@ -75,6 +77,23 @@ def audit_standing(scope):
         or original.get("stopped") != "recursive closure completed" or not support
         or original["kernel"]["contracts"].get(support, {}).get("status") != "discharged"):
         raise ValueError("audit_source_changed")
+
+
+def evaluation_standing(scope):
+    # A measurement has its own issuer/Contract. It is not an OTA proposal job
+    # and does not borrow the strict independent audit's completed-RSI standing.
+    with closing(sqlite3.connect(f"file:{scope['database']}?mode=ro", uri=True)) as db:
+        state = json.loads(db.execute("SELECT value FROM rsi_evaluation WHERE id=1").fetchone()[0])
+    assignment = next((item for item in state["assignments"] if item["id"] == scope["assignment"]), None)
+    if (state.get("stopped") or state["protocol"] != scope["protocol"]
+        or state["pair"] != scope["pair"] or not assignment
+        or assignment["status"] != "active" or assignment["pair"] != scope["pair"]
+        or assignment.get("deadline") != scope["deadline"] or time.time() * 1000 >= scope["deadline"]):
+        raise ValueError("stale_measurement_admission")
+    contract = state["kernel"]["contracts"].get(assignment.get("contractID"), {})
+    if (contract.get("status") != "active" or contract.get("scope") != scope["protocol"]
+        or contract.get("spec", {}).get("budget", {}).get("deadline") != scope["deadline"]):
+        raise ValueError("measurement_contract_withdrawn")
 
 
 def validate_tools(scope, body):

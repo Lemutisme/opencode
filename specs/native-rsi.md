@@ -202,6 +202,13 @@ Both adapters have native Docker/script-provider qualifications, including
 official grading and cleanup. These validate integration, not model intelligence
 or RSI improvement. Task-local private-state forks are deliberately unsupported.
 
+For a separately frozen **fixed-pair measurement**, `rsi-evaluation.ts NEW_ROOT PLAN`
+uses its own evaluation ledger and Kernel measurement Contracts, not an OTA
+proposal or a fabricated successful audit source. The plan binds the exact seed
+pair, profile and instance/repeat identities; it never proposes or promotes H/S.
+A valid zero completes the measurement, not the task. Invalid measurements stop
+without invented scores. Existing ledgers accept only explicit `--fence`, not replay.
+
 From `packages/core`, launch using the existing OS-locked supervisor:
 
 ```sh

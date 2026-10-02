@@ -83,6 +83,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
         "rsi-gateway.py",
         "rsi-bridge.ts",
         "rsi-safety.ts",
+        "rsi-evaluation.ts",
         "rsi-files.py",
         "rsi-task.ts",
         "contract-delivery.ts",
