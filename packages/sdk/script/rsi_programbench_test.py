@@ -39,6 +39,7 @@ class BoundaryTest(unittest.TestCase):
                 "image": "sha256:" + "b" * 64,
                 "instance": "fixture__program.deadbeef",
                 "docker": {"path": str(self.root / "fake-docker")},
+                "wheelhouse": {"path": str(self.root / "wheels")},
             },
         }
         # This executable is an explicit test transport, not a Docker daemon.
@@ -150,6 +151,82 @@ class BoundaryTest(unittest.TestCase):
             self.assertEqual(args[args.index("--cap-drop") + 1], "ALL")
             self.assertIn(self.control["config"]["image"], args)
             self.assertEqual(args[args.index("--pull") + 1], "never")
+
+    def test_existing_scorer_isolation_flags_are_not_duplicated(self):
+        args = grader.docker_arguments(
+            self.control,
+            [
+                "run",
+                "--init",
+                "--name",
+                "fixture",
+                "--network",
+                "none",
+                "--net=none",
+                "--pull=never",
+                "--cap-drop",
+                "ALL",
+                "--security-opt=no-new-privileges",
+                "--memory",
+                "8g",
+                "--pids-limit=512",
+                "image",
+            ],
+        )
+        for option in [
+            "--network",
+            "--pull",
+            "--cap-drop",
+            "--security-opt",
+            "--memory",
+            "--pids-limit",
+        ]:
+            self.assertEqual(args.count(option), 1, args)
+        self.assertNotIn("--net=none", args)
+        self.assertEqual(args[-1], "image")
+
+    def test_network_enforcement_does_not_rewrite_the_in_container_command(self):
+        args = grader.docker_arguments(
+            self.control,
+            ["create", "--name", "fixture", "image", "program", "--network", "host"],
+        )
+        self.assertEqual(args[-4:], ["image", "program", "--network", "host"])
+        self.assertEqual(args[args.index("--network") + 1], "none")
+
+    def test_conflicting_network_or_resource_bounds_fail_closed(self):
+        for option in [
+            "--network=host",
+            "--net=bridge",
+            "--memory=16g",
+            "--pull=always",
+        ]:
+            with (
+                self.subTest(option=option),
+                self.assertRaisesRegex(grader.GraderError, "Conflicting"),
+            ):
+                grader.docker_arguments(self.control, ["run", option, "image"])
+
+    def test_test_containers_use_the_frozen_readonly_offline_supply_too(self):
+        args = grader.docker_arguments(
+            self.control,
+            [
+                "run",
+                "--init",
+                "--env",
+                "PIP_CONSTRAINT=/trusted/constraints.txt",
+                "test-image",
+            ],
+        )
+        self.assertIn(
+            "type=bind,source="
+            + str(self.root / "wheels")
+            + ",target=/opt/rsi-grader-wheels,readonly",
+            args,
+        )
+        self.assertIn("PIP_NO_INDEX=1", args)
+        self.assertIn("PIP_FIND_LINKS=/opt/rsi-grader-wheels", args)
+        self.assertIn("PIP_CONSTRAINT=/trusted/constraints.txt", args)
+        self.assertEqual(args[args.index("--network") + 1], "none")
 
     def test_fence_rejects_new_admission_without_spawning(self):
         grader.write(self.root / "FENCE.json", {"acknowledged": False})

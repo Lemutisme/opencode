@@ -228,6 +228,58 @@ def docker_arguments(control, argv):
     )
     argv = [value["image"] if part == tag else part for part in argv]
     if argv[0] in {"run", "create"}:
+        # The frozen scorer already sets some isolation options. Docker rejects
+        # duplicate network flags, even when both say none. Normalize only the
+        # option prefix; never rewrite arguments belonging to the container's command.
+        required = {
+            "--pull": "never",
+            "--network": "none",
+            "--net": "none",
+            "--pids-limit": "512",
+            "--memory": "8g",
+        }
+        repeated = {"--cap-drop": "ALL", "--security-opt": "no-new-privileges"}
+        flags = {
+            "--init",
+            "--rm",
+            "--read-only",
+            "--detach",
+            "-d",
+            "--interactive",
+            "-i",
+            "--tty",
+            "-t",
+            "-it",
+            "-dit",
+        }
+        prefix = []
+        index = 1
+        while index < len(argv) and argv[index].startswith("-"):
+            item = argv[index]
+            if item == "--":
+                index += 1
+                break
+            if item in flags:
+                prefix.append(item)
+                index += 1
+                continue
+            option, equal, argument = item.partition("=")
+            length = 1 if equal else 2
+            if not equal:
+                if index + 1 >= len(argv):
+                    raise GraderError("infrastructure", "Missing Docker option value")
+                argument = argv[index + 1]
+            if option in required:
+                if argument != required[option]:
+                    raise GraderError(
+                        "infrastructure",
+                        "Conflicting Docker isolation option: " + option,
+                    )
+            elif repeated.get(option) != argument:
+                prefix.extend(argv[index : index + length])
+            index += length
+        if index >= len(argv):
+            raise GraderError("infrastructure", "Missing Docker image")
         argv = [
             argv[0],
             "--pull",
@@ -244,7 +296,21 @@ def docker_arguments(control, argv):
             "512",
             "--memory",
             "8g",
-            *argv[1:],
+            *prefix,
+            # The legacy scorer mounts wheels for builds but assumes networking
+            # in test containers. Keep both phases offline with the same frozen
+            # supply; a distinct target avoids duplicate legacy bind mounts.
+            "--mount",
+            "type=bind,source="
+            + value["wheelhouse"]["path"]
+            + ",target=/opt/rsi-grader-wheels,readonly",
+            "--env",
+            "PIP_NO_INDEX=1",
+            "--env",
+            "PIP_FIND_LINKS=/opt/rsi-grader-wheels",
+            "--env",
+            "PIP_DISABLE_PIP_VERSION_CHECK=1",
+            *argv[index:],
         ]
     return argv
 
@@ -796,6 +862,7 @@ def supervise(value, workspace, root, deadline, config_hash, owner):
             for part in [
                 str(Path(sys.executable).resolve()),
                 "-I",
+                "-B",
                 "-S",
                 script,
                 "--docker",
@@ -829,6 +896,7 @@ def supervise(value, workspace, root, deadline, config_hash, owner):
                 [
                     value["python"]["path"],
                     "-I",
+                    "-B",
                     script,
                     "--worker",
                     str(root / "control.json"),

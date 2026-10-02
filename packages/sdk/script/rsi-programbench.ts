@@ -60,6 +60,7 @@ export async function programBench(root: string, reference: RSIRuntime.File) {
     const child = Bun.spawn(
       [
         "python3",
+        "-B",
         path.join(import.meta.dir, "rsi-programbench.py"),
         "--config",
         task.grader.path,
