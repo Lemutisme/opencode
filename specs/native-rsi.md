@@ -161,6 +161,9 @@ Alternatively, replace `grader` with a `programbench` manifest file reference:
 
 Each grader JSON pins the official runner, Python, Docker, wheelhouse and that
 instance's offline blobs; see `rsi-programbench.py`'s validated configuration.
+The wheelhouse must cover both build and every test branch's dependencies. The
+guard mounts it read-only in both phases and disables pip network access; missing
+test dependencies invalidate the evaluation rather than becoming a zero score.
 Only the candidate H solves the task. The host packages its fenced workspace and
 scores it with cancellation-aware process/container fencing. `safety` names a
 separate fixed native liveness/containment obligation, not a benchmark instance.
@@ -234,3 +237,6 @@ takeovers, a separate H2-handoff closure that correctly leaves its task escalate
 and a cross-task closure followed by four independent audit allocations without
 changing the source ledger. These new container cases use width one. Historical
 tree qualification and current lineage regressions are separate evidence.
+A separate offline official-scorer regression reproduced the archived i3-style
+463/539 result without another model allocation or changing the old artifacts.
+This validates scorer wiring, not a new RSI gain or hostile-candidate resistance.
