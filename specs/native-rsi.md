@@ -164,6 +164,9 @@ instance's offline blobs; see `rsi-programbench.py`'s validated configuration.
 The wheelhouse must cover both build and every test branch's dependencies. The
 guard mounts it read-only in both phases and disables pip network access; missing
 test dependencies invalidate the evaluation rather than becoming a zero score.
+Acknowledged candidate build failures instead follow the official Evaluator's
+terminal-zero result, retaining its error annotation and `executedTests: 0`.
+They do not cancel other fixed repeats; infrastructure unknowns still fail closed.
 Only the candidate H solves the task. The host packages its fenced workspace and
 scores it with cancellation-aware process/container fencing. `safety` names a
 separate fixed native liveness/containment obligation, not a benchmark instance.

@@ -501,10 +501,11 @@ class OfficialScopeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         sys.path.insert(0, str(Path(os.environ["PROGRAMBENCH_RUNNER"]) / "src"))
-        from programbench.eval.eval import EvaluationResult, TestResult
+        from programbench.eval.eval import EvaluationResult, TestResult, TestBranchError
 
         cls.EvaluationResult = EvaluationResult
         cls.TestResult = TestResult
+        cls.TestBranchError = TestBranchError
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -540,9 +541,9 @@ class OfficialScopeTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def grade(self):
+    def grade(self, acknowledgements=None):
         self.path.write_text(self.result.model_dump_json())
-        return grader.official_result(self.path, self.instance)
+        return grader.official_result(self.path, self.instance, acknowledgements)
 
     def test_valid_partial_uses_official_active_ignored_denominator(self):
         result, valid = self.grade()
@@ -556,6 +557,56 @@ class OfficialScopeTest(unittest.TestCase):
         self.result.test_results = self.result.test_results[:1]
         _, valid = self.grade()
         self.assertFalse(valid)
+
+    def test_only_acknowledged_official_build_failure_is_terminal_zero(self):
+        self.result.error_code = "compile_failed"
+        for test in self.result:
+            test.status = "not_run"
+            test.extra = {"error_code": "compile_failed"}
+        _, valid = self.grade()
+        self.assertFalse(valid)
+        receipts = {"compile": {"acknowledged": True, "exitCode": 7}}
+        result, valid = self.grade(receipts)
+        self.assertTrue(valid)
+        self.assertEqual((result.n_resolved, len(result), result.score), (0, 2, 0))
+        self.assertEqual(
+            grader.terminal_failure(result, receipts),
+            {"kind": "candidate_build", "officialError": "compile_failed", "stage": "compile", "exitCode": 7, "executedTests": 0},
+        )
+
+    def test_infrastructure_and_incomplete_scopes_cannot_become_terminal_zero(self):
+        receipts = {"compile": {"acknowledged": True, "exitCode": 1}}
+        for test in self.result:
+            test.status = "not_run"
+            test.extra = {"error_code": "compile_failed"}
+        for code in ["install_rerunfailures_failed", "wipe_workspace_failed", "unknown"]:
+            self.result.error_code = code
+            self.assertFalse(self.grade(receipts)[1])
+        self.result.error_code = "compile_failed"
+        for receipt in [{"acknowledged": False, "exitCode": 1}, {"acknowledged": True, "exitCode": 137}, {"acknowledged": True, "exitCode": 0}]:
+            self.assertFalse(self.grade({"compile": receipt})[1])
+        self.result.test_results = self.result.test_results[:1]
+        self.assertFalse(self.grade(receipts)[1])
+
+    def test_terminal_scope_distinguishes_declared_empty_branch_from_missing_metadata(self):
+        self.result.error_code = "compile_failed"
+        for test in self.result:
+            test.status = "not_run"
+            test.extra = {"error_code": "compile_failed"}
+        self.result.test_branch_errors = {
+            "active": [self.TestBranchError(error_code="no_expected_test_list", error_details="unknown")]
+        }
+        receipts = {"compile": {"acknowledged": True, "exitCode": 7}}
+        self.assertFalse(self.grade(receipts)[1])
+        self.result.test_branch_errors = {
+            "empty": [self.TestBranchError(error_code="no_expected_test_list", error_details="no cases")]
+        }
+        self.result.test_branches.append("empty")
+        self.instance["branches"]["empty"] = {"tests": []}
+        self.assertTrue(self.grade(receipts)[1])
+        self.instance["branches"]["empty"] = {}
+        with self.assertRaises(KeyError):
+            self.grade(receipts)
 
     def test_warnings_system_errors_and_branch_errors_fail_closed(self):
         self.result.warnings = ["synthetic infrastructure issue"]

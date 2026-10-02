@@ -484,7 +484,49 @@ def validate_workspace(path):
                 )
 
 
-def official_result(path, instance):
+def terminal_failure(result, acknowledgements, instance=None):
+    """Only acknowledged candidate-owned commands can be terminal negatives.
+
+    A Docker/host interruption does not produce the post-command receipt. This
+    is the declared normal-use scorer boundary, not hostile-image certification.
+    """
+    stage = {
+        "compile_failed": "compile",
+        "copy_executable_failed": "copy_executable",
+        "hash_executable_failed": "hash_executable",
+    }.get(result.error_code)
+    receipt = (acknowledgements or {}).get(stage)
+    if (
+        not stage
+        or not receipt
+        or receipt.get("acknowledged") is not True
+        or type(receipt.get("exitCode")) is not int
+        or not 1 <= receipt["exitCode"] <= 127
+        or any(
+            (instance or {}).get("branches", {}).get(branch, {}).get("tests") != []
+            or any(error.error_code != "no_expected_test_list" for error in errors)
+            for branch, errors in result.test_branch_errors.items()
+        )
+        or result.warnings
+        or result.n_system_errors
+        or not result.test_results
+        or any(
+            test.status != "not_run"
+            or test.extra.get("error_code") != result.error_code
+            for test in result
+        )
+    ):
+        return None
+    return {
+        "kind": "candidate_build",
+        "officialError": result.error_code,
+        "stage": stage,
+        "exitCode": receipt["exitCode"],
+        "executedTests": 0,
+    }
+
+
+def official_result(path, instance, acknowledgements=None):
     """Canonical active/ignored scope, with completeness independent of score."""
     from programbench.eval.eval import EvaluationResult
     from programbench.eval.eval_batch import get_branches_to_eval
@@ -516,6 +558,10 @@ def official_result(path, instance):
         or result.n_system_errors
         or result.warnings
     )
+    if terminal_failure(result, acknowledgements, instance):
+        # The official evaluator declares every case not_run after a failed
+        # build. These are denominator entries, never invented executed tests.
+        valid = bool(expected)
     valid = valid and len(observed) == len(set(observed)) and set(observed) == expected
     return result, bool(valid)
 
@@ -541,11 +587,7 @@ def worker(path):
         HF_DATASETS_OFFLINE="1",
         PROGRAMBENCH_DOCKER_CPUS=str(value["cpus"]),
     )
-    from programbench.candidate import (
-        CandidateError,
-        package_workspace,
-        preflight_candidate,
-    )
+    from programbench.candidate import CandidateError, package_workspace
     from programbench.eval.eval import Evaluator
     from programbench.utils.load_data import (
         get_active_branches,
@@ -562,24 +604,6 @@ def worker(path):
         subject = sha(archive)
         archive.chmod(0o400)
         write(root / "SUBJECT.json", {"archive": str(archive), "sha256": subject})
-        stage = "preflight"
-        checked = preflight_candidate(
-            archive,
-            value["instance"],
-            image_ref=value["image"],
-            docker_cpus=value["cpus"],
-            deadline=time.monotonic()
-            + max(0, control["deadline"] / 1000 - time.time()),
-            labels={LABEL: control["token"]},
-        )
-        write(
-            root / "PREFLIGHT.json",
-            {
-                "archive": subject,
-                "executable": checked.executable_hash,
-                "output": checked.output,
-            },
-        )
         stage = "official_evaluation"
         # Only the trusted grader reads benchmark metadata; none is exposed to H.
         instance = _load_single_instance(
@@ -587,7 +611,40 @@ def worker(path):
             include_tests=True,
         )
         branches = get_active_branches(instance)
-        result = Evaluator(
+        acknowledgements = {}
+
+        class AcknowledgedEvaluator(Evaluator):
+            def _run_step(self, command, **options):
+                name = options["step_name"]
+                if name not in {"compile", "copy_executable", "hash_executable"}:
+                    return super()._run_step(command, **options)
+                marker = "__rsi_command_" + uuid.uuid4().hex + "__="
+                wrapped = (
+                    "set +e; ( " + command + "\n); status=$?; printf '\\n"
+                    + marker + "%s\\n' \"$status\"; exit \"$status\""
+                )
+                try:
+                    return super()._run_step(wrapped, **options)
+                finally:
+                    entry = options["log_buf"][-1] if options["log_buf"] else {}
+                    codes = re.findall(
+                        r"(?m)^" + re.escape(marker) + r"([0-9]+)$",
+                        entry.get("output", ""),
+                    )
+                    acknowledged = (
+                        entry.get("step") == name
+                        and not entry.get("exception_info")
+                        and len(codes) == 1
+                        and int(codes[0]) == entry.get("returncode")
+                    )
+                    acknowledgements[name] = {
+                        "acknowledged": acknowledged,
+                        "exitCode": entry.get("returncode"),
+                        "commandHash": hashlib.sha256(command.encode()).hexdigest(),
+                    }
+                    write(root / "COMMANDS.json", acknowledgements)
+
+        result = AcknowledgedEvaluator(
             image_name=instance["image_name"],
             solution_branch="submission",
             submission_archive=archive,
@@ -607,7 +664,15 @@ def worker(path):
         ).run()
         evaluation = root / "OFFICIAL.eval.json"
         evaluation.write_text(result.model_dump_json(indent=2))
-        evaluated, valid = official_result(evaluation, instance)
+        evaluated, valid = official_result(evaluation, instance, acknowledgements)
+        terminal = terminal_failure(evaluated, acknowledgements, instance)
+        faults = [
+            record
+            for path in (root / "operations").glob("*.json")
+            if (record := json.loads(path.read_text()))["phase"] in {"failed", "uncertain"}
+        ]
+        if faults:
+            valid = False
         if sha(archive) != subject:
             raise GraderError(
                 "submission_changed", "Sealed submission changed during grading"
@@ -615,12 +680,14 @@ def worker(path):
         write(
             root / "worker-result.json",
             {
-                "passed": evaluated.n_resolved,
-                "total": len(evaluated),
+                "passed": evaluated.n_resolved if valid else None,
+                "total": len(evaluated) if valid else None,
                 "valid": valid,
-                "failure": None if valid else "invalid_evaluation",
+                "failure": "candidate_build" if valid and terminal else None if valid else "invalid_evaluation",
+                "terminalFailure": terminal if valid else None,
+                "officialError": evaluated.error_code,
+                "executedTests": sum(test.status != "not_run" for test in evaluated),
                 "subjectHash": subject,
-                "preflightExecutableHash": checked.executable_hash,
                 "executableHash": evaluated.executable_hash,
                 "stage": "complete",
             },

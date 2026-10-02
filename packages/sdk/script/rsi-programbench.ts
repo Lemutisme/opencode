@@ -29,6 +29,17 @@ const Score = Schema.Struct({
   cleanupAcknowledged: Schema.Literal(true),
   scoringTrust: Schema.Literal("official-programbench-normal-use"),
   hostileCandidateQualified: Schema.Literal(false),
+  failure: Schema.NullOr(Schema.String),
+  executedTests: Schema.Int,
+  terminalFailure: Schema.NullOr(
+    Schema.Struct({
+      kind: Schema.Literal("candidate_build"),
+      officialError: Schema.String,
+      stage: Schema.String,
+      exitCode: Schema.Int,
+      executedTests: Schema.Literal(0),
+    }),
+  ),
 })
 
 export async function programBench(root: string, reference: RSIRuntime.File) {
@@ -97,6 +108,11 @@ export async function programBench(root: string, reference: RSIRuntime.File) {
       )
       if (!result.valid || result.total <= 0 || result.passed < 0 || result.passed > result.total)
         throw new Error("invalid ProgramBench result")
+      if (
+        result.terminalFailure &&
+        (result.passed !== 0 || result.executedTests !== 0 || result.failure !== "candidate_build")
+      )
+        throw new Error("terminal ProgramBench failure cannot report executed or passing tests")
       return result
     } finally {
       clearTimeout(timer)
