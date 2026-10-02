@@ -1,7 +1,12 @@
 import { Plugin } from "@opencode/plugin"
+import { Schema } from "effect"
 import { ContractDelivery } from "./contract-delivery"
 
-export function contractProfile(delivery: Awaited<ReturnType<typeof ContractDelivery.create>>, deadline: number) {
+export function contractProfile(
+  delivery: Awaited<ReturnType<typeof ContractDelivery.create>>,
+  deadline: number,
+  revise?: (reason: string) => void,
+) {
   return Plugin.define({
     id: "procontract.native-worker",
     async setup(context) {
@@ -42,6 +47,23 @@ export function contractProfile(delivery: Awaited<ReturnType<typeof ContractDeli
               return { content: JSON.stringify(await delivery.act(input, call.signal)) }
             }),
         })
+        if (revise)
+          editor.add({
+            name: "rsi_revise",
+            description:
+              "Checkpoint this task and request a separately evaluated S/H improvement. This does not authorize replacement or complete the task.",
+            input: Schema.Struct({ reason: Schema.String }),
+            options: { codemode: false },
+            execute: (input, call) =>
+              delivery.exclusive(async () => {
+                call.signal.throwIfAborted()
+                if (!input.reason.trim()) throw new Error("A concrete revision reason is required")
+                revise(input.reason)
+                return {
+                  content: "Task revision requested; host qualification and original deadline remain authoritative.",
+                }
+              }),
+          })
       })
     },
   })
@@ -52,10 +74,13 @@ export async function drainDelivery(input: {
   prompt: (text: string) => Promise<unknown>
   status: () => ReturnType<Awaited<ReturnType<typeof ContractDelivery.create>>["status"]>
   assertActive: () => Promise<void>
+  revision?: () => string | undefined
 }) {
   while (true) {
     await input.wait()
     await input.assertActive()
+    const revision = input.revision?.()
+    if (revision) return { state: "revise" as const, reason: revision }
     const disposition = await input.status()
     if (disposition.state !== "open") return disposition
     // A new durable inbox item, not a legacy or in-memory model/tool loop.

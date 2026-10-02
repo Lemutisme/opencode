@@ -22,6 +22,8 @@ export type Job = {
   source?: { id: string; pair: { s: string; h: string } }
   output: string
   memory: State["active"]["memory"]
+  purpose?: "continuation"
+  task?: { id: string; checkpoint: string }
   feedback?: {
     eligible: boolean
     developmentPassed?: number
@@ -30,12 +32,21 @@ export type Job = {
     preparationFailure?: string
   }
 }
+export type Continuation = {
+  previous: string
+  checkpoint: string
+  receipt: string
+  outcome: "revise" | "delivered" | "blocked"
+}
 export type Worker = {
   result: Promise<void>
   // Host-observed provider/tool completion sequence, never candidate testimony.
   progress(): Promise<number>
   // Acknowledges termination of ALL owned descendants/containers, not just a PID.
   stop(): Promise<Accounting>
+  // Trusted adapter seals public task state and adjudicates the completed work.
+  // Called only after result and acknowledged stop, never candidate testimony.
+  continuation?(signal: AbortSignal): Promise<Continuation>
 }
 export type Driver = {
   // Pin the external Kernel, evaluator, supervisor and containment adapter.
@@ -58,6 +69,7 @@ export type Driver = {
     pair: Job["pair"]
     deadline: number
     signal: AbortSignal
+    task?: { id: string; checkpoint: string }
   }): Promise<{
     passed: number
     total: number
@@ -140,9 +152,22 @@ export async function supervise(
       throw new Error("trusted control plane changed")
     await artifacts.pair(ota.read().active.pair)
   }
-  const halt = (reason: string) => {
+  const halt = async (reason: string, details?: unknown) => {
     const state = ota.read()
-    return state.stopped ? state : ota.stop(state.revision, reason, Math.max(Date.now(), state.clock))
+    if (state.stopped) return state
+    if (ota.protocol.completion)
+      await record("completion", {
+        protocol: ota.digest,
+        completed: reason === "recursive closure completed",
+        reason,
+        seed: state.seed,
+        pair: state.active.pair,
+        job: state.job,
+        selections: recursiveSelections(ota),
+        health: { trial: state.trial, support: state.active.support, quarantine: state.quarantine },
+        details,
+      })
+    return ota.stop(state.revision, reason, Math.max(Date.now(), state.clock))
   }
   // Fencing is required even if the prior journal says idle: a crash can occur
   // between spawning a worker and persisting its transport handle.
@@ -152,14 +177,27 @@ export async function supervise(
     const state = ota.read()
     if (state.stopped) return state
     if (state.job || state.trial) {
-      if (state.trial && state.fallback && (!state.job || Date.now() < state.job.deadline))
+      if (
+        (state.trial || (ota.protocol.completion && state.job?.phase === "running")) &&
+        state.fallback &&
+        (!state.job || Date.now() < state.job.deadline)
+      ) {
         ota.rollback(state.revision, "supervisor restarted during unconfirmed boot", Date.now())
-      else return halt("interrupted work: fenced; no implicit provider retry")
+        if (ota.protocol.completion) return await halt("recursive closure interrupted: unconfirmed successor restarted")
+      } else return await halt("interrupted work: fenced; no implicit provider retry")
+    }
+    if (ota.protocol.completion) {
+      if (readmission) throw new Error("recursive closure requires live producers, not operator readmission")
+      if (!driver.prepare) throw new Error("recursive closure requires an isolated preparation boundary")
+      const progress = recursiveSelections(ota)
+      if (!progress.valid) return await halt(`recursive closure failed: ${progress.reason}`)
+      if (ota.protocol.completion.stopOnRejection && rejected(ota))
+        return await halt("recursive closure rejected: retained negative result")
     }
     // An operator may re-adjudicate sealed observations under a NEW protocol.
     // This is not a model handoff or a retry, and it never rewrites old standing.
     if (readmission && state.revision === 0) {
-      if (await cancelled()) return halt("cancelled before readmission")
+      if (await cancelled()) return await halt("cancelled before readmission")
       await artifacts.pair(readmission.pair)
       const receipt = await record("operator-readmission", readmission)
       const admitted = ota.begin(state.revision, Date.now())
@@ -181,14 +219,14 @@ export async function supervise(
         },
         Date.now(),
       )
-      if (!selected.trial) return halt("operator readmission rejected")
+      if (!selected.trial) return await halt("operator readmission rejected")
     }
     while (!ota.read().stopped) {
       await verify()
-      if (await cancelled()) return halt("cancelled")
+      if (await cancelled()) return await halt("cancelled")
       const current = ota.read()
       const state = current.job ? current : ota.begin(current.revision, Date.now())
-      if (Date.now() >= state.job!.deadline) return halt("original job deadline reached")
+      if (Date.now() >= state.job!.deadline) return await halt("original job deadline reached")
       const name = `${state.job!.id}-e${state.epoch}`
       const output = path.join(root, "staging", name)
       await mkdir(output, { recursive: true, mode: 0o700 })
@@ -205,6 +243,8 @@ export async function supervise(
           : {}),
         output,
         memory: state.active.memory,
+        ...(state.job!.purpose ? { purpose: state.job!.purpose } : {}),
+        ...(state.task ? { task: { id: state.task.id, checkpoint: state.task.checkpoint } } : {}),
       }
       const previous = ota
         .history()
@@ -267,7 +307,10 @@ export async function supervise(
           return undefined
         },
       )
-      if (!worker) continue
+      if (!worker) {
+        if (ota.protocol.completion) return await halt("recursive closure failed: successor startup", { producer: job })
+        continue
+      }
       const running = { done: false }
       const completed = worker.result.then(
         () => "handoff",
@@ -300,31 +343,71 @@ export async function supervise(
         accounting: requireAccounting(accounting),
         originalDeadline: job.deadline,
       })
-      if (outcome === "full-pass improvement confirmed") return halt(outcome)
+      if (outcome === "full-pass improvement confirmed") return await halt(outcome)
       if (outcome !== "handoff") {
         const live = ota.read()
         if (outcome === "cancelled" || outcome === "original job deadline reached" || !live.fallback)
-          return halt(outcome)
+          return await halt(outcome)
         ota.rollback(live.revision, outcome, Date.now())
+        if (ota.protocol.completion) return await halt(`recursive closure failed: ${outcome}`, { producer: job })
         continue
       }
       await verify()
+      if (job.purpose === "continuation") {
+        ota.continuationReady(ota.read().revision, job.epoch, job.id, Date.now())
+        const report = await continuationReport(job, worker, cancelled)
+        await artifacts.get(report.checkpoint)
+        await artifacts.get(report.receipt)
+        await record(name + "-continuation", { producer: job, pair: state.active.pair, report })
+        if (await cancelled()) return await halt("cancelled before task continuation settlement")
+        ota.continued(ota.read().revision, job.epoch, job.id, report, Date.now())
+        if (report.outcome === "delivered") return await halt("task delivered", { producer: job, report })
+        if (report.outcome === "blocked") return await halt("task blocked", { producer: job, report })
+        continue
+      }
       if (ota.protocol.stopOnPrimaryImprovement && ota.read().primaryImproved)
-        return halt("full-pass improvement confirmed")
+        return await halt("full-pass improvement confirmed")
       const proposal = await artifacts.candidate(output, job.mutable)
       const live = ota.read()
       ota.handedOff(live.revision, state.epoch, job.id, Date.now(), accounting.checkpoint)
+      const file = await artifacts.get(proposal)
+      if (await cancelled()) return await halt("cancelled before preparation")
+      if (ota.protocol.deployment && Date.now() >= ota.protocol.deployment.deadline)
+        throw new Error("original task deadline reached before preparation")
       const prepared = new AbortController()
-      const preparing = setInterval(() => {
-        void cancelled().then((value) => {
-          if (value) prepared.abort()
-        })
-      }, 100)
-      const materialization = await (
-        driver.prepare
-          ? driver.prepare({ job, proposal: await artifacts.get(proposal), signal: prepared.signal })
-          : Bun.file(await artifacts.get(proposal)).bytes()
-      ).finally(() => clearInterval(preparing))
+      const preparing = { done: false }
+      const work = Promise.resolve().then(() =>
+        driver.prepare ? driver.prepare({ job, proposal: file, signal: prepared.signal }) : Bun.file(file).bytes(),
+      )
+      const watchPreparation = (async () => {
+        while (!preparing.done) {
+          if (await cancelled()) {
+            prepared.abort()
+            throw new Error("cancelled during preparation")
+          }
+          if (ota.protocol.deployment && Date.now() >= ota.protocol.deployment.deadline) {
+            prepared.abort()
+            throw new Error("original task deadline reached during preparation")
+          }
+          await Bun.sleep(100)
+        }
+      })()
+      const materialization = await Promise.race([work, watchPreparation]).finally(async () => {
+        preparing.done = true
+        prepared.abort()
+        await watchPreparation.catch(() => undefined)
+        // Cancellation is not a build-container stop acknowledgement.
+        await bounded(
+          work.then(
+            () => undefined,
+            () => undefined,
+          ),
+          60_000,
+        )
+      })
+      if (!materialization) throw new Error("preparation ended without an artifact")
+      if (ota.protocol.deployment && Date.now() >= ota.protocol.deployment.deadline)
+        throw new Error("original task deadline reached during preparation")
       if (!(materialization instanceof Uint8Array)) {
         await bounded(driver.fence(), 30_000)
         ota.rejectPreparation(
@@ -334,27 +417,55 @@ export async function supervise(
           materialization.receipt,
           Date.now(),
         )
+        if (ota.protocol.completion?.stopOnRejection)
+          return await halt("recursive closure rejected: preparation", {
+            producer: job,
+            proposal,
+            preparation: materialization,
+          })
         continue
       }
       const replacement = await artifacts.put(materialization)
       await record(name + "-materialization", { proposed: proposal, materialized: replacement })
       const pair = { ...state.active.pair, [job.mutable]: replacement }
       if (
-        ota.protocol.expansion &&
-        ota
-          .read()
-          .lineage?.some(
-            (node) => subject(node.root) === subject(state.active.pair) && subject(node.pair) === subject(pair),
-          )
+        (ota.protocol.completion && subject(pair) === subject(state.active.pair)) ||
+        (ota.protocol.expansion &&
+          ota
+            .read()
+            .lineage?.some(
+              (node) => subject(node.root) === subject(state.active.pair) && subject(node.pair) === subject(pair),
+            ))
       ) {
         ota.rejectPreparation(
           ota.read().revision,
           pair,
-          "This exact pair was already evaluated under this incumbent",
+          "This exact pair is unchanged or was already evaluated under this incumbent",
           await record(name + "-duplicate", { pair }),
           Date.now(),
         )
+        if (ota.protocol.completion?.stopOnRejection)
+          return await halt("recursive closure rejected: duplicate proposal", {
+            producer: job,
+            proposal,
+            prepared: replacement,
+          })
         continue
+      }
+      if (ota.protocol.completion) {
+        const progress = recursiveSelections(ota)
+        if (!progress.valid) return await halt(`recursive closure failed: ${progress.reason}`)
+        if (progress.selections.length > ota.protocol.completion.selections)
+          throw new Error("recursive closure selection target was exceeded")
+        if (progress.selections.length === ota.protocol.completion.selections) {
+          const completion = await recursiveHandoff(ota, artifacts, job, proposal, replacement)
+          await verify()
+          await artifacts.pair(pair)
+          await bounded(driver.fence(), 30_000)
+          if (await cancelled()) return await halt("cancelled before recursive closure")
+          if (Date.now() >= job.deadline) return await halt("original job deadline reached before recursive closure")
+          return await halt("recursive closure completed", completion)
+        }
       }
       const tables = {
         baseline: [] as { id: string; passed: number; total: number; valid: boolean }[],
@@ -373,8 +484,10 @@ export async function supervise(
           const request = {
             test,
             pair: await artifacts.pair(version === "baseline" ? state.active.pair : pair),
-            deadline: Date.now() + SIX_HOURS,
+            deadline: Math.min(Date.now() + SIX_HOURS, ota.protocol.deployment?.deadline ?? Infinity),
+            ...(state.task ? { task: { id: state.task.id, checkpoint: state.task.checkpoint } } : {}),
           }
+          if (Date.now() >= request.deadline) throw new Error("original task deadline reached before evaluation")
           await record(`${name}-${version}-test-${hash(test.id)}-admission`, request)
           const abort = new AbortController()
           const stop = () => abort.abort()
@@ -418,18 +531,39 @@ export async function supervise(
       )
       await verify()
       await artifacts.pair(pair)
-      if (await cancelled()) return halt("cancelled before switch")
+      if (await cancelled()) return await halt("cancelled before switch")
       const evidence = {
         protocol: ota.digest,
         subject: subject(pair),
         job: job.id,
+        ...(state.task ? { checkpoint: state.task.checkpoint } : {}),
         rows: tables.candidate,
         baseline: { subject: subject(state.active.pair), rows: tables.baseline },
-        receipt: await record(name + "-evaluation", { pair, tables }),
+        receipt: await record(name + "-evaluation", {
+          pair,
+          tables,
+          producer: {
+            pair: state.active.pair,
+            job: job.id,
+            epoch: job.epoch,
+            mutable: job.mutable,
+            outcome: "handoff",
+            ...(state.task ? { task: { id: state.task.id, checkpoint: state.task.checkpoint } } : {}),
+          },
+          proposal,
+          materialized: replacement,
+        }),
       }
       // All worker processes, including evaluator-owned ones, must be gone.
       await bounded(driver.fence(), 30_000)
-      ota.settle(ota.read().revision, pair, evidence, Date.now())
+      const selected = ota.settle(ota.read().revision, pair, evidence, Date.now())
+      if (ota.protocol.completion?.stopOnRejection && subject(selected.active.pair) !== subject(pair))
+        return await halt("recursive closure rejected: qualification", {
+          producer: job,
+          proposal,
+          prepared: replacement,
+          evidence,
+        })
     }
     return ota.read()
   } catch (error) {
@@ -438,10 +572,208 @@ export async function supervise(
       () => undefined,
       (failure) => String(failure),
     )
-    const state = halt((await cancelled()) && !fenceFailure ? "cancelled" : String(error))
+    const state = await halt((await cancelled()) && !fenceFailure ? "cancelled" : String(error))
     await record(`fault-${Date.now()}`, { error: String(error), fenceFailure, state, usageIncomplete: true })
     return state
   }
+}
+
+/** Grading owns the task's original deadline too. Abort must be acknowledged
+ * before any checkpoint can be committed or another generation can start.
+ */
+export async function continuationReport(
+  job: Pick<Job, "deadline">,
+  worker: Pick<Worker, "continuation">,
+  cancelled: () => Promise<boolean>,
+) {
+  if (!worker.continuation) throw new Error("task continuation requires a trusted checkpoint adapter")
+  if ((await cancelled()) || Date.now() >= job.deadline)
+    throw new Error("continuation grading cancelled or original deadline reached")
+  const abort = new AbortController()
+  const reading = { done: false }
+  const work = Promise.resolve().then(() => worker.continuation!(abort.signal))
+  const watch = (async () => {
+    while (!reading.done) {
+      if ((await cancelled()) || Date.now() >= job.deadline) {
+        abort.abort()
+        throw new Error("continuation grading cancelled or original deadline reached")
+      }
+      await Bun.sleep(100)
+    }
+  })()
+  try {
+    const report = await Promise.race([work, watch])
+    if (!report || abort.signal.aborted || Date.now() >= job.deadline || (await cancelled()))
+      throw new Error("incomplete or late continuation report")
+    return report
+  } finally {
+    reading.done = true
+    abort.abort()
+    await watch.catch(() => undefined)
+    await bounded(
+      work.then(
+        () => undefined,
+        () => undefined,
+      ),
+      60_000,
+    )
+  }
+}
+
+type RecursiveSelection = {
+  root: Pair
+  pair: Pair
+  job: string
+  receipt: string
+  support: string
+  checkpoint?: string
+}
+
+/** This is a view of the existing ledger, never another promotion authority.
+ * Neither a large epoch nor a cleared probation bit proves recursive execution.
+ */
+export function recursiveSelections(ota: OTA) {
+  const state = ota.read()
+  const history = ota.history() as {
+    type: string
+    commands?: { type: string; contractID?: string }[]
+    details?: { passed?: boolean; evidence?: Evidence }
+  }[]
+  const selections: RecursiveSelection[] = []
+  const invalid = (reason: string) => ({ valid: false, reason, selections })
+  if (history.some((event) => event.type === "rollback")) return invalid("successor health was withdrawn")
+  for (const node of state.lineage ?? []) {
+    if (node.outcome !== "selected") continue
+    const root = selections.at(-1)?.pair ?? state.seed
+    if (subject(root) !== subject(node.root)) return invalid("selected producer lineage is discontinuous")
+    const events = history.filter(
+      (event) =>
+        event.type === "qualification" &&
+        event.details?.passed === true &&
+        event.details.evidence &&
+        node.id === hash(JSON.stringify([ota.digest, event.details.evidence.job, subject(node.pair)])),
+    )
+    if (events.length !== 1) return invalid("selection lacks one exact qualification")
+    const evidence = events[0].details!.evidence!
+    if (
+      evidence.protocol !== ota.digest ||
+      evidence.subject !== subject(node.pair) ||
+      evidence.baseline.subject !== subject(root)
+    )
+      return invalid("selection evidence names another producer or candidate")
+    const support = events[0].commands?.find((command) => command.type === "discharge")?.contractID
+    if (
+      !support ||
+      state.kernel.contracts[support]?.status !== "discharged" ||
+      state.kernel.contracts[support].handoff?.subjectHash !== subject(node.pair)
+    )
+      return invalid("selection lacks live Kernel standing")
+    selections.push({
+      root,
+      pair: node.pair,
+      job: evidence.job,
+      receipt: evidence.receipt,
+      support,
+      ...(evidence.checkpoint ? { checkpoint: evidence.checkpoint } : {}),
+    })
+  }
+  if (subject(selections.at(-1)?.pair ?? state.seed) !== subject(state.active.pair))
+    return invalid("active pair is not the recursive successor")
+  if (selections.length && selections.at(-1)!.support !== state.active.support)
+    return invalid("active support is not the selected successor")
+  return { valid: true, reason: "exact qualified producer chain", selections }
+}
+
+/** Each selected candidate must have been produced by the preceding admitted
+ * pair, not by operator readmission or a disconnected, externally authored patch.
+ */
+export async function recursiveEvidence(ota: OTA, artifacts: Artifacts) {
+  const progress = recursiveSelections(ota)
+  if (!progress.valid) throw new Error(progress.reason)
+  return Promise.all(
+    progress.selections.map(async (selection) => {
+      const receipt: {
+        pair?: Pair
+        producer?: { pair: Pair; job: string; mutable: Slot; outcome: string; task?: Job["task"] }
+        proposal?: string
+        materialized?: string
+      } = await Bun.file(await artifacts.get(selection.receipt)).json()
+      if (
+        !receipt?.pair ||
+        !receipt.producer ||
+        !receipt.proposal ||
+        !receipt.materialized ||
+        receipt.producer.outcome !== "handoff" ||
+        receipt.producer.job !== selection.job ||
+        subject(receipt.producer.pair) !== subject(selection.root) ||
+        subject(receipt.pair) !== subject(selection.pair) ||
+        !["s", "h"].includes(receipt.producer.mutable) ||
+        receipt.materialized !== selection.pair[receipt.producer.mutable] ||
+        selection.pair[receipt.producer.mutable] === selection.root[receipt.producer.mutable] ||
+        selection.pair[opposite(receipt.producer.mutable)] !== selection.root[opposite(receipt.producer.mutable)] ||
+        (ota.protocol.deployment &&
+          (receipt.producer.task?.id !== ota.protocol.deployment.task ||
+            receipt.producer.task?.checkpoint !== selection.checkpoint))
+      )
+        throw new Error("qualification lacks the exact sealed producer handoff")
+      await artifacts.get(receipt.proposal)
+      await artifacts.get(receipt.materialized)
+      return { ...selection, proposal: receipt.proposal, prepared: receipt.materialized }
+    }),
+  )
+}
+
+/** A final proposal is useful execution evidence only after acknowledged stop,
+ * Kernel handoff and successful preparation. It receives no evaluation standing.
+ */
+export async function recursiveHandoff(ota: OTA, artifacts: Artifacts, job: Job, proposal: string, prepared: string) {
+  const state = ota.read()
+  const selections = await recursiveEvidence(ota, artifacts)
+  const producer = await artifacts.pair(state.active.pair)
+  if (!ota.protocol.completion || selections.length !== ota.protocol.completion.selections)
+    throw new Error("recursive selection target not met")
+  if (
+    job.purpose === "continuation" ||
+    state.job?.phase !== "evaluating" ||
+    state.job.id !== job.id ||
+    state.epoch !== job.epoch ||
+    state.job.deadline !== job.deadline ||
+    Date.now() >= job.deadline ||
+    job.slot !== state.active.slot ||
+    job.mutable !== opposite(state.active.slot) ||
+    job.pair.s !== producer.s ||
+    job.pair.h !== producer.h ||
+    (state.task && (job.task?.id !== state.task.id || job.task.checkpoint !== state.task.checkpoint))
+  )
+    throw new Error("completion requires the exact active successor handoff")
+  await artifacts.get(proposal)
+  await artifacts.get(prepared)
+  const pair = { ...state.active.pair, [job.mutable]: prepared }
+  if (
+    subject(pair) === subject(state.active.pair) ||
+    state.lineage?.some(
+      (node) => subject(node.root) === subject(state.active.pair) && subject(node.pair) === subject(pair),
+    )
+  )
+    throw new Error("completion requires a new prepared proposal")
+  return {
+    producer: job,
+    pair: state.active.pair,
+    proposal,
+    prepared,
+    inactive: pair,
+    selections,
+    health: "exact admitted successor completed a useful handoff and preparation; no long-duration stability claim",
+    evaluated: false,
+    promoted: false,
+  }
+}
+
+function rejected(ota: OTA) {
+  return ota.history().some((entry) => {
+    const event = entry as { type: string; details?: { passed?: boolean } }
+    return event.type === "preparation-rejected" || (event.type === "qualification" && event.details?.passed === false)
+  })
 }
 
 async function regular(file: string) {

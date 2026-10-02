@@ -11,14 +11,17 @@ Integration base: upstream V2 **2.0.22**, `41516c78c8387a86e998a90043265a33a8702
 (merged on 2026-10-02). Historical qualifications remain bound to their original
 source snapshots; merging upstream does not renew them.
 
-| Scope | Implemented | Not established |
-| --- | --- | --- |
-| Within-task delivery | Public counterexample retention, repair, replay and explicit delivery in `contract-worker.ts` | This repairs the task artifact, not S/H. Within-task S/H replacement and continuation of the same task are not implemented. |
-| Across-task RSI | Native S/H proposals, isolated releases, independent evaluation, Kernel selection and successor execution; scripted linear/tree qualification | The ProgramBench task/grader adapter, finite two-selection closure and independent final-audit entrypoint remain unconnected. No real-model RSI result exists. |
+| Scope           | Implemented                                                                                                                                                                    | Not established                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Within-task RSI | Task-scoped S/H selection, public checkpoints, same-task successor execution, one original deadline and Kernel task completion; scripted native/container qualification passed | Real-model performance is untested. Ordinary task-source repair alone is not RSI.                 |
+| Across-task RSI | Native proposals/releases, paired selection, finite closure, ProgramBench adapter and independent audit; scripted native/container qualification passed                        | No real-model RSI result exists; the official scorer was not exercised by the mechanical fixture. |
 
-The ordinary ProgramBench worker and the RSI worker are separate entrypoints.
-Their individual tests do not establish a combined task-level and cross-task
-RSI experiment. No model-weight self-training is implemented or claimed.
+The RSI worker composes the existing ProgramBench delivery tools instead of
+launching the old fixed worker. Qualification ran real SDK/Session, builds,
+containers, checkpoints and Kernel settlement with scripted responses and synthetic
+scores. It establishes mechanism execution, not learned improvements or benchmark
+generalization. No model-weight self-training is implemented or claimed. A disk
+reserve failure blocks execution, not permission to relax the guard or delete history.
 
 ## One source graph, one admission gate
 
@@ -42,6 +45,38 @@ incumbent S/H → choose source parent → propose inactive S or H → fence
 The normative reducer is unchanged. `task-pareto`, fixed repeats, complete
 safety/development/confirmation evidence and retained-full-pass protections
 remain authoritative. Source ancestry never substitutes for evidence.
+
+## One replacement mechanism, two authority scopes
+
+Omit `deployment` for campaign-level selection. A task-local profile instead
+freezes `{kind: "task", task, started, deadline, checkpoint}`; `checkpoint` is a
+file reference in the JSON profile and a content hash in the Core protocol.
+Use a separate campaign root. Local standing never updates the global incumbent.
+
+```text
+original task Contract + checkpoint
+  → incumbent continues task → explicit revision request + fenced checkpoint
+  → propose inactive S/H → compare both versions from that same checkpoint
+  → Kernel selects task-local successor → successor continues SAME task
+```
+
+The original task owns one deadline across continuation, proposal, build,
+comparison, rollback and grading. The task checkpoint is separate from proposal
+memory. It contains the public workspace, immutable task goal/image and retained
+public obligations, never private Session databases or grading traces. A fresh
+Session restores these obligations without inheriting predecessor readiness.
+After stop acknowledgement, `continuationReady` closes the execution lease while
+the verifier uses the remaining original deadline; no synthetic heartbeat is used.
+Only trusted verification can discharge the original task Contract. A stopped
+search, partial score or successful S/H replacement is not task completion.
+
+For the finite cross-task experiment, freeze
+`completion: {selections: 2, successorHandoff: true, stopOnRejection: true}`.
+Rejection or failed successor ends the chain (with withdrawal/rollback where
+applicable). After two selections the actual successor must hand off a new,
+successfully prepared proposal; that last proposal is **not evaluated or promoted**.
+The completion receipt binds producer lineage, artifacts and current standing.
+This policy is opt-in and incompatible with `stopOnPrimaryImprovement`.
 
 ## Boundaries
 
@@ -93,11 +128,52 @@ A frozen JSON profile supplies `harness`, `strategy`, `grader`, `gateway` and
 The operator must enumerate the custom grader/data closure in `authority`.
 Performance manifests require safety tests and at least two distinct executions
 per task in each development/confirmation panel. All ties reject promotion.
+An optional `development: {goal, files}` packet supplies hash-pinned public
+development context to the first proposer as well as later generations. It is
+explicitly operator-curated; confirmation/audit diagnostics are never exported
+automatically as development context.
 
-The trusted grader exports `task(test)` (goal, output basename, optional pinned
-input files/image) and `grade({test, artifact, state, run, release})` returning
+The trusted grader exports `task(test, taskCheckpoint?)` (goal, output basename,
+optional pinned inputs/image and dataset identity) and
+`grade({test, artifact, state, run, release, deadline, signal})` returning
 `{passed, total, valid}`. It judges fenced artifact bytes independently; worker
 summaries, exit status and self-tests do not certify correctness.
+Task-local operation also requires the trusted `continuation` adapter;
+`RSITask.continuation` supplies public checkpoint sealing and verifier integration.
+
+Alternatively, replace `grader` with a `programbench` manifest file reference:
+
+```json
+{
+  "scoringTrust": "official-programbench-normal-use",
+  "safety": ["containment"],
+  "tasks": [
+    {
+      "id": "INSTANCE",
+      "tests": ["d1", "d2"],
+      "goal": "FROZEN_GOAL",
+      "image": "sha256:IMAGE",
+      "grader": { "path": "/frozen/grader.json", "sha256": "HASH" }
+    }
+  ]
+}
+```
+
+Each grader JSON pins the official runner, Python, Docker, wheelhouse and that
+instance's offline blobs; see `rsi-programbench.py`'s validated configuration.
+Only the candidate H solves the task. The host packages its fenced workspace and
+scores it with cancellation-aware process/container fencing. `safety` names a
+separate fixed native liveness/containment obligation, not a benchmark instance.
+All other test IDs must resolve to a frozen instance.
+
+**Scoring boundary:** the official scorer runs tests in the candidate-built image.
+Complete official scores do not certify resistance to malicious modification of
+that image's interpreter/test environment. The manifest explicitly acknowledges
+this normal-use trust model; stronger hostile-candidate qualification is still
+required before making that stronger claim. Task-local use additionally requires
+`taskFeedback: "qualification-outcomes"`: acceptance/rejection from task-local
+comparison is feedback, not blind benchmark evaluation. Final ready submissions
+with partial official scores terminate the task as blocked, not another solve retry.
 
 From `packages/core`, launch using the existing OS-locked supervisor:
 
@@ -110,16 +186,51 @@ OPENCODE_RSI_PROFILE=/absolute/frozen-profile.json \
 signal. Freeze a separate performance experiment before paid model execution;
 no real-model RSI campaign is implied by these commands or the qualification.
 
+After a finite **cross-task** closure, the same frozen profile may supply two
+separate `audit` test IDs/repeats. From `packages/sdk`:
+
+```sh
+OPENCODE_RSI_PROFILE=/absolute/frozen-profile.json \
+  bun script/rsi-audit.ts /absolute/new-audit /absolute/completed-campaign
+```
+
+The audit freezes the exact stopped source state and admits four evaluation-only
+Kernel Contracts: seed/final × two repeats of one distinct instance. It checks
+actual dataset identities, including safety assignments, not merely test labels.
+It does not write the source ledger, resume search or authorize deployment.
+Ties are compared exactly and cannot become improvement through floating error.
+Existing ProgramBench exposure prevents calling reused instances globally unseen;
+search isolation and blind generalization are different claims.
+After an audit issuer crash, `bun script/rsi-audit.ts EXISTING_AUDIT --fence`
+only revokes/fences that audit's resources. It needs no profile or model key,
+does not resume allocations, and retains any unacknowledged cleanup failure.
+
 ## Verification
 
 - Core: `bun test script/ota-rsi.test.ts script/ota-lineage.test.ts script/ota-supervisor.test.ts`.
 - SDK: `bun test script/rsi-boundary.test.ts`; Python: `python3 script/rsi_gateway_test.py`.
+- Scoped additions: Core `script/ota-task.test.ts`, `script/ota-completion.test.ts`;
+  SDK `script/rsi-task.test.ts`, `script/rsi-audit.test.ts`, `script/rsi-programbench.test.ts`;
+  Python `rsi_files_test.py`, `rsi_programbench_test.py` (the latter uses the pinned
+  ProgramBench Python and `PROGRAMBENCH_RUNNER`). Tests do not call a real model.
 - Container/wire qualification: `bun script/rsi-qualify.ts NEW_ROOT FIXTURE_RELEASE GATEWAY WIDTH MODE [WARMUP_STEPS]`.
   The explicit fixture release adds an observable code revision to the real SDK
   worker; the scripted provider generates actual source patches and policy files.
   Healthy tests require both promoted H and S to appear in successor executions,
   not just an updated pointer. Rollback tests require restored standing and the
   unchanged job deadline. A 1002-step warmup checks the former count boundary.
+- Task-scoped container qualification: `bun script/rsi-scoped-qualify.ts NEW_ROOT
+NEW_FIXTURE_RELEASE GATEWAY PINNED_TASK_IMAGE [delivery|closure]`. Use a fresh
+  source snapshot with the fixture-only revision marker, not a historical release.
+  `delivery` requires actual H/S takeovers and original-task discharge; `closure`
+  requires the final prepared H2 proposal and keeps the unfinished task escalated.
+  Both use scripted responses/mechanical scores, never real-model performance.
 
 Qualification scores are deterministic mechanics fixtures, not ProgramBench scores.
 The previous [task-level regression](./pro-contract-v2-delivery.md) remains unchanged.
+
+The 2026-10-02 scoped qualification includes original-task delivery after both S/H
+takeovers, a separate H2-handoff closure that correctly leaves its task escalated,
+and a cross-task closure followed by four independent audit allocations without
+changing the source ledger. These new container cases use width one. Historical
+tree qualification and current lineage regressions are separate evidence.

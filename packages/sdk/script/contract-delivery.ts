@@ -20,6 +20,15 @@ export namespace ContractDelivery {
     Schema.Struct({ action: Schema.Literal("handoff"), summary: Schema.String }),
     Schema.Struct({ action: Schema.Literal("blocked"), reason: Schema.String }),
   ])
+  export const Obligation = Schema.Struct({
+    probe: Probe,
+    expected: Schema.Struct({
+      exit: Schema.Number,
+      stdout: Schema.String,
+      stderr: Schema.String,
+      files: Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
+    }),
+  })
   export const instructions = `Delivery is not authorized by a final text response or a passing self-written validator.
 Use contract_delivery(action="probe") for public black-box observations: it retains the reference result and compares the candidate. Each probe is a durable regression obligation; it cannot be deleted or silently redefined. Register documented behavior families and edge cases, not just one passing smoke test. Shell remains available for exploratory work, but discoveries made there must be turned into retained probes.
 A probe runs reference and executable separately with the same args, stdin, fixture files, environment and working directory. Strings are UTF-8; use {base64: "..."} for binary stdin or fixture contents. Use {{case}} in textual fixtures, stdin, args or env to refer to that temporary fixture directory. outputs lists relative files whose bytes must also match. Do not put fixtures into the source tree. Use read/shell for exploratory cases not supported by this probe format; disclose these coverage limitations in your handoff summary.
@@ -40,6 +49,8 @@ If an obligation cannot be resolved safely, use action="blocked" with a concrete
     deadline: number
     signal: AbortSignal
     assertStanding: () => Promise<void>
+    // Host-sealed public obligations, not a private Session database or a resume grant.
+    obligations?: readonly (typeof Obligation.Type)[]
   }
 
   export async function create(options: Options) {
@@ -55,6 +66,16 @@ If an obligation cannot be resolved safely, use action="blocked" with a concrete
     }
     if (await Bun.file(journal).exists())
       throw new Error("Delivery evidence already exists; explicit recovery required")
+    for (const item of options.obligations ?? []) {
+      const id = Bun.SHA256.hash(JSON.stringify(item.probe), "hex")
+      if (probes.has(id)) throw new Error("Duplicate inherited public obligation")
+      await append({
+        type: "probe",
+        id,
+        probe: item.probe,
+        expected: { ...item.expected, files: { ...item.expected.files } },
+      })
+    }
     const assertActive = async () => {
       options.signal.throwIfAborted()
       if (Date.now() >= options.deadline) throw new Error("Original Contract deadline reached")
@@ -244,7 +265,12 @@ If an obligation cannot be resolved safely, use action="blocked" with a concrete
       )
       return next
     }
-    return { act, status, exclusive }
+    return {
+      act,
+      status,
+      exclusive,
+      obligations: () => [...probes.values()].map((item) => ({ probe: item.probe, expected: item.expected })),
+    }
   }
 
   function data(value: typeof Data.Type, directory: string) {

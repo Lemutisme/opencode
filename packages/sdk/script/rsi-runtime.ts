@@ -37,8 +37,9 @@ export namespace RSIRuntime {
 
   export async function run(
     argv: string[],
-    options: { input?: string; timeout?: number; env?: NodeJS.ProcessEnv; output?: string } = {},
+    options: { input?: string; timeout?: number; env?: NodeJS.ProcessEnv; output?: string; signal?: AbortSignal } = {},
   ) {
+    options.signal?.throwIfAborted()
     const child = Bun.spawn(argv, {
       stdin: options.input === undefined ? "ignore" : new Blob([options.input]),
       stdout: "pipe",
@@ -46,12 +47,16 @@ export namespace RSIRuntime {
       env: options.env,
     })
     const timer = setTimeout(() => child.kill("SIGKILL"), options.timeout ?? 60_000)
+    const abort = () => child.kill("SIGKILL")
+    options.signal?.addEventListener("abort", abort, { once: true })
+    if (options.signal?.aborted) abort()
     try {
       const [out, error, code] = await Promise.all([
         capture(child.stdout, options.output),
         capture(child.stderr, options.output ? options.output + ".stderr" : undefined),
         child.exited,
       ])
+      options.signal?.throwIfAborted()
       if (code !== 0)
         throw new ControlFailure(
           code,
@@ -63,6 +68,7 @@ export namespace RSIRuntime {
       throw error
     } finally {
       clearTimeout(timer)
+      options.signal?.removeEventListener("abort", abort)
     }
   }
   export async function ref(file: string): Promise<File> {
@@ -102,26 +108,27 @@ export namespace RSIRuntime {
       throw new Error("unacknowledged RSI fence")
   }
   const mounts = new Map<string, Promise<string>>()
-  export async function materialize(root: string, release: Release) {
+  export async function materialize(root: string, release: Release, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     await Promise.all([release.source, release.dependencies, release.bun, release.rg].map(checked))
     const key = root + ":" + hash(JSON.stringify(release))
     const existing = mounts.get(key)
     if (existing) return existing
-    const pending = materializeOnce(root, release)
+    const pending = materializeOnce(root, release, signal)
     mounts.set(key, pending)
     return pending
   }
-  async function materializeOnce(root: string, release: Release) {
+  async function materializeOnce(root: string, release: Release, signal?: AbortSignal) {
     await Promise.all([release.source, release.dependencies, release.bun, release.rg].map(checked))
     const identity = hash(JSON.stringify(release))
     const volume = `rsi-${label(root).slice(0, 12)}-${identity}`
     const receipt = path.join(root, "releases", identity + ".json")
     if (await Bun.file(receipt).exists()) {
-      await run(["docker", "volume", "inspect", volume])
+      await run(["docker", "volume", "inspect", volume], { signal })
       return volume
     }
     await fs.mkdir(path.dirname(receipt), { recursive: true, mode: 0o700 })
-    await run(["docker", "volume", "create", "--label", `opencode.rsi=${label(root)}`, volume])
+    await run(["docker", "volume", "create", "--label", `opencode.rsi=${label(root)}`, volume], { signal })
     const name = `rsi-materialize-${crypto.randomUUID()}`
     try {
       await run(
@@ -162,7 +169,7 @@ export namespace RSIRuntime {
           "-ec",
           'test -z "$(ls -A /runtime)"; chmod 0777 /runtime; sleep 360',
         ],
-        { timeout: 300_000 },
+        { timeout: 300_000, signal },
       )
       // Same UID as the artifact owner: no DAC override capability is needed.
       await run(
@@ -176,7 +183,7 @@ export namespace RSIRuntime {
           "-ec",
           "tar --no-same-owner --no-same-permissions -xf /source.tar -C /runtime; tar --no-same-owner --no-same-permissions -xf /dependencies.tar -C /runtime",
         ],
-        { timeout: 300_000 },
+        { timeout: 300_000, signal },
       )
       await Bun.write(receipt, JSON.stringify({ identity, volume, release }))
     } finally {
@@ -187,7 +194,7 @@ export namespace RSIRuntime {
 
   export async function build(root: string, parent: Release, patch: string, signal: AbortSignal) {
     signal.throwIfAborted()
-    const volume = await materialize(root, parent)
+    const volume = await materialize(root, parent, signal)
     const directory = path.join(root, "builds", crypto.randomUUID())
     await fs.mkdir(directory, { recursive: true, mode: 0o700 })
     const name = `rsi-build-${crypto.randomUUID()}`

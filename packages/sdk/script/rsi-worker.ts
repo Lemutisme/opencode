@@ -7,6 +7,8 @@ import { Plugin } from "@opencode/plugin"
 import { ProviderTransport } from "@opencode/core/effect/provider-transport"
 import { requestExecutor } from "@opencode/core/effect/app-node-platform"
 import { PromiseSdk } from "../src/promise"
+import { ContractDelivery } from "./contract-delivery"
+import { contractProfile, drainDelivery } from "./contract-profile"
 
 const Input = Schema.Struct({
   id: Schema.String,
@@ -15,6 +17,8 @@ const Input = Schema.Struct({
   effort: Schema.String,
   goal: Schema.String,
   artifact: Schema.String,
+  mode: Schema.optional(Schema.Literal("programbench")),
+  allowRevise: Schema.optional(Schema.Boolean),
 })
 const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(await Bun.file("/admission/worker.json").text())
 if (!/^[a-z][a-z0-9_.-]*$/.test(input.artifact)) throw new Error("invalid output artifact")
@@ -28,6 +32,24 @@ while (!(await Bun.file("/admission/ready").exists())) {
 }
 if (await Bun.file("/state/session.sqlite").exists()) throw new Error("implicit execution recovery is not qualified")
 const disposition = { digest: "", summary: "", blocked: "" }
+const controller = new AbortController()
+const revisionRequest = { reason: undefined as string | undefined }
+const delivery =
+  input.mode === "programbench"
+    ? await ContractDelivery.create({
+        directory: "/candidate/workspace",
+        state: "/state/delivery",
+        reference: "/workspace/executable",
+        deadline: input.deadline,
+        signal: controller.signal,
+        assertStanding: standing,
+        obligations: (await Bun.file("/task/obligations.json").exists())
+          ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(ContractDelivery.Obligation)))(
+              await Bun.file("/task/obligations.json").text(),
+            )
+          : [],
+      })
+    : undefined
 const artifact = path.join("/candidate", input.artifact)
 const snapshot = async () => {
   const info = await fs.lstat(artifact)
@@ -130,7 +152,19 @@ const host = await PromiseSdk.create(
         },
       }),
     },
-    plugins: [plugin],
+    plugins: [
+      delivery
+        ? contractProfile(
+            delivery,
+            input.deadline,
+            input.allowRevise
+              ? (reason) => {
+                  revisionRequest.reason = reason
+                }
+              : undefined,
+          )
+        : plugin,
+    ],
   },
   {
     overrides: [
@@ -143,10 +177,11 @@ const host = await PromiseSdk.create(
 const session = await host.sessions.create({
   id: input.id,
   title: "RSI allocation",
-  location: { directory: "/candidate" },
+  location: { directory: delivery ? "/candidate/workspace" : "/candidate" },
   model: { providerID: "openai", id: input.model, variant: input.effort },
 })
 const abort = () => {
+  controller.abort()
   void host.sessions.interrupt({ sessionID: session.id }).catch(() => undefined)
 }
 process.on("SIGTERM", abort)
@@ -155,14 +190,42 @@ const timer = setTimeout(abort, Math.max(0, input.deadline - Date.now()))
 try {
   await host.sessions.prompt({
     sessionID: session.id,
-    text: `${await Bun.file("/strategy").text()}\n\n${input.goal}\n\nDeliver /candidate/${input.artifact} using rsi_handoff with an honest summary. If unable, use rsi_blocked. Host verification and promotion are independent; never self-certify.`,
+    text:
+      `${await Bun.file("/strategy").text()}\n\n${input.goal}\n\n` +
+      (delivery
+        ? ContractDelivery.instructions +
+          (input.allowRevise
+            ? "\nIf the execution strategy or harness prevents further progress, use rsi_revise with a concrete diagnosis. The host may evaluate a replacement; your task checkpoint and original deadline are retained. Do not use this merely to edit task source."
+            : "")
+        : `Deliver /candidate/${input.artifact} using rsi_handoff with an honest summary. If unable, use rsi_blocked. Host verification and promotion are independent; never self-certify.`),
   })
-  while (true) {
+  const wait = async () => {
     await host.sessions.wait({ sessionID: session.id })
     await standing()
     const events = await Array.fromAsync(host.sessions.log({ sessionID: session.id }))
     await Bun.write("/state/events.json", JSON.stringify(events))
     if (events.some((e) => e.type === "session.execution.failed")) throw new Error("native Session failed")
+  }
+  if (delivery) {
+    const result = await drainDelivery({
+      wait,
+      prompt: (text) => host.sessions.prompt({ sessionID: session.id, text }),
+      status: delivery.status,
+      assertActive: standing,
+      revision: () => revisionRequest.reason,
+    })
+    // Outside workspace: writing the handoff must not invalidate its source snapshot.
+    await Bun.write(
+      artifact,
+      JSON.stringify({ kind: "programbench-handoff", result, obligations: delivery.obligations() }),
+    )
+    disposition.digest = await snapshot()
+    disposition.summary =
+      ("summary" in result ? result.summary : "reason" in result ? result.reason : undefined) ??
+      "Task artifact submitted"
+  }
+  while (!delivery) {
+    await wait()
     if (disposition.blocked) throw new Error(disposition.blocked)
     if (disposition.digest && disposition.digest === (await snapshot())) break
     await host.sessions.prompt({
@@ -176,5 +239,6 @@ try {
   )
 } finally {
   clearTimeout(timer)
+  controller.abort()
   await host.close()
 }

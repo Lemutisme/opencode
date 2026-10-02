@@ -44,7 +44,12 @@ try {
   const state = await supervise(root, ota, artifacts, config.driver, config.readmission)
   await Bun.write(path.join(root, "STATUS.json"), JSON.stringify(state, null, 2))
   process.exitCode =
-    state.stopped?.startsWith("cancelled") || state.stopped === "full-pass improvement confirmed" ? 0 : 1
+    state.stopped?.startsWith("cancelled") ||
+    state.stopped === "full-pass improvement confirmed" ||
+    state.stopped === "recursive closure completed" ||
+    state.stopped === "task delivered"
+      ? 0
+      : 1
 } finally {
   ota.db.close()
 }

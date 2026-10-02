@@ -14,6 +14,10 @@ export type Protocol = {
   trusted: string
   // Width one is linear; larger widths explore a breadth-first source tree.
   expansion?: { width: number }
+  completion?: { selections: number; successorHandoff: true; stopOnRejection: boolean }
+  // A task-local ledger never changes a campaign's default pair. Its original
+  // allowance and initial public checkpoint are part of the frozen authority.
+  deployment?: { kind: "task"; task: string; started: number; deadline: number; checkpoint: string }
   scope: "mechanics" | "performance"
   performanceRule?: "panel-margin" | "task-pareto"
   minimumMeanGainBps?: number
@@ -37,6 +41,8 @@ export type Evidence = {
   baseline: { subject: string; rows: Evidence["rows"] }
   // Reference to issuer-recorded execution/accounting, including incomplete usage.
   receipt: string
+  // Both versions must have been evaluated from this same task checkpoint.
+  checkpoint?: string
 }
 type Boot = {
   slot: Slot
@@ -61,6 +67,13 @@ export type State = {
   epoch: number
   trial: boolean
   primaryImproved?: boolean
+  task?: {
+    id: string
+    contractID: string
+    checkpoint: string
+    needsContinuation: boolean
+    status: "open" | "delivered" | "blocked"
+  }
   job?: {
     id: string
     deadline: number
@@ -68,6 +81,7 @@ export type State = {
     heartbeat: number
     sequence: number
     phase: "running" | "evaluating"
+    purpose?: "continuation"
     source?: { id: string; pair: Pair }
   }
   stopped?: string
@@ -96,6 +110,34 @@ export class OTA {
     requireHash(protocol.trusted)
     if (protocol.expansion && (!Number.isSafeInteger(protocol.expansion.width) || protocol.expansion.width < 1))
       throw new Error("expansion width must be a positive integer")
+    if (
+      protocol.completion &&
+      (!Number.isSafeInteger(protocol.completion.selections) ||
+        protocol.completion.selections < 1 ||
+        protocol.completion.successorHandoff !== true ||
+        typeof protocol.completion.stopOnRejection !== "boolean" ||
+        !protocol.expansion ||
+        protocol.stopOnPrimaryImprovement)
+    )
+      throw new Error(
+        "finite completion requires a positive selection count, source lineage and successor handoff only",
+      )
+    if (protocol.deployment) {
+      if (protocol.stopOnPrimaryImprovement)
+        throw new Error("task deployment requires actual continuation, not primary-improvement stopping")
+      if (
+        protocol.deployment.kind !== "task" ||
+        typeof protocol.deployment.task !== "string" ||
+        !protocol.deployment.task.trim() ||
+        !Number.isSafeInteger(protocol.deployment.started) ||
+        protocol.deployment.started < 0 ||
+        !Number.isSafeInteger(protocol.deployment.deadline) ||
+        protocol.deployment.deadline <= protocol.deployment.started ||
+        protocol.deployment.deadline - protocol.deployment.started > SIX_HOURS
+      )
+        throw new Error("task deployment requires one task and its original deadline of at most six hours")
+      requireHash(protocol.deployment.checkpoint)
+    }
     requirePair(seed)
     if (
       !Number.isInteger(protocol.evaluationConcurrency ?? 1) ||
@@ -183,6 +225,54 @@ export class OTA {
           quarantine: [],
           retainedFull: [],
           clock: 0,
+          ...(protocol.deployment
+            ? {
+                task: {
+                  id: protocol.deployment.task,
+                  contractID: taskContractID(this.digest, protocol.deployment.task),
+                  checkpoint: protocol.deployment.checkpoint,
+                  needsContinuation: true,
+                  status: "open" as const,
+                },
+              }
+            : {}),
+        }
+        const commands: ProContractKernel.Command[] = []
+        if (protocol.deployment) {
+          const id = ProContract.ID.make(state.task!.contractID)
+          const spec = ProContract.Spec.make({
+            trigger: { type: "immediate" },
+            goal: "Deliver a host-verified sealed result for this original task within its original deadline",
+            brief: JSON.stringify({
+              protocol: this.digest,
+              task: protocol.deployment.task,
+              checkpoint: protocol.deployment.checkpoint,
+            }),
+            requires: [],
+            authority: [],
+            budget: { deadline: protocol.deployment.deadline },
+            evidence: { type: "principal", claim: "The trusted task verifier accepts this exact task checkpoint" },
+            resolution: { maxAttempts: 1, retryDelay: 0 },
+          })
+          apply(state, commands, {
+            type: "issue",
+            actor: issuer,
+            draft: {
+              id,
+              issuer,
+              executor: "task-runtime",
+              scope: this.digest,
+              spec,
+              specHash: ProContractKernel.hashSpec(spec),
+            },
+          })
+          apply(state, commands, {
+            type: "activate",
+            actor: "institution",
+            contractID: id,
+            revision: 1,
+            time: protocol.deployment.started,
+          })
         }
         this.db.query("INSERT INTO ota_state VALUES (1, ?)").run(JSON.stringify(state))
         this.db.query("INSERT INTO ota_event VALUES (0, ?)").run(
@@ -190,6 +280,7 @@ export class OTA {
             type: "authorized-seed",
             pair: seed,
             performancePromotion: false,
+            ...(commands.length ? { commands } : {}),
           }),
         )
         return true
@@ -215,15 +306,20 @@ export class OTA {
   begin(revision: number, now: number) {
     return this.change(revision, now, "begin", (state) => {
       if (state.job) throw new Error("an admitted job already exists")
+      requireTask(this.protocol, state, now)
       requireStanding(state, state.active)
       state.job = {
         id: `job-${state.revision + 1}-${state.epoch}`,
-        deadline: now + SIX_HOURS,
+        deadline: Math.min(now + SIX_HOURS, this.protocol.deployment?.deadline ?? now + SIX_HOURS),
         started: now,
         heartbeat: now,
         sequence: -1,
         phase: "running",
-        ...(this.protocol.expansion ? { source: expansionParent(state, this.protocol.expansion.width) } : {}),
+        ...(state.task?.needsContinuation
+          ? { purpose: "continuation" as const }
+          : this.protocol.expansion
+            ? { source: expansionParent(state, this.protocol.expansion.width) }
+            : {}),
       }
     })
   }
@@ -245,7 +341,9 @@ export class OTA {
   // A short successful operation need not be kept busy to fill probation time.
   handedOff(revision: number, epoch: number, job: string, now: number, checkpoint?: string) {
     return this.change(revision, now, "quiescent-handoff", (state) => {
+      requireTask(this.protocol, state, now)
       requireJob(state, epoch, job, now)
+      if (state.job!.purpose === "continuation") throw new Error("task continuation requires a verified task handoff")
       if (state.job!.phase !== "running" || this.expired(state, now)) throw new Error("handoff arrived after lease")
       state.job!.phase = "evaluating"
       if (checkpoint) {
@@ -256,10 +354,109 @@ export class OTA {
     })
   }
 
+  // Acknowledged worker stop closes the execution lease before external grading.
+  // No synthetic provider heartbeat or health confirmation is needed while the
+  // grader uses the remainder of the task's original deadline.
+  continuationReady(revision: number, epoch: number, job: string, now: number) {
+    return this.change(revision, now, "quiescent-task-continuation", (state) => {
+      requireTask(this.protocol, state, now)
+      requireJob(state, epoch, job, now)
+      requireStanding(state, state.active)
+      if (
+        !state.task?.needsContinuation ||
+        state.job!.purpose !== "continuation" ||
+        state.job!.phase !== "running" ||
+        this.expired(state, now)
+      )
+        throw new Error("live task continuation stop acknowledgement required")
+      state.job!.phase = "evaluating"
+      return { task: state.task.id, pair: state.active.pair, checkpoint: state.task.checkpoint, job }
+    })
+  }
+
+  // The host calls this only after fencing the worker and checking its public
+  // task artifact. Candidate testimony is neither completion nor authority.
+  continued(
+    revision: number,
+    epoch: number,
+    job: string,
+    handoff: { previous: string; checkpoint: string; receipt: string; outcome: "revise" | "delivered" | "blocked" },
+    now: number,
+  ) {
+    return this.change(revision, now, "task-continuation", (state, commands) => {
+      requireTask(this.protocol, state, now)
+      requireJob(state, epoch, job, now)
+      requireStanding(state, state.active)
+      if (!state.task?.needsContinuation || state.job!.purpose !== "continuation" || state.job!.phase !== "evaluating")
+        throw new Error("current task continuation handoff required")
+      requireHash(handoff.previous)
+      requireHash(handoff.checkpoint)
+      requireHash(handoff.receipt)
+      if (handoff.previous !== state.task.checkpoint) throw new Error("task checkpoint changed before handoff")
+      if (!["revise", "delivered", "blocked"].includes(handoff.outcome)) throw new Error("invalid task handoff outcome")
+      const task = state.kernel.contracts[state.task.contractID]
+      if (handoff.outcome === "delivered") {
+        apply(state, commands, {
+          type: "report-ready",
+          actor: "institution",
+          contractID: task.id,
+          revision: task.revision,
+          subjectHash: handoff.checkpoint,
+          summary: "The isolated runtime delivered this exact public task checkpoint to the trusted task verifier",
+          uncertainties: ["Task delivery does not establish general runtime improvement."],
+          time: now,
+        })
+        apply(state, commands, {
+          type: "discharge",
+          actor: issuer,
+          contractID: task.id,
+          attestation: {
+            id: ProContract.AttestationID.make(
+              `pca_ota_task_${hash(JSON.stringify([task.id, handoff.checkpoint, handoff.receipt]))}`,
+            ),
+            revision: task.revision,
+            specHash: task.specHash,
+            subjectHash: handoff.checkpoint,
+            evidenceHash: handoff.receipt,
+            verifierID: issuer,
+            class: "principal",
+          },
+        })
+      }
+      if (handoff.outcome === "blocked")
+        apply(state, commands, {
+          type: "escalate",
+          actor: "institution",
+          contractID: task.id,
+          revision: task.revision,
+          reason: `Trusted task verifier reported blocked: ${handoff.receipt}`,
+          time: now,
+        })
+      state.task.checkpoint = handoff.checkpoint
+      state.task.needsContinuation = false
+      // This is only a projection of the original task Contract's standing.
+      state.task.status =
+        state.kernel.contracts[task.id].status === "discharged"
+          ? "delivered"
+          : state.kernel.contracts[task.id].status === "active"
+            ? "open"
+            : "blocked"
+      state.trial = false
+      delete state.job
+      return { ...handoff, task: state.task.id, pair: state.active.pair }
+    })
+  }
+
   settle(revision: number, pair: Pair, evidence: Evidence, now: number) {
     return this.change(revision, now, "qualification", (state, commands) => {
+      requireTask(this.protocol, state, now)
       if (!state.job || state.job.phase !== "evaluating") throw new Error("quiescent handoff required")
+      if (state.job.purpose === "continuation") throw new Error("task continuation is not a source proposal")
       if (state.job.id !== evidence.job) throw new Error("evidence names another job")
+      if (state.task && evidence.checkpoint !== state.task.checkpoint)
+        throw new Error("evaluation must bind the current task checkpoint")
+      if (!state.task && evidence.checkpoint !== undefined)
+        throw new Error("task evidence cannot deploy a campaign pair")
       requireStanding(state, state.active)
       requirePair(pair)
       if (
@@ -364,6 +561,7 @@ export class OTA {
       state.epoch += 1
       state.trial = true
       state.primaryImproved = decision.primaryImproved
+      if (state.task) state.task.needsContinuation = true
       state.retainedFull = [...new Set([...state.retainedFull, ...decision.full])]
       delete state.job
       return { evidence, decision, passed: true }
@@ -372,7 +570,9 @@ export class OTA {
 
   rejectPreparation(revision: number, pair: Pair, reason: string, receipt: string, now: number) {
     return this.change(revision, now, "preparation-rejected", (state, commands) => {
+      requireTask(this.protocol, state, now)
       if (state.job?.phase !== "evaluating") throw new Error("quiescent proposal required")
+      if (state.job.purpose === "continuation") throw new Error("task continuation is not a source proposal")
       requireStanding(state, state.active)
       requirePair(pair)
       requireHash(receipt)
@@ -455,20 +655,38 @@ export class OTA {
       state.epoch += 1
       state.trial = false
       state.primaryImproved = false
+      if (state.task) state.task.needsContinuation = true
       if (state.job) {
         // No fresh six-hour allowance after rollback or supervisor restart.
         state.job.started = now
         state.job.heartbeat = now
         state.job.sequence = -1
         state.job.phase = "running"
-        if (this.protocol.expansion) state.job.source = expansionParent(state, this.protocol.expansion.width)
+        if (state.task) {
+          state.job.purpose = "continuation"
+          delete state.job.source
+        }
+        if (!state.task && this.protocol.expansion)
+          state.job.source = expansionParent(state, this.protocol.expansion.width)
       }
       return { reason }
     })
   }
 
   stop(revision: number, reason: string, now: number) {
-    return this.change(revision, now, "stop", (state) => {
+    return this.change(revision, now, "stop", (state, commands) => {
+      const task = state.task && state.kernel.contracts[state.task.contractID]
+      if (task && (task.status === "active" || task.status === "verification")) {
+        apply(state, commands, {
+          type: "escalate",
+          actor: "institution",
+          contractID: task.id,
+          revision: task.revision,
+          reason: `Task stopped without verified delivery: ${reason}`,
+          time: now,
+        })
+        state.task!.status = "blocked"
+      }
       state.stopped = reason
       return { reason }
     })
@@ -645,6 +863,26 @@ function requireStanding(state: State, boot: Boot) {
   const support = state.kernel.contracts[boot.support]
   if (support?.status !== "discharged" || support.handoff?.subjectHash !== subject(boot.pair))
     throw new Error("boot support was withdrawn")
+}
+
+function requireTask(protocol: Protocol, state: State, now: number) {
+  if (!protocol.deployment) return
+  if (now < protocol.deployment.started) throw new Error("original task has not started")
+  if (now >= protocol.deployment.deadline) throw new Error("original task deadline reached")
+  if (state.task?.status !== "open") throw new Error("task is already delivered or blocked")
+  const task = state.kernel.contracts[state.task.contractID]
+  if (
+    state.task.id !== protocol.deployment.task ||
+    state.task.contractID !== taskContractID(state.protocol, protocol.deployment.task) ||
+    task?.status !== "active" ||
+    task.scope !== state.protocol ||
+    task.spec.budget.deadline !== protocol.deployment.deadline
+  )
+    throw new Error("original task Contract is not active under this frozen scope")
+}
+
+function taskContractID(protocol: string, task: string) {
+  return ProContract.ID.make(`pct_ota_task_${hash(JSON.stringify([protocol, task]))}`)
 }
 
 function requireJob(state: State, epoch: number, job: string, now: number) {

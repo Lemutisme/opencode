@@ -31,6 +31,23 @@ async function fixture() {
 }
 const probe = { title: "documented argument", args: ["value"] }
 
+test("a successor inherits unresolved public obligations, not predecessor readiness", async () => {
+  const f = await fixture()
+  await f.delivery.act({ action: "probe", probe })
+  const obligations = f.delivery.obligations()
+  const successor = await ContractDelivery.create({ ...f.options, state: path.join(f.root, "successor"), obligations })
+  expect(successor.obligations()).toEqual(obligations)
+  expect(await successor.act({ action: "handoff", summary: "same self-validator, new agent" })).toMatchObject({
+    state: "open",
+    reason: "Retained public counterexamples remain",
+  })
+  await fs.copyFile(f.options.reference, path.join(f.directory, "source"))
+  expect(await successor.act({ action: "handoff", summary: "repaired by successor" })).toMatchObject({
+    state: "ready",
+    probes: 1,
+  })
+})
+
 test("stop and a passing self-validator cannot close a retained counterexample", async () => {
   const f = await fixture()
   expect((await f.delivery.status()).state).toBe("open")

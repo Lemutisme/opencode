@@ -5,6 +5,19 @@ import path from "node:path"
 import { RSINative } from "./rsi-native"
 import { RSIRuntime } from "./rsi-runtime"
 
+test("host control cancellation drains its actual child before returning", async () => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 60)
+  try {
+    await expect(
+      RSIRuntime.run(["python3", "-I", "-c", "import time;time.sleep(30)"], { signal: controller.signal }),
+    ).rejects.toThrow()
+    expect(controller.signal.aborted).toBe(true)
+  } finally {
+    clearTimeout(timer)
+  }
+})
+
 test("handoff import rejects symlinks, hardlinks, oversized records and self-attestation", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rsi-boundary-"))
   try {

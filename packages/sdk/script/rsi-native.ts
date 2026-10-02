@@ -21,14 +21,27 @@ export namespace RSINative {
     key: string
     fixture?: boolean
   }
-  export type Scope = {
+  export type OTAScope = {
+    kind?: "ota"
     database: string
     protocol: string
     epoch: number
     job: string
     phase: "running" | "evaluating"
     incumbent: Pair
+    purpose?: "continuation"
+    task?: { id: string; checkpoint: string }
   }
+  export type Scope =
+    | OTAScope
+    | {
+        kind: "audit"
+        database: string
+        protocol: string
+        assignment: string
+        pair: Pair
+        deadline: number
+      }
   export type Input = {
     release: RSIRuntime.Release
     strategy: string
@@ -39,6 +52,8 @@ export namespace RSINative {
     source?: RSIRuntime.Release
     files?: Record<string, RSIRuntime.File>
     image?: string
+    mode?: "programbench"
+    allowRevise?: boolean
   }
   export class Process {
     readonly id = crypto.randomUUID()
@@ -49,6 +64,8 @@ export namespace RSINative {
     private stopped = false
     private deadline = 0
     private launching: Promise<void> = Promise.resolve()
+    private controller = new AbortController()
+    private expiry?: ReturnType<typeof setTimeout>
     constructor(
       readonly root: string,
       readonly provider: Provider,
@@ -57,16 +74,40 @@ export namespace RSINative {
     }
     launch(input: Input) {
       this.deadline = input.deadline
+      this.expiry = setTimeout(
+        () => {
+          void this.close().catch(() => undefined)
+        },
+        Math.max(0, input.deadline - Date.now()),
+      )
       this.launching = this.boot(input)
       return this.launching
     }
     private async boot(input: Input) {
-      const volume = await RSIRuntime.materialize(this.root, input.release)
+      this.controller.signal.throwIfAborted()
+      if (Date.now() >= input.deadline) throw new Error("original allocation deadline reached")
+      const volume = await RSIRuntime.materialize(this.root, input.release, this.controller.signal)
       if (this.stopped) throw new Error("startup cancelled")
       await RSIRuntime.checked(this.provider.gateway)
       for (const dir of ["control", "admission", "channel", "candidate", "state"])
         await fs.mkdir(path.join(this.directory, dir), { recursive: true, mode: dir === "control" ? 0o700 : 0o755 })
-      await Bun.write(path.join(this.directory, "control/scope.json"), JSON.stringify(input.scope))
+      await Bun.write(
+        path.join(this.directory, "control/scope.json"),
+        JSON.stringify({ ...input.scope, mode: input.mode, allowRevise: input.allowRevise }),
+      )
+      await Bun.write(
+        path.join(this.directory, "EXECUTION.json"),
+        JSON.stringify({
+          worker: this.id,
+          release: input.release,
+          strategy: await RSIRuntime.ref(input.strategy),
+          scope: input.scope,
+          image: input.image ?? input.release.image,
+          deadline: input.deadline,
+          mode: input.mode ?? "proposal",
+          files: input.files,
+        }),
+      )
       await Bun.write(path.join(this.directory, "control/active"), "active")
       await Bun.write(path.join(this.directory, "admission/active"), "active")
       await Bun.write(
@@ -78,6 +119,8 @@ export namespace RSINative {
           effort: this.provider.effort,
           goal: input.goal,
           artifact: input.artifact,
+          mode: input.mode,
+          allowRevise: input.allowRevise,
         }),
       )
       await Bun.write(
@@ -191,17 +234,42 @@ export namespace RSINative {
       }))
         argv.push("--env", `${key}=${value}`)
       if (input.image && !/^sha256:[a-f0-9]{64}$/.test(input.image)) throw new Error("task image must be pinned")
-      await RSIRuntime.run([
-        ...argv,
-        "--workdir",
-        "/candidate",
-        "--entrypoint",
-        "/runtime-bun",
-        input.image ?? input.release.image,
-        `/runtime/${input.release.entry}`,
-      ])
+      await RSIRuntime.run(
+        [
+          ...argv,
+          "--workdir",
+          "/candidate",
+          "--entrypoint",
+          "/runtime-bun",
+          input.image ?? input.release.image,
+          `/runtime/${input.release.entry}`,
+        ],
+        { signal: this.controller.signal },
+      )
+      const containment = Schema.decodeUnknownSync(
+        Schema.fromJsonString(
+          Schema.Struct({
+            NetworkMode: Schema.String,
+            ReadonlyRootfs: Schema.Boolean,
+            Privileged: Schema.Boolean,
+            CapDrop: Schema.Array(Schema.String),
+          }),
+        ),
+      )(
+        await RSIRuntime.run(["docker", "inspect", "--format", "{{json .HostConfig}}", this.name], {
+          signal: this.controller.signal,
+        }),
+      )
+      if (
+        containment.NetworkMode !== "none" ||
+        !containment.ReadonlyRootfs ||
+        containment.Privileged ||
+        !containment.CapDrop.includes("ALL")
+      )
+        throw new Error("native containment not established")
+      await Bun.write(path.join(this.directory, "CONTAINMENT.json"), JSON.stringify(containment))
       if (this.stopped) throw new Error("startup cancelled")
-      await RSIRuntime.run(["docker", "start", this.name])
+      await RSIRuntime.run(["docker", "start", this.name], { signal: this.controller.signal })
       const pid = Number((await RSIRuntime.run(["docker", "inspect", "--format", "{{.State.Pid}}", this.name])).trim())
       const raw = await Bun.file(`/proc/${pid}/stat`).text()
       await Bun.write(
@@ -224,7 +292,19 @@ export namespace RSINative {
             "-ec",
             `mkdir /candidate/source; tar -xf /parent-source.tar -C /candidate/source; cd /candidate/source; export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null; git -c core.hooksPath=/dev/null init -q; git -c core.hooksPath=/dev/null add --force --all; git -c core.hooksPath=/dev/null -c user.name=RSI -c user.email=rsi@localhost commit -qm parent`,
           ],
-          { timeout: 120_000 },
+          { timeout: 120_000, signal: this.controller.signal },
+        )
+      if (input.mode === "programbench")
+        await RSIRuntime.run(
+          [
+            "docker",
+            "exec",
+            this.name,
+            "/bin/sh",
+            "-ec",
+            "mkdir /candidate/workspace; if test -f /task/workspace.tar; then tar --no-same-owner --no-same-permissions -xf /task/workspace.tar -C /candidate/workspace; else cp -a /workspace/. /candidate/workspace/; rm -f /candidate/workspace/executable; fi; rm -f /candidate/workspace/reference; ln -s /workspace/executable /candidate/workspace/reference",
+          ],
+          { timeout: 120_000, signal: this.controller.signal },
         )
       if (this.stopped) throw new Error("startup cancelled")
       await Bun.write(path.join(this.directory, "admission/ready"), "ready")
@@ -264,6 +344,9 @@ export namespace RSINative {
     }
     private async stop() {
       this.stopped = true
+      clearTimeout(this.expiry)
+      this.controller.abort()
+      await fs.mkdir(this.directory, { recursive: true, mode: 0o700 })
       await Promise.all(
         ["control/active", "admission/active"].map((file) => fs.rm(path.join(this.directory, file), { force: true })),
       )
@@ -299,6 +382,12 @@ export namespace RSINative {
     }
     async accounting() {
       const file = path.join(this.directory, "control/requests.db")
+      if (!(await Bun.file(file).exists())) {
+        await fs.mkdir(this.directory, { recursive: true, mode: 0o700 })
+        const source = path.join(this.directory, "ACCOUNTING.json")
+        await Bun.write(source, JSON.stringify({ rows: [], incomplete: true, reason: "provider ledger unavailable" }))
+        return { source, knownCost: null, incomplete: true }
+      }
       const db = new Database(file, { readonly: true })
       db.exec("PRAGMA busy_timeout=4000")
       const rows = db.query("SELECT * FROM request").all()

@@ -9,12 +9,17 @@ from pathlib import Path
 import signal
 import sqlite3
 import threading
+import time
+import hashlib
+from contextlib import closing
 
 
 def standing(scope):
     if (Path(scope["database"]).parent / "CANCEL").exists():
         raise ValueError("campaign_cancelled")
-    with sqlite3.connect(f"file:{scope['database']}?mode=ro", uri=True) as db:
+    if scope.get("kind") == "audit":
+        return audit_standing(scope)
+    with closing(sqlite3.connect(f"file:{scope['database']}?mode=ro", uri=True)) as db:
         state = json.loads(
             db.execute("SELECT value FROM ota_state WHERE id=1").fetchone()[0]
         )
@@ -31,12 +36,57 @@ def standing(scope):
         raise ValueError("stale_issuer_job")
     if state["active"]["pair"] != scope["incumbent"]:
         raise ValueError("incumbent_changed")
+    if state["job"].get("purpose") != scope.get("purpose"):
+        raise ValueError("execution_purpose_changed")
+    task = state.get("task")
+    if task and scope.get("task") != {"id": task["id"], "checkpoint": task["checkpoint"]}:
+        raise ValueError("task_checkpoint_changed")
+    if not task and scope.get("task"):
+        raise ValueError("foreign_task_scope")
+    if task and state["kernel"]["contracts"].get(task.get("contractID"), {}).get("status") != "active":
+        raise ValueError("task_support_withdrawn")
     support = state["active"].get("support")
     if (
         support
         and state["kernel"]["contracts"].get(support, {}).get("status") != "discharged"
     ):
         raise ValueError("deployment_support_withdrawn")
+
+
+def audit_standing(scope):
+    with closing(sqlite3.connect(f"file:{scope['database']}?mode=ro", uri=True)) as db:
+        state = json.loads(db.execute("SELECT value FROM rsi_audit WHERE id=1").fetchone()[0])
+    assignment = next((item for item in state["assignments"] if item["id"] == scope["assignment"]), None)
+    if (state.get("stopped") or state["protocol"] != scope["protocol"] or not assignment
+        or assignment["status"] != "active" or assignment["pair"] != scope["pair"]
+        or assignment.get("deadline") != scope["deadline"] or time.time() * 1000 >= scope["deadline"]):
+        raise ValueError("stale_audit_admission")
+    if state["kernel"]["contracts"].get(assignment.get("contractID"), {}).get("status") != "active":
+        raise ValueError("audit_support_withdrawn")
+    source = state["source"]
+    with closing(sqlite3.connect(f"file:{source['database']}?mode=ro", uri=True)) as db:
+        raw = db.execute("SELECT value FROM ota_state WHERE id=1").fetchone()[0]
+        original = json.loads(raw)
+    support = original["active"].get("support")
+    if (hashlib.sha256(raw.encode()).hexdigest() != source["stateHash"]
+        or original["revision"] != source["revision"] or original["protocol"] != source["protocol"]
+        or original["active"]["pair"] != source["pair"] or original["seed"] != source["seed"]
+        or original.get("task") or original.get("trial")
+        or original.get("stopped") != "recursive closure completed" or not support
+        or original["kernel"]["contracts"].get(support, {}).get("status") != "discharged"):
+        raise ValueError("audit_source_changed")
+
+
+def validate_tools(scope, body):
+    allowed = {"glob", "grep", "read", "patch", "shell"}
+    if scope.get("mode") == "programbench":
+        allowed.add("contract_delivery")
+        if scope.get("allowRevise") and scope.get("purpose") == "continuation":
+            allowed.add("rsi_revise")
+    else:
+        allowed.update({"rsi_handoff", "rsi_blocked"})
+    if any(tool.get("name") not in allowed for tool in json.loads(body).get("tools", [])):
+        raise ValueError("tool_not_admitted")
 
 
 def main():
@@ -70,21 +120,7 @@ def main():
             standing(scope)
             if not (Path(args.scope).parent / "active").exists():
                 raise ValueError("allocation_closed")
-            tools = json.loads(body).get("tools", [])
-            if any(
-                tool.get("name")
-                not in {
-                    "glob",
-                    "grep",
-                    "read",
-                    "patch",
-                    "shell",
-                    "rsi_handoff",
-                    "rsi_blocked",
-                }
-                for tool in tools
-            ):
-                raise ValueError("tool_not_admitted")
+            validate_tools(scope, body)
             return super().record(pid, body)
 
     server = Gateway(
