@@ -284,3 +284,35 @@ SDK 全套首次执行在既有 embedded 测试中遇到持续的 SQLite 锁等�
 完整命令、退出码、日志哈希及保留核验见[本轮验证汇总](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/VERIFICATION.md)和[机器可读记录](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/verification.json)。[增量补丁](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/baseline-delta.patch)相对本轮保存的送审工作树生成，不能当作相对 HEAD 的完整实现补丁；已在独立基线副本验证正向应用，并在当前工作树验证反向检查。新增进程场景的 provider 输入、请求、合同／binding、job 操作及宿主日志在[进程证据目录](/workspace/opencode-native-advisory-nodes-review-validation-20261001T051109638851Z/process-artifacts-final)。
 
 本轮要求的修复和补测均已完成。除上表明确的 M2–M5 行为边界外，没有新增设计差异；既有单宿主、确切文件清单、context 变化后 review 失效和换 Session 不补送旧意见的限制保持原样。持续性存储故障仍可能阻止原生执行或恢复；本次保证单次循环故障不会永久终止循环，不承诺在底层存储持续不可用时仍可完成工作。定稿设计、历史材料、kernel/reducer、Research 严格状态机、`sameTask`、评测网关及其测试未改。HEAD、分支、index 保持不变，未提交、未推送；未开展演练或试运行。停在本轮送审状态，等待 Claude 复核。
+
+## 2026-10-02：两轮行为冒烟测试收尾
+
+两轮都是单独标注的行为冒烟测试，不属于任何 cohort，只记录能力兼容性和实际行为，不据此推断 review 的效果。任务均为 SBNO（从 `SBNO_formulas.tex` 实现算法），隔离、CPU、固定 `acceptance.mjs`、七文件 artifacts、6 小时 deadline-only 预算保持一致。
+
+| 项目 | 第一轮（2026-09-27） | 第二轮（2026-10-01） |
+| --- | --- | --- |
+| 代码 | `dfa8721c0`（只有主动请求） | `78c6366fd`（交付前节点默认开启） |
+| Researcher／reviewer | `gpt-5.6-luna` low／low | `gpt-5.6-luna` low／high |
+| 关闭组 | 完成交付，replay 通过；从签发到清理结束 108 秒 | 完成交付，replay 实际执行 2 次并通过；从签发到清理结束 93 秒 |
+| 开启组 | 完成交付；未请求 review，记为"未发生"；从签发到清理结束 70 秒 | 交付前审阅发生；最终未能交付，操作者中止；从签发到清理结束 339 秒 |
+
+**第一轮结论：**原生路径能在隔离环境中跑通 `acceptance.mjs`，最初导致 SBNO 失败 12 次的能力问题已解决。两组 Researcher 都只读了原文档的一部分就快速交付，说明"只靠 Researcher 主动请求"不足以让 reviewer 进入研究过程，由此引出[重要节点设计](pro-contract-researcher-native-advisory-nodes.md)。
+
+**第二轮结论：**
+
+- 交付前节点在真实运行中完整走通一次：第一次交付被拦截，暂停 92.6 秒后在原 Session 恢复；reviewer 以 high 档发出 8 次请求，完整读取 8 个交付文件和 tex 第 541–900 行，意见只投递一次。
+- 意见有实质内容，并给出具体代码行，例如零频系数 `A0` 算出后未参与重建、归一化分母与文档公式不同。Researcher 据此自主修改了 `sbno.py`、`train.py` 和 `REPORT.md`，没有原样重新交付。
+- 开启组未能交付，原因与 review 无关：Researcher 在审阅之前（工具调用 #26）误写了受保护的 `TASK.md`，原生 replay 的保护检查拒绝了此后所有交付。报告 blocked 后原生调度连续开新 attempt，操作者按规则保全现场并中止。详见[问题说明](pro-contract-protected-inputs-and-blocked-retry-problem.md)。
+- 两轮的 review 机制、恢复和计量记录均如实完整；清理全部 `confirmed`。
+
+**合同状态：**两轮关闭组的交付仍停在 `verification`，开启组第二轮的合同为 `active` 且 admission 已关闭。它们都在独立的试运行数据库中，宿主已退出，没有作 Principal 认可，也不需要进一步处理。
+
+**遗留事项：**
+
+1. ProContract 原生问题：受保护输入可被写坏、blocked 后重试空转。已写成[问题说明](pro-contract-protected-inputs-and-blocked-retry-problem.md)，另行规划。
+2. advisory 小问题：`materials.json` 是单行 JSON，reviewer 的 read 工具每行只返回前 2000 个字符。应改为分行写出。
+3. advisory 小问题：宿主主循环每轮为每个开启中途节点的登记各开一个 immediate 事务，包括已结束的合同。中途节点默认关闭，影响很小。
+4. 测试隔离：SDK embedded 测试因为数据库路径在模块导入时固定，会打开默认测试库，与其他测试争锁。运行测试时设置独立的 `OPENCODE_DB` 可以避开；这是既有问题。
+5. 下一轮试运行：等问题 A 的修复合入后再跑两组，新合同把 `resolution.retryDelay` 设为几分钟。
+
+**证据目录：**第一轮在 `/workspace/sbno-native-advisory-preparation-20260924T054618Z/approved-execution-20260927T072425Z/`，第二轮在 `/workspace/sbno-native-advisory-preparation-20260924T054618Z/nodes-preparation-20261001T062410Z/approved-execution-20261001T065720Z/`，两者各有 `RESULTS.md` 和封存清单。
