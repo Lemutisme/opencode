@@ -81,6 +81,11 @@ Local official qualification feedback is adaptive evaluation, not blind leaderbo
 measurement. Fixed-pair `evaluateNative` still disables task-local revision; it does
 not silently nest another search inside a cross-task comparison.
 
+`rsi_revise` interrupts its own native Session rather than waiting for the model
+to volunteer a final answer. The worker waits for idle and the host still fences
+it before sealing the checkpoint. Interrupted stream usage may be unknown and
+must remain explicitly incomplete; interruption is not original-task failure.
+
 For the finite cross-task experiment, freeze
 `completion: {selections: 2, successorHandoff: true, stopOnRejection: true}`.
 Rejection or failed successor ends the chain (with withdrawal/rollback where

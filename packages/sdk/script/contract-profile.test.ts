@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { Effect, Layer } from "effect"
-import { LanguageModel, LLMClient } from "@opencode/ai"
+import { LanguageModel, LLMClient, LLMEvent } from "@opencode/ai"
 import { OpenAIChat } from "@opencode/ai/protocols"
 import { TestLLM } from "@opencode/ai/testing"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
@@ -12,92 +12,116 @@ import { PromiseSdk } from "../src/promise"
 import { ContractDelivery } from "./contract-delivery"
 import { contractProfile, drainDelivery } from "./contract-profile"
 
-test("revision stops the native Session instead of waiting for a cooperative model final answer", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "revision-native-"))
-  const directory = path.join(root, "candidate")
-  await fs.mkdir(directory)
-  const controller = new AbortController()
-  const deadline = Date.now() + 30_000
-  const delivery = await ContractDelivery.create({
-    directory,
-    state: path.join(root, "evidence"),
-    reference: path.join(root, "reference"),
-    deadline,
-    signal: controller.signal,
-    assertStanding: async () => undefined,
-  })
-  const revision = { reason: undefined as string | undefined }
-  const llm = await Effect.runPromise(TestLLM.Test.pipe(Effect.provide(TestLLM.testLayer())))
-  await Effect.runPromise(
-    llm.push(
-      TestLLM.tool("request", "rsi_revise", {
-        reason: "Use a differential fixture matrix based on public discrepancies",
-      }),
-      TestLLM.tool("must-not-run", "shell", { command: "touch after-revision", workdir: directory }),
-      TestLLM.text("A cooperative final answer must not be required", "late-final"),
-    ),
-  )
-  const model = SessionRunnerModel.resolved(
-    LanguageModel.make({ id: "gpt-5.6-luna", provider: "openai", route: OpenAIChat.route }),
-    {
-      capabilities: { tools: true, input: ["text"], output: ["text"] },
-      cost: [],
-      limit: { context: 200_000, output: 8192 },
-    },
-  )
-  const host = await PromiseSdk.create(
-    {
-      app: { name: "revision-test" },
-      database: { path: path.join(root, "session.sqlite") },
-      events: { persist: true },
-      models: { fetch: false },
-      fs: { filewatcher: false, fff: false },
-      config: {
-        directory: path.join(root, "config"),
-        project: false,
-        content: JSON.stringify({ permissions: [{ action: "*", resource: "*", effect: "allow" }] }),
-      },
-      plugins: [
-        contractProfile(delivery, deadline, (reason) => {
-          revision.reason = reason
-        }),
-      ],
-    },
-    {
-      overrides: [
-        llmClient.replace(Layer.succeed(LLMClient.Service, llm)),
-        SessionRunnerModel.node.replace(
-          Layer.succeed(SessionRunnerModel.Service, { resolve: () => Effect.succeed(model) }),
-        ),
-      ],
-    },
-  )
-  try {
-    const session = await host.sessions.create({ title: "Revision barrier", location: { directory } })
-    await host.sessions.prompt({ sessionID: session.id, text: "Request a harness revision, then try to keep working." })
-    const result = await drainDelivery({
-      wait: () => host.sessions.wait({ sessionID: session.id }),
-      prompt: () => {
-        throw new Error("A revision must not admit another solver prompt")
-      },
-      status: delivery.status,
-      assertActive: async () => {
-        if (Date.now() >= deadline) throw new Error("deadline")
-      },
-      revision: () => revision.reason,
+test.each(["continue", "batched", "hanging"])(
+  "revision stops the native Session (%s)",
+  async (mode) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "revision-native-"))
+    const directory = path.join(root, "candidate")
+    await fs.mkdir(directory)
+    const controller = new AbortController()
+    const deadline = Date.now() + 30_000
+    const delivery = await ContractDelivery.create({
+      directory,
+      state: path.join(root, "evidence"),
+      reference: path.join(root, "reference"),
+      deadline,
+      signal: controller.signal,
+      assertStanding: async () => undefined,
     })
-    expect(result).toEqual({ state: "revise", reason: revision.reason })
-    expect(await Bun.file(path.join(directory, "after-revision")).exists()).toBe(false)
-    const events = await Array.fromAsync(host.sessions.log({ sessionID: session.id }))
-    expect(events.filter((event) => event.type === "session.step.started")).toHaveLength(1)
-    expect(events.filter((event) => event.type === "session.execution.interrupted")).toHaveLength(1)
-    expect(events.filter((event) => event.type === "session.execution.failed")).toHaveLength(0)
-  } finally {
-    controller.abort()
-    await host.close()
-    await fs.rm(root, { recursive: true, force: true })
-  }
-}, 40_000)
+    const revision = { reason: undefined as string | undefined }
+    const llm = await Effect.runPromise(TestLLM.Test.pipe(Effect.provide(TestLLM.testLayer())))
+    const request = LLMEvent.toolCall({
+      id: "request",
+      name: "rsi_revise",
+      input: { reason: "Use a differential fixture matrix based on public discrepancies" },
+    })
+    await Effect.runPromise(
+      llm.push(
+        mode === "hanging"
+          ? TestLLM.hangAfter(request)
+          : mode === "batched"
+            ? TestLLM.toolCalls(
+                request,
+                LLMEvent.toolCall({
+                  id: "queued",
+                  name: "shell",
+                  input: { command: "touch after-revision", workdir: directory },
+                }),
+              )
+            : TestLLM.toolCalls(request),
+        TestLLM.tool("must-not-run", "shell", { command: "touch after-revision", workdir: directory }),
+        TestLLM.text("A cooperative final answer must not be required", "late-final"),
+      ),
+    )
+    const model = SessionRunnerModel.resolved(
+      LanguageModel.make({ id: "gpt-5.6-luna", provider: "openai", route: OpenAIChat.route }),
+      {
+        capabilities: { tools: true, input: ["text"], output: ["text"] },
+        cost: [],
+        limit: { context: 200_000, output: 8192 },
+      },
+    )
+    const host = await PromiseSdk.create(
+      {
+        app: { name: "revision-test" },
+        database: { path: path.join(root, "session.sqlite") },
+        events: { persist: true },
+        models: { fetch: false },
+        fs: { filewatcher: false, fff: false },
+        config: {
+          directory: path.join(root, "config"),
+          project: false,
+          content: JSON.stringify({ permissions: [{ action: "*", resource: "*", effect: "allow" }] }),
+        },
+        plugins: [
+          contractProfile(delivery, deadline, (reason) => {
+            revision.reason = reason
+          }),
+        ],
+      },
+      {
+        overrides: [
+          llmClient.replace(Layer.succeed(LLMClient.Service, llm)),
+          SessionRunnerModel.node.replace(
+            Layer.succeed(SessionRunnerModel.Service, { resolve: () => Effect.succeed(model) }),
+          ),
+        ],
+      },
+    )
+    try {
+      const session = await host.sessions.create({ title: "Revision barrier", location: { directory } })
+      await host.sessions.prompt({
+        sessionID: session.id,
+        text: "Request a harness revision, then try to keep working.",
+      })
+      const result = await drainDelivery({
+        wait: () => host.sessions.wait({ sessionID: session.id }),
+        prompt: () => {
+          throw new Error("A revision must not admit another solver prompt")
+        },
+        status: delivery.status,
+        assertActive: async () => {
+          if (Date.now() >= deadline) throw new Error("deadline")
+        },
+        revision: () => revision.reason,
+      })
+      expect(result).toEqual({
+        state: "revise",
+        reason: "Use a differential fixture matrix based on public discrepancies",
+      })
+      expect(await Bun.file(path.join(directory, "after-revision")).exists()).toBe(false)
+      const events = await Array.fromAsync(host.sessions.log({ sessionID: session.id }))
+      expect(events.filter((event) => event.type === "session.step.started")).toHaveLength(1)
+      expect(events.filter((event) => event.type === "session.execution.interrupted")).toHaveLength(1)
+      expect(events.filter((event) => event.type === "session.execution.failed")).toHaveLength(0)
+    } finally {
+      controller.abort()
+      await host.close()
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  },
+  40_000,
+)
 
 for (const precedingSteps of [0, 1002])
   test(`native closure after ${precedingSteps} preceding steps`, async () => {
