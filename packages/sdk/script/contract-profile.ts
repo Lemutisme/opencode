@@ -59,6 +59,10 @@ export function contractProfile(
                 call.signal.throwIfAborted()
                 if (!input.reason.trim()) throw new Error("A concrete revision reason is required")
                 revise(input.reason)
+                // A revision request is a handoff barrier, not advice to the
+                // model. Interrupt only this Session; the worker drains it and
+                // the host fences the allocation before sealing its checkpoint.
+                await context.session.interrupt({ sessionID: call.sessionID })
                 return {
                   content: "Task revision requested; host qualification and original deadline remain authoritative.",
                 }
