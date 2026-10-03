@@ -66,6 +66,97 @@ function proposal(ota: OTA) {
 }
 
 describe("task-local RSI authority", () => {
+  test.each([-1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid task revision schedule %s",
+    (revisions) => {
+      expect(
+        () => new OTA(":memory:", { ...protocol, deployment: { ...protocol.deployment!, revisions } }, seed),
+      ).toThrow("task revision schedule")
+    },
+  )
+
+  test("a task revision schedule cannot be confused with recursive proposal completion", () => {
+    expect(
+      () =>
+        new OTA(
+          ":memory:",
+          {
+            ...protocol,
+            deployment: { ...protocol.deployment!, revisions: 1 },
+            completion: { selections: 1, successorHandoff: true, stopOnRejection: true },
+          },
+          seed,
+        ),
+    ).toThrow("recursive completion")
+  })
+
+  test("zero task revisions admits solving, not a forged revision handoff", async () => {
+    const { ota } = await fixture({ ...protocol, deployment: { ...protocol.deployment!, revisions: 0 } })
+    expect(ota.read().task!.revisions).toBe(0)
+    const begun = ota.begin(0, 100)
+    expect(begun.job).toMatchObject({ purpose: "continuation", allowRevise: false, deadline: 10_000 })
+    expect(() => continuation(ota)).toThrow("revision schedule exhausted")
+    // Failed revision validation is transactional; final task verification still works.
+    const ready = ota.read()
+    const completed = ota.continued(
+      ready.revision,
+      ready.epoch,
+      ready.job!.id,
+      {
+        previous: ready.task!.checkpoint,
+        checkpoint: hash("final output without adaptation"),
+        receipt: hash("independent final grade"),
+        outcome: "delivered",
+      },
+      ready.clock + 1,
+    )
+    expect(completed.task!.status).toBe("delivered")
+    expect(completed.active.pair).toEqual(seed)
+  })
+
+  test.each(["selected", "qualification-rejected", "preparation-rejected"])(
+    "%s spends one task revision then continues the same original task without another proposal",
+    async (kind) => {
+      const { ota, file } = await fixture({ ...protocol, deployment: { ...protocol.deployment!, revisions: 1 } })
+      const first = continuation(ota)
+      expect(first.begun.job!.allowRevise).toBe(true)
+      const input = proposal(ota)
+      expect(input.begun.job!.allowRevise).toBeUndefined()
+      const before = ota.read()
+      const state =
+        kind === "preparation-rejected"
+          ? ota.rejectPreparation(
+              before.revision,
+              input.pair,
+              "build rejected",
+              hash("build receipt"),
+              before.clock + 1,
+            )
+          : ota.settle(
+              before.revision,
+              input.pair,
+              {
+                ...input.evidence,
+                rows: [{ id: "safety", passed: kind === "selected" ? 1 : 0, total: 1, valid: true }],
+              },
+              before.clock + 1,
+            )
+      expect(state.task).toMatchObject({ revisions: 1, needsContinuation: true, checkpoint: first.handoff.checkpoint })
+      expect(state.active.pair).toEqual(kind === "selected" ? input.pair : seed)
+      expect(state.kernel.contracts[state.task!.contractID].status).toBe("active")
+      const reopened = new OTA(file, ota.protocol, seed)
+      databases.push(reopened)
+      const next = reopened.begin(state.revision, state.clock + 1)
+      expect(next.job).toMatchObject({ purpose: "continuation", allowRevise: false, deadline: 10_000 })
+      const done = continuation(reopened, "delivered")
+      expect(done.state.task).toMatchObject({ revisions: 1, status: "delivered" })
+      expect(done.state.active.pair).toEqual(state.active.pair)
+      expect(reopened.history().filter((row) => (row as { type: string }).type === "qualification")).toHaveLength(
+        kind === "preparation-rejected" ? 0 : 1,
+      )
+    },
+  )
+
   test("primary-improvement stopping cannot bypass task successor continuation", () => {
     expect(() => new OTA(":memory:", { ...protocol, stopOnPrimaryImprovement: true }, seed)).toThrow(
       "actual continuation",

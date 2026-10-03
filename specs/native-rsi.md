@@ -70,6 +70,17 @@ the verifier uses the remaining original deadline; no synthetic heartbeat is use
 Only trusted verification can discharge the original task Contract. A stopped
 search, partial score or successful S/H replacement is not task completion.
 
+For a separately frozen task on/off experiment, `deployment.revisions: 0` keeps
+the incumbent fixed; a positive count schedules that many formal S/H proposals.
+Each selected or rejected proposal returns to the same task checkpoint. Once the
+schedule is exhausted, the successor or retained incumbent must finish without
+another revision; the host also rejects forged revision handoffs. This is not a
+provider/tool-call cap or a renewed deadline. It is incompatible with `completion`.
+ProgramBench scores terminal blocked artifacts too, but never calls them delivered.
+Local official qualification feedback is adaptive evaluation, not blind leaderboard
+measurement. Fixed-pair `evaluateNative` still disables task-local revision; it does
+not silently nest another search inside a cross-task comparison.
+
 For the finite cross-task experiment, freeze
 `completion: {selections: 2, successorHandoff: true, stopOnRejection: true}`.
 Rejection or failed successor ends the chain (with withdrawal/rollback where

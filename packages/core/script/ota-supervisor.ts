@@ -23,6 +23,7 @@ export type Job = {
   output: string
   memory: State["active"]["memory"]
   purpose?: "continuation"
+  allowRevise?: boolean
   task?: { id: string; checkpoint: string }
   feedback?: {
     eligible: boolean
@@ -244,6 +245,7 @@ export async function supervise(
         output,
         memory: state.active.memory,
         ...(state.job!.purpose ? { purpose: state.job!.purpose } : {}),
+        ...(state.job!.allowRevise !== undefined ? { allowRevise: state.job!.allowRevise } : {}),
         ...(state.task ? { task: { id: state.task.id, checkpoint: state.task.checkpoint } } : {}),
       }
       const previous = ota

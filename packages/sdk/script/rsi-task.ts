@@ -77,7 +77,7 @@ export namespace RSITask {
   export function continuation(
     root: string,
     verify: (input: NativeObservation & { job: Job }) => Promise<{ passed: number; total: number; valid: boolean }>,
-    options?: { partial: "revise" | "blocked" },
+    options?: { partial: "revise" | "blocked"; scoreBlocked?: boolean },
   ): NonNullable<NativeConfiguration["continuation"]> {
     return {
       task: async (job) => {
@@ -105,9 +105,10 @@ export namespace RSITask {
         )
         retained(previous.obligations, handoff.obligations)
         live({ ...input, signal })
-        const verification = handoff.result.state === "ready" ? await verify({ ...input, signal }) : null
+        const score = handoff.result.state === "ready" || (handoff.result.state === "blocked" && options?.scoreBlocked)
+        const verification = score ? await verify({ ...input, signal }) : null
         if (
-          handoff.result.state === "ready" &&
+          score &&
           (!verification ||
             verification.valid !== true ||
             !Number.isSafeInteger(verification.passed) ||

@@ -184,7 +184,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
             strategy: job.pair.s,
             deadline: job.deadline,
             scope: execution,
-            allowRevise: true,
+            allowRevise: job.allowRevise ?? true,
           })
           .catch(async (error) => {
             await worker.close()

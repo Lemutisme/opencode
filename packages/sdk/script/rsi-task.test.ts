@@ -224,6 +224,29 @@ test.each(["revise", "blocked"] as const)(
   },
 )
 
+test("an opted-in blocked artifact is scored without being called completed or permitting another solve", async () => {
+  const f = await fixture()
+  const scores: string[] = []
+  const next = await RSITask.continuation(
+    f.root,
+    async (input) => {
+      scores.push(input.run)
+      return { passed: 2, total: 4, valid: true }
+    },
+    { partial: "blocked", scoreBlocked: true },
+  ).settle({
+    ...f.input,
+    artifact: new TextEncoder().encode(
+      JSON.stringify({ ...f.handoff, result: { state: "blocked", reason: "Partial implementation" } }),
+    ),
+  })
+  expect(scores).toEqual([f.run])
+  expect(next.outcome).toBe("blocked")
+  const receipt = await Bun.file(await f.artifacts.get(next.receipt)).json()
+  expect(receipt.verification).toEqual({ passed: 2, total: 4, valid: true })
+  expect(receipt.deadline).toBe(f.input.deadline)
+})
+
 test.each(["removed", "expected", "probe", "duplicate"])("public obligations cannot be %s", async (kind) => {
   const f = await fixture()
   const calls: string[] = []

@@ -135,7 +135,7 @@ export async function programBench(root: string, reference: RSIRuntime.File) {
           if (!task) throw new Error("unassigned live task")
           return grade(task, input)
         },
-        { partial: "blocked" },
+        { partial: "blocked", scoreBlocked: true },
       )
     : undefined
   const configuration: Pick<NativeConfiguration, "task" | "grade" | "continuation"> = {

@@ -17,7 +17,16 @@ export type Protocol = {
   completion?: { selections: number; successorHandoff: true; stopOnRejection: boolean }
   // A task-local ledger never changes a campaign's default pair. Its original
   // allowance and initial public checkpoint are part of the frozen authority.
-  deployment?: { kind: "task"; task: string; started: number; deadline: number; checkpoint: string }
+  deployment?: {
+    kind: "task"
+    task: string
+    started: number
+    deadline: number
+    checkpoint: string
+    // Optional experimental adaptation schedule, not a model/tool call limit.
+    // Finish the original task after these proposals, even when one is rejected.
+    revisions?: number
+  }
   scope: "mechanics" | "performance"
   performanceRule?: "panel-margin" | "task-pareto"
   minimumMeanGainBps?: number
@@ -73,6 +82,7 @@ export type State = {
     checkpoint: string
     needsContinuation: boolean
     status: "open" | "delivered" | "blocked"
+    revisions?: number
   }
   job?: {
     id: string
@@ -82,6 +92,7 @@ export type State = {
     sequence: number
     phase: "running" | "evaluating"
     purpose?: "continuation"
+    allowRevise?: boolean
     source?: { id: string; pair: Pair }
   }
   stopped?: string
@@ -137,6 +148,13 @@ export class OTA {
       )
         throw new Error("task deployment requires one task and its original deadline of at most six hours")
       requireHash(protocol.deployment.checkpoint)
+      if (
+        protocol.deployment.revisions !== undefined &&
+        (!Number.isSafeInteger(protocol.deployment.revisions) ||
+          protocol.deployment.revisions < 0 ||
+          protocol.completion)
+      )
+        throw new Error("task revision schedule requires a nonnegative count and cannot use recursive completion")
     }
     requirePair(seed)
     if (
@@ -233,6 +251,7 @@ export class OTA {
                   checkpoint: protocol.deployment.checkpoint,
                   needsContinuation: true,
                   status: "open" as const,
+                  ...(protocol.deployment.revisions !== undefined ? { revisions: 0 } : {}),
                 },
               }
             : {}),
@@ -308,6 +327,13 @@ export class OTA {
       if (state.job) throw new Error("an admitted job already exists")
       requireTask(this.protocol, state, now)
       requireStanding(state, state.active)
+      if (
+        state.task &&
+        !state.task.needsContinuation &&
+        this.protocol.deployment?.revisions !== undefined &&
+        (state.task.revisions ?? 0) >= this.protocol.deployment.revisions
+      )
+        throw new Error("task revision schedule exhausted; no further source proposal")
       state.job = {
         id: `job-${state.revision + 1}-${state.epoch}`,
         deadline: Math.min(now + SIX_HOURS, this.protocol.deployment?.deadline ?? now + SIX_HOURS),
@@ -316,7 +342,12 @@ export class OTA {
         sequence: -1,
         phase: "running",
         ...(state.task?.needsContinuation
-          ? { purpose: "continuation" as const }
+          ? {
+              purpose: "continuation" as const,
+              ...(this.protocol.deployment?.revisions !== undefined
+                ? { allowRevise: (state.task.revisions ?? 0) < this.protocol.deployment.revisions }
+                : {}),
+            }
           : this.protocol.expansion
             ? { source: expansionParent(state, this.protocol.expansion.width) }
             : {}),
@@ -394,6 +425,12 @@ export class OTA {
       requireHash(handoff.receipt)
       if (handoff.previous !== state.task.checkpoint) throw new Error("task checkpoint changed before handoff")
       if (!["revise", "delivered", "blocked"].includes(handoff.outcome)) throw new Error("invalid task handoff outcome")
+      if (
+        handoff.outcome === "revise" &&
+        this.protocol.deployment?.revisions !== undefined &&
+        (state.task.revisions ?? 0) >= this.protocol.deployment.revisions
+      )
+        throw new Error("task revision schedule exhausted; finish the original task with the incumbent")
       const task = state.kernel.contracts[state.task.contractID]
       if (handoff.outcome === "delivered") {
         apply(state, commands, {
@@ -476,6 +513,10 @@ export class OTA {
       if (evidence.baseline.subject !== subject(state.active.pair)) throw new Error("baseline is not the current pair")
       const decision = qualify(this.protocol, this.digest, pair, evidence, state.retainedFull)
       const passed = decision.eligible
+      if (state.task && this.protocol.deployment?.revisions !== undefined) {
+        state.task.revisions = (state.task.revisions ?? 0) + 1
+        state.task.needsContinuation = true
+      }
       if (state.job.source) {
         state.lineage ??= []
         state.lineage.push({
@@ -608,6 +649,10 @@ export class OTA {
         reason: `Preparation failed: ${receipt}`,
         time: now,
       })
+      if (state.task && this.protocol.deployment?.revisions !== undefined) {
+        state.task.revisions = (state.task.revisions ?? 0) + 1
+        state.task.needsContinuation = true
+      }
       delete state.job
       return { reason, receipt, performanceEvaluated: false }
     })
@@ -664,6 +709,8 @@ export class OTA {
         state.job.phase = "running"
         if (state.task) {
           state.job.purpose = "continuation"
+          if (this.protocol.deployment?.revisions !== undefined)
+            state.job.allowRevise = (state.task.revisions ?? 0) < this.protocol.deployment.revisions
           delete state.job.source
         }
         if (!state.task && this.protocol.expansion)
