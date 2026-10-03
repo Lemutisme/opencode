@@ -154,6 +154,9 @@ an existing public excerpt key (`publicFile`) in `development.files`:
   admission, actual S/H and deadline.
 - `development-measurement` binds a completed fixed-pair measurement and its
   `execution` to a task explicitly selected as development in the new protocol.
+- `development-task` binds a task-continuation receipt to its actual job, epoch,
+  pair, checkpoint and original deadline. It can carry public experience into a
+  new cross-task proposal; task-local standing never becomes global authority.
 - `proposal-build` identifies an acknowledged build rejection, not a task score;
   compiler feedback alone is insufficient task experience.
 

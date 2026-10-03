@@ -179,3 +179,56 @@ test("completed measurement feedback binds its assignment and new development id
     await fs.rm(f.root, { recursive: true, force: true })
   }
 })
+
+test("task-local experience keeps its continuation identity and cannot export task-local authority", async () => {
+  const f = await fixture()
+  try {
+    const task = { id: "D", checkpoint: hash("before task continuation") }
+    const data = {
+      producer: { id: "original-job", epoch: 2, purpose: "continuation", task, pair: f.data.pair, deadline: 1000 },
+      pair: { s: f.strategy.sha256, h: f.harness.sha256 },
+      report: {
+        previous: task.checkpoint,
+        checkpoint: hash("after continuation"),
+        receipt: hash("host receipt"),
+        outcome: "blocked",
+      },
+    }
+    const execution = await f.write("task-execution", {
+      ...f.execution,
+      scope: { kind: "ota", phase: "running", purpose: "continuation", job: "original-job", epoch: 2, task },
+    })
+    const source = await f.write("task-report", { sha256: hash(JSON.stringify(data)), data })
+    const evidence = { kind: "development-task" as const, source, execution, publicFile: "failure" }
+    const result = await revisionContext({ ...f.input, evidence: [evidence] })
+    expect(result.context.observations[0]).toMatchObject({
+      kind: "development-task",
+      task: "D",
+      publicFile: "/task/failure",
+    })
+    expect(JSON.stringify(result.context)).not.toContain(f.root)
+    expect(JSON.stringify(result.context)).not.toContain("original-job")
+    for (const changed of [
+      { ...data, producer: { ...data.producer, id: "other-job" } },
+      { ...data, producer: { ...data.producer, epoch: 3 } },
+      { ...data, producer: { ...data.producer, deadline: 2000 } },
+      { ...data, producer: { ...data.producer, task: { ...task, id: "C" } } },
+      { ...data, pair: { ...data.pair, h: hash("inactive local proposal") } },
+      { ...data, report: { ...data.report, previous: hash("other checkpoint") } },
+    ]) {
+      const source = await f.write("changed-report", { sha256: hash(JSON.stringify(changed)), data: changed })
+      await expect(revisionContext({ ...f.input, evidence: [{ ...evidence, source }] })).rejects.toThrow()
+    }
+    const stale = await f.write("wrong-scope", { ...f.execution, scope: { phase: "evaluating" } })
+    await expect(revisionContext({ ...f.input, evidence: [{ ...evidence, execution: stale }] })).rejects.toThrow()
+    await expect(
+      revisionContext({
+        ...f.input,
+        evidence: [evidence],
+        task: () => ({ identity: "D", goal: "alias", artifact: "out" }),
+      }),
+    ).rejects.toThrow("overlaps")
+  } finally {
+    await fs.rm(f.root, { recursive: true, force: true })
+  }
+})

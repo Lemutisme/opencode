@@ -8,7 +8,7 @@ import type { NativeConfiguration } from "./rsi-driver"
 
 export const RevisionEvidence = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literals(["development-run", "development-measurement"]),
+    kind: Schema.Literals(["development-run", "development-measurement", "development-task"]),
     source: RSIRuntime.File,
     execution: RSIRuntime.File,
     publicFile: Schema.String,
@@ -141,17 +141,67 @@ export async function revisionContext(input: {
           harness: profile.harness,
         }
       }
+      const receipt = Schema.decodeUnknownSync(
+        Schema.fromJsonString(Schema.Struct({ sha256: Schema.String, data: Schema.Unknown })),
+      )(await Bun.file(evidence.source.path).text())
+      if (hash(JSON.stringify(receipt.data)) !== receipt.sha256)
+        throw new Error("development admission receipt changed")
+      if (evidence.kind === "development-task") {
+        // A task continuation is experience, not a global deployment grant or
+        // an evaluator admission. Keep its actual scope instead of relabeling it.
+        const scope = Schema.decodeUnknownSync(
+          Schema.Struct({
+            kind: Schema.optional(Schema.Literal("ota")),
+            phase: Schema.Literal("running"),
+            purpose: Schema.Literal("continuation"),
+            job: Schema.String,
+            epoch: Schema.Int,
+            task: Schema.Struct({ id: Schema.String, checkpoint: Schema.String }),
+          }),
+        )(execution.scope)
+        const continuation = Schema.decodeUnknownSync(
+          Schema.Struct({
+            producer: Schema.Struct({
+              id: Schema.String,
+              epoch: Schema.Int,
+              purpose: Schema.Literal("continuation"),
+              deadline: Schema.Number,
+              pair: Schema.Struct({ s: Schema.String, h: Schema.String }),
+              task: Schema.Struct({ id: Schema.String, checkpoint: Schema.String }),
+            }),
+            pair: Schema.Struct({ s: Schema.String, h: Schema.String }),
+            report: Schema.Struct({
+              previous: Schema.String,
+              checkpoint: Schema.String,
+              receipt: Schema.String,
+              outcome: Schema.Literals(["revise", "delivered", "blocked"]),
+            }),
+          }),
+        )(receipt.data)
+        const producer = continuation.producer
+        const strategy = await RSIRuntime.ref(producer.pair.s)
+        const harness = await RSIRuntime.ref(producer.pair.h)
+        if (
+          scope.job !== producer.id ||
+          scope.epoch !== producer.epoch ||
+          scope.task.id !== producer.task.id ||
+          scope.task.checkpoint !== producer.task.checkpoint ||
+          continuation.report.previous !== producer.task.checkpoint ||
+          continuation.pair.s !== strategy.sha256 ||
+          continuation.pair.h !== harness.sha256 ||
+          ![continuation.report.previous, continuation.report.checkpoint, continuation.report.receipt].every((value) =>
+            /^[a-f0-9]{64}$/.test(value),
+          )
+        )
+          throw new Error("task experience does not bind the actual continuation and checkpoint")
+        return { task: producer.task.id, deadline: producer.deadline, strategy, harness }
+      }
       Schema.decodeUnknownSync(
         Schema.Struct({
           kind: Schema.optional(Schema.Literal("ota")),
           phase: Schema.Literal("evaluating"),
         }),
       )(execution.scope)
-      const receipt = Schema.decodeUnknownSync(
-        Schema.fromJsonString(Schema.Struct({ sha256: Schema.String, data: Schema.Unknown })),
-      )(await Bun.file(evidence.source.path).text())
-      if (hash(JSON.stringify(receipt.data)) !== receipt.sha256)
-        throw new Error("development admission receipt changed")
       const admitted = Schema.decodeUnknownSync(
         Schema.Struct({
           test: Schema.Struct({
