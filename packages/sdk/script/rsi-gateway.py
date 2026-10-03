@@ -118,6 +118,9 @@ def validate_tools(scope, body):
             allowed.add("rsi_revise")
     elif mode is None:
         allowed.update({"rsi_handoff", "rsi_blocked"})
+        proposal = scope.get("proposal")
+        if isinstance(proposal, dict) and proposal.get("kind") in {"h", "s"}:
+            allowed.add("rsi_check")
     else:
         raise ValueError("execution_mode_not_admitted")
     if any(tool.get("name") not in allowed for tool in json.loads(body).get("tools", [])):

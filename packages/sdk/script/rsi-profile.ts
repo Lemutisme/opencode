@@ -7,6 +7,7 @@ import type { NativeConfiguration } from "./rsi-driver"
 import type { Protocol } from "../../core/script/ota-rsi"
 import { Artifacts } from "../../core/script/ota-supervisor"
 import path from "node:path"
+import { RevisionEvidence, revisionContext } from "./rsi-revision"
 
 const Profile = Schema.Struct({
   harness: RSIRuntime.File,
@@ -16,9 +17,15 @@ const Profile = Schema.Struct({
   terminal: Schema.optional(RSIRuntime.File),
   tau: Schema.optional(RSIRuntime.File),
   safety: Schema.optional(Schema.Array(Schema.String)),
+  safetyFormat: Schema.optional(Schema.Literals(["legacy-v1", "witness-v2"])),
+  evaluationTarget: Schema.optional(Schema.Literal("task-performance")),
   authority: Schema.Array(RSIRuntime.File),
   development: Schema.optional(
-    Schema.Struct({ goal: Schema.String, files: Schema.Record(Schema.String, RSIRuntime.File) }),
+    Schema.Struct({
+      goal: Schema.String,
+      files: Schema.Record(Schema.String, RSIRuntime.File),
+      evidence: Schema.optional(Schema.Array(RevisionEvidence)),
+    }),
   ),
   gateway: RSIRuntime.File,
   model: Schema.String,
@@ -84,13 +91,17 @@ export async function configure(root: string) {
       const test = input.tests.find((test) => test.id === id)
       return !test || test.performance !== undefined || test.total !== 1 || input.audit?.some((test) => test.id === id)
     }) ||
-    ((input.terminal || input.tau) && !safety.size)
+    ((input.terminal || input.tau || input.safetyFormat) && !safety.size)
   )
     throw new Error("external benchmark safety IDs must name fixed non-performance selection tests, never audit")
   const safetyAdapter = await (async () => {
     if (!safety.size) return
     const { containmentTask, containmentScore } = await import("./rsi-safety")
-    return { task: containmentTask, grade: containmentScore }
+    return {
+      task: (test: Protocol["tests"][number]) => containmentTask(test, input.safetyFormat),
+      grade: (observation: Parameters<NativeConfiguration["grade"]>[0]) =>
+        containmentScore(observation, input.safetyFormat),
+    }
   })()
   const references = [
     input.harness,
@@ -134,10 +145,28 @@ export async function configure(root: string) {
   if (typeof adapter.task !== "function" || typeof adapter.grade !== "function")
     throw new Error("trusted grader must export task and grade")
   if (input.deployment && !adapter.continuation) throw new Error("task scope requires trusted checkpoint continuation")
+  if (input.development?.evidence && !input.evaluationTarget)
+    throw new Error("revision evidence requires an explicit evaluationTarget")
+  const revision = input.evaluationTarget
+    ? await revisionContext({
+        evidence: input.development?.evidence ?? [],
+        files: { ...input.development?.files },
+        tests: [...input.tests],
+        audit: input.audit ?? [],
+        task: (test) => (safety.has(test.id) ? safetyAdapter!.task(test) : adapter.task(test)),
+      })
+    : undefined
   const native: NativeConfiguration = {
     root,
     provider: { gateway: input.gateway, model: input.model, effort: input.effort, upstream: input.upstream, key },
-    authority: [profile, ...references, ...adapter.authority, await RSIRuntime.ref(import.meta.path)],
+    authority: [
+      profile,
+      ...references,
+      ...adapter.authority,
+      ...(revision?.authority ?? []),
+      await RSIRuntime.ref(import.meta.path),
+    ],
+    revision: revision?.context,
     task: (test, task) => (safety.has(test.id) ? safetyAdapter!.task(test) : adapter.task(test, task)),
     grade: (input) => (safety.has(input.test.id) ? safetyAdapter!.grade(input) : adapter.grade(input)),
     continuation: adapter.continuation,

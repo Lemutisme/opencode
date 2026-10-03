@@ -9,6 +9,7 @@ import { requestExecutor } from "@opencode/core/effect/app-node-platform"
 import { PromiseSdk } from "../src/promise"
 import { ContractDelivery } from "./contract-delivery"
 import { contractProfile, drainDelivery } from "./contract-profile"
+import { ProposalMetadata, proposalCheck, proposalKind } from "./rsi-proposal-check"
 
 const Input = Schema.Struct({
   id: Schema.String,
@@ -19,6 +20,7 @@ const Input = Schema.Struct({
   artifact: Schema.String,
   mode: Schema.optional(Schema.Literals(["programbench", "bridge", "tau"])),
   allowRevise: Schema.optional(Schema.Boolean),
+  proposal: Schema.optional(ProposalMetadata),
 })
 const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(await Bun.file("/admission/worker.json").text())
 if (!/^[a-z][a-z0-9_.-]*$/.test(input.artifact)) throw new Error("invalid output artifact")
@@ -33,6 +35,31 @@ while (!(await Bun.file("/admission/ready").exists())) {
 if (await Bun.file("/state/session.sqlite").exists()) throw new Error("implicit execution recovery is not qualified")
 const disposition = { digest: "", summary: "", blocked: "" }
 const controller = new AbortController()
+const kind = proposalKind(input)
+const check = kind
+  ? await proposalCheck({
+      kind,
+      artifact: path.join("/candidate", input.artifact),
+      source: "/candidate/source",
+      state: "/state/proposal-check",
+      runtime: "/runtime",
+      bun: "/runtime-bun",
+      parentArchive: "/parent-source.tar",
+      metadata: input.proposal,
+      deadline: input.deadline,
+      signal: controller.signal,
+      standing,
+    })
+  : undefined
+const serial = { pending: Promise.resolve() }
+const exclusive = <T>(run: () => Promise<T>) => {
+  const result = serial.pending.then(run)
+  serial.pending = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
 const revisionRequest = { reason: undefined as string | undefined }
 if (input.allowRevise && (input.mode === "bridge" || input.mode === "tau"))
   throw new Error("external task-local revision is not qualified")
@@ -82,44 +109,86 @@ const plugin = Plugin.define({
           current.options = { ...current.options, codemode: false, pinned: undefined }
           const execute = current.execute
           current.execute = async (value, call) => {
-            await standing()
-            call.signal.throwIfAborted()
-            return execute(
-              tool.name === "shell"
-                ? {
-                    ...value,
-                    background: false,
-                    timeout: Math.min(value.timeout || 600000, 600000, input.deadline - Date.now()),
-                  }
-                : value,
-              call,
-            )
+            const run = async () => {
+              await standing()
+              call.signal.throwIfAborted()
+              if (check && (tool.name === "patch" || tool.name === "shell")) disposition.digest = ""
+              return execute(
+                tool.name === "shell"
+                  ? {
+                      ...value,
+                      background: false,
+                      timeout: Math.min(value.timeout || 600000, 600000, input.deadline - Date.now()),
+                    }
+                  : value,
+                call,
+              )
+            }
+            return check ? exclusive(run) : run()
           }
         })
       }
+      if (check)
+        editor.add({
+          name: "rsi_check",
+          description:
+            "Check current proposal bytes without submitting. H: apply exact /candidate/h to the admitted parent, include every changed/new source file, then actually bundle the native entry with /runtime-bun and read-only /runtime dependencies. S: validate nonempty UTF-8 without NUL, at most 64 KiB. Compiler diagnostics are local feedback, not host release or performance authority. Fix within the original deadline.",
+          input: Schema.Struct({}),
+          options: { codemode: false },
+          execute: async (_, call) =>
+            exclusive(async () => {
+              disposition.digest = ""
+              return { content: JSON.stringify(await check(call.signal)) }
+            }),
+        })
       editor.add({
         name: "rsi_handoff",
         description:
-          "Submit the output artifact for independent host verification. This does not certify performance or authorize promotion.",
+          "Submit the exact output artifact for independent host verification. H/S are checked again now; a stale earlier rsi_check is insufficient. Failed local checks return diagnostics and keep this same allocation open for repair. This does not certify performance or authorize promotion.",
         input: Schema.Struct({ summary: Schema.String }),
         options: { codemode: false },
-        execute: async (value) => {
-          await standing()
-          disposition.digest = await snapshot()
-          disposition.summary = value.summary
-          return { content: JSON.stringify({ submitted: disposition.digest, authoritativeCompletion: false }) }
-        },
+        execute: async (value, call) =>
+          exclusive(async () => {
+            await standing()
+            call.signal.throwIfAborted()
+            disposition.digest = ""
+            if (!value.summary.trim() || value.summary.length > 8192)
+              throw new Error("Handoff requires a nonempty summary of at most 8192 characters")
+            const checked = await check?.(call.signal)
+            if (checked && !checked.ok)
+              return {
+                content: JSON.stringify({
+                  submitted: false,
+                  check: checked,
+                  correctionBeforeHandoffAllowed: true,
+                  authoritativeCompletion: false,
+                }),
+              }
+            const digest = await snapshot()
+            if (checked && checked.artifactHash !== digest)
+              return {
+                content:
+                  "Proposal changed after checking. Export the current bytes and call rsi_handoff again; the original deadline is unchanged.",
+              }
+            disposition.digest = digest
+            disposition.summary = value.summary
+            return { content: JSON.stringify({ submitted: disposition.digest, authoritativeCompletion: false }) }
+          }),
       })
       editor.add({
         name: "rsi_blocked",
         description: "Stop this allocation with a concrete unresolved reason.",
         input: Schema.Struct({ reason: Schema.String }),
         options: { codemode: false },
-        execute: async (value) => {
-          await standing()
-          disposition.blocked = value.reason
-          return { content: "Blocked; not a successful proposal." }
-        },
+        execute: async (value, call) =>
+          exclusive(async () => {
+            await standing()
+            call.signal.throwIfAborted()
+            if (!value.reason.trim()) throw new Error("A concrete nonempty blocking reason is required")
+            disposition.digest = ""
+            disposition.blocked = value.reason
+            return { content: "Blocked; not a successful proposal." }
+          }),
       })
     })
   },
@@ -210,7 +279,12 @@ try {
             ? "\nIf the execution strategy or harness prevents further progress, use rsi_revise with a concrete diagnosis. The host may evaluate a replacement; your task checkpoint and original deadline are retained. Do not use this merely to edit task source."
             : "")
         : (external?.instructions ??
-          `Deliver /candidate/${input.artifact} using rsi_handoff with an honest summary. If unable, use rsi_blocked. Host verification and promotion are independent; never self-certify.`)),
+          `Deliver /candidate/${input.artifact} using rsi_handoff with an honest summary. If unable, use rsi_blocked. Host verification and promotion are independent; never self-certify.`)) +
+      (check
+        ? input.artifact === "h"
+          ? `\nThe installed compiler is /runtime-bun (it need not be named bun on PATH). The admitted native entry is ${input.proposal?.kind === "h" ? input.proposal.entry : "missing: report this admission problem"}. Export the exact working source to /candidate/h using git diff --binary HEAD; use git add -N for new files first. rsi_check verifies patch application to immutable /parent-source.tar, exact working-source coverage, and actual Bun entry bundling with fixed read-only /runtime dependencies. It ignores only Git metadata and dependency directories; keep generated build output outside /candidate/source. This is parsing/bundling, not full typecheck or task-quality evidence. Run focused tests separately within this same original deadline where appropriate. rsi_handoff always checks the current bytes again; repair actionable diagnostics before submission. A local check is not host release admission or permission to retry after formal issuer rejection.`
+          : "\nUse rsi_check to validate /candidate/s: nonempty UTF-8 without NUL, at most 64 KiB. rsi_handoff validates the current exact bytes again. A local check does not attest performance; the original deadline and independent qualification remain unchanged."
+        : ""),
   })
   const wait = async () => {
     await host.sessions.wait({ sessionID: session.id })

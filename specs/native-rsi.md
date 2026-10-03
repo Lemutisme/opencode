@@ -14,7 +14,7 @@ source snapshots; merging upstream does not renew them.
 | Scope           | Implemented                                                                                                                                                                    | Not established                                                                                   |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
 | Within-task RSI | ProgramBench task-scoped S/H selection, checkpoints, same-task continuation, original deadline and Kernel completion; scripted container qualification passed | Real-model gains are unproven; τ/TB environment forks are not qualified and fail closed. |
-| Across-task RSI | Native proposals/releases, paired selection, finite closure, independent audit and ProgramBench/τ³/TB4 adapters | Real proposals have run, but no completed real-model paired result or RSI gain is established here. |
+| Across-task RSI | Native proposals/releases, paired selection, finite closure, independent audit and ProgramBench/τ³/TB4 adapters; real paired evaluation has run | No successful real-model recursive succession or RSI performance gain has been established. |
 
 The RSI worker composes the existing ProgramBench delivery tools instead of
 launching the old fixed worker. Qualification ran real SDK/Session, builds,
@@ -132,6 +132,44 @@ An optional `development: {goal, files}` packet supplies hash-pinned public
 development context to the first proposer as well as later generations. It is
 explicitly operator-curated; confirmation/audit diagnostics are never exported
 automatically as development context.
+
+### Revising from observed failures
+
+New profiles can freeze `evaluationTarget: "task-performance"` with
+`development.evidence`. Each item names a host-only `source` file reference and
+an existing public excerpt key (`publicFile`) in `development.files`:
+
+- `development-run` also binds its `execution` receipt to an original development
+  admission, actual S/H and deadline.
+- `development-measurement` binds a completed fixed-pair measurement and its
+  `execution` to a task explicitly selected as development in the new protocol.
+- `proposal-build` identifies an acknowledged build rejection, not a task score;
+  compiler feedback alone is insufficient task experience.
+
+Canonical development identities cannot overlap confirmation, audit or safety.
+Raw provenance is sealed on the host, never mounted as proposer input. Excerpts
+still require operator review: hashes are not redaction or causal-effect proofs,
+and the full source/docs/memory input closure must also be considered. No hidden
+confirmation diagnostics are automatically exported. The goal names the actual
+entry and adapter modes, distinguishes solver changes from proposer-only edits,
+and asks for a failure, changed mechanism and falsifier. Those claims do not
+replace paired grading or relax task-Pareto.
+
+Host proposal metadata, not an output filename, enables `rsi_check`. Before H
+handoff, the worker replays the exact patch against its pinned parent, compares
+all source files including additions, and bundles the actual entry with
+`/runtime-bun` and the read-only dependency supply. Diagnostics permit local
+repair within the same original allocation; handoff checks again instead of
+trusting a stale receipt. This is not full typechecking, performance evidence or
+permission to retry a formally rejected candidate. The independent host builder
+still decides release preparation. ProgramBench handoff also removes the old
+entrypoint before compiling, preventing stale binaries from satisfying delivery.
+
+New profiles may select `safetyFormat: "witness-v2"` with explicit `safety` IDs.
+A per-allocation JSON nonce permits normal formatting whitespace; its host
+witness binds run, release and original deadline. Bad JSON/nonce is a mechanical
+zero; missing containment/identity/fence is invalid. Legacy exact-byte safety
+remains the default for old profiles, with no reinterpretation of old results.
 
 The trusted grader exports `task(test, taskCheckpoint?)` (goal, output basename,
 optional pinned inputs/image and dataset identity) and

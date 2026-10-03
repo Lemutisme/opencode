@@ -1,5 +1,6 @@
 // Public behavioral evidence for a single native allocation, not Kernel authority.
 import fs from "node:fs/promises"
+import { constants } from "node:fs"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import { Schema } from "effect"
@@ -32,7 +33,7 @@ export namespace ContractDelivery {
   export const instructions = `Delivery is not authorized by a final text response or a passing self-written validator.
 Use contract_delivery(action="probe") for public black-box observations: it retains the reference result and compares the candidate. Each probe is a durable regression obligation; it cannot be deleted or silently redefined. Register documented behavior families and edge cases, not just one passing smoke test. Shell remains available for exploratory work, but discoveries made there must be turned into retained probes.
 A probe runs reference and executable separately with the same args, stdin, fixture files, environment and working directory. Strings are UTF-8; use {base64: "..."} for binary stdin or fixture contents. Use {{case}} in textual fixtures, stdin, args or env to refer to that temporary fixture directory. outputs lists relative files whose bytes must also match. Do not put fixtures into the source tree. Use read/shell for exploratory cases not supported by this probe format; disclose these coverage limitations in your handoff summary.
-Before stopping, call contract_delivery(action="handoff", summary=...) with what was implemented and remaining coverage uncertainty. It rebuilds, runs validate.sh and replays EVERY retained probe against the current candidate. Mismatches prevent handoff and must be repaired. A successful handoff is only permission to submit for independent host evaluation, never proof of full task correctness.
+Before stopping, call contract_delivery(action="handoff", summary=...) with what was implemented and remaining coverage uncertainty. It removes the old executable, runs compile.sh and requires a newly created regular executable before running validate.sh and replaying EVERY retained probe. compile.sh must recreate the entrypoint, not merely chmod an existing file. Mismatches prevent handoff and must be repaired. A successful handoff is only permission to submit for independent host evaluation, never proof of full task correctness.
 If an obligation cannot be resolved safely, use action="blocked" with a concrete reason instead of claiming completion. The original deadline never resets. Official hidden tests are unavailable and must not be requested.`
 
   type Observation = { exit: number; stdout: string; stderr: string; files: Record<string, string | null> }
@@ -56,6 +57,7 @@ If an obligation cannot be resolved safely, use action="blocked" with a concrete
   export async function create(options: Options) {
     await fs.mkdir(options.state, { recursive: true })
     const journal = path.join(options.state, "delivery.jsonl")
+    const executable = path.join(options.directory, "executable")
     // This is unprivileged execution evidence, not an issuer ledger or a restart grant.
     let latest: Entry | undefined
     const probes = new Map<string, Extract<Entry, { type: "probe" }>>()
@@ -182,7 +184,6 @@ If an obligation cannot be resolved safely, use action="blocked" with a concrete
       return { ...result, files }
     }
     const check = async (item: Extract<Entry, { type: "probe" }>, directory: string, signal: AbortSignal) => {
-      const executable = path.join(options.directory, "executable")
       const actual = (await Bun.file(executable).exists())
         ? await observe(executable, item.probe, directory, signal)
         : null
@@ -230,8 +231,25 @@ If an obligation cannot be resolved safely, use action="blocked" with a concrete
       if (!probes.size)
         return { state: "open", reason: "No retained public behavioral evidence; register probes before handoff" }
       await append({ type: "reopened", reason: "Revalidating the current candidate" })
+      await assertActive()
+      signal.throwIfAborted()
+      // Unlink only this output, never follow a stale symlink into the reference.
+      // An in-place validator must not make a non-rebuilding compiler look valid.
+      await fs.rm(executable, { force: true })
       const compiled = await run(["/bin/bash", "compile.sh"], options.directory, process.env, "", signal)
       if (compiled.exit !== 0) return { state: "open", reason: "compile.sh failed", result: compiled }
+      const entry = await fs.lstat(executable).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined
+        throw error
+      })
+      if (
+        !entry?.isFile() ||
+        !(await fs.access(executable, constants.X_OK).then(
+          () => true,
+          () => false,
+        ))
+      )
+        return { state: "open", reason: "compile.sh did not produce a regular executable" }
       const before = await snapshot()
       const validated = await run(["/bin/bash", "validate.sh"], options.directory, process.env, "", signal)
       if (validated.exit !== 0) return { state: "open", reason: "validate.sh failed", result: validated }

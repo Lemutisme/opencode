@@ -102,9 +102,13 @@ class AdmissionTest(unittest.TestCase):
     def test_task_tools_cannot_escape_into_evaluation_or_proposal(self):
         body = lambda name: json.dumps({"tools": [{"name": name}]})
         gateway.validate_tools({}, body("rsi_handoff"))
+        gateway.validate_tools({"proposal": {"kind": "h"}}, body("rsi_check"))
+        gateway.validate_tools({"proposal": {"kind": "s"}}, body("rsi_check"))
         gateway.validate_tools({"mode": "programbench"}, body("contract_delivery"))
         gateway.validate_tools({"mode": "programbench", "allowRevise": True, "purpose": "continuation"}, body("rsi_revise"))
         for scope, tool in [({}, "contract_delivery"), ({"mode": "programbench"}, "rsi_handoff"),
+                            ({}, "rsi_check"), ({"proposal": {"kind": "other"}}, "rsi_check"),
+                            ({"mode": "programbench"}, "rsi_check"),
                             ({"mode": "programbench", "allowRevise": True}, "rsi_revise")]:
             with self.assertRaisesRegex(ValueError, "tool_not_admitted"):
                 gateway.validate_tools(scope, body(tool))
@@ -153,7 +157,7 @@ class AdmissionTest(unittest.TestCase):
                             (terminal, "task_blocked"), (tau, "tau_turn")]:
             gateway.validate_tools(scope, body(tool))
         for scope in [terminal, tau]:
-            for tool in ["shell", "read", "patch", "rsi_handoff", "rsi_revise", "contract_delivery"]:
+            for tool in ["shell", "read", "patch", "rsi_handoff", "rsi_revise", "rsi_check", "contract_delivery"]:
                 with self.assertRaisesRegex(ValueError, "tool_not_admitted"):
                     gateway.validate_tools({**scope, "allowRevise": True, "purpose": "continuation"}, body(tool))
         for scope in [{"mode": "bridge"}, {"mode": "tau", "benchmarkTools": ["shell"]}]:

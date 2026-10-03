@@ -70,6 +70,144 @@ test("stop and a passing self-validator cannot close a retained counterexample",
   expect(events.at(-1).type).toBe("handoff")
 })
 
+test("handoff removes a stale executable before compiling and retains the failure", async () => {
+  const f = await fixture()
+  await fs.copyFile(f.options.reference, path.join(f.directory, "source"))
+  await f.delivery.act({ action: "probe", probe })
+  expect(await f.delivery.act({ action: "handoff", summary: "first build" })).toMatchObject({ state: "ready" })
+  await Bun.write(path.join(f.directory, "compile.sh"), "chmod +x executable\n")
+  await Bun.write(path.join(f.directory, "validate.sh"), "touch validator-ran\n")
+  expect(await f.delivery.act({ action: "handoff", summary: "old entrypoint still runs" })).toMatchObject({
+    state: "open",
+    reason: "compile.sh failed",
+    result: { exit: 1 },
+  })
+  expect(await Bun.file(path.join(f.directory, "executable")).exists()).toBe(false)
+  expect(await Bun.file(path.join(f.directory, "validator-ran")).exists()).toBe(false)
+  expect(await f.delivery.status()).toMatchObject({ state: "open", probes: 1 })
+  const events = (await Bun.file(path.join(f.options.state, "delivery.jsonl")).text()).trim().split("\n")
+  expect(JSON.parse(events.at(-1)!).type).toBe("reopened")
+})
+
+test.each(["absent", "nonexecutable", "symlink", "directory"] as const)(
+  "compile exit zero with a %s entrypoint cannot be repaired by validator side effects",
+  async (kind) => {
+    const f = await fixture()
+    await fs.copyFile(f.options.reference, path.join(f.directory, "source"))
+    await f.delivery.act({ action: "probe", probe })
+    await fs.copyFile(f.options.reference, path.join(f.directory, "executable"))
+    await Bun.write(
+      path.join(f.directory, "compile.sh"),
+      {
+        absent: "exit 0\n",
+        nonexecutable: "cp source executable\nchmod 0644 executable\n",
+        symlink: `ln -s ${JSON.stringify(f.options.reference)} executable\n`,
+        directory: "mkdir executable\n",
+      }[kind],
+    )
+    await Bun.write(
+      path.join(f.directory, "validate.sh"),
+      "touch validator-ran\ncp source executable\nchmod +x executable\n",
+    )
+    expect(await f.delivery.act({ action: "handoff", summary: "compiler returned zero" })).toMatchObject({
+      state: "open",
+      reason: "compile.sh did not produce a regular executable",
+    })
+    expect(await Bun.file(path.join(f.directory, "validator-ran")).exists()).toBe(false)
+    expect(await f.delivery.status()).toMatchObject({ state: "open", probes: 1 })
+  },
+)
+
+test("source rebuild replaces an old reference symlink without reading or changing execute-only gold", async () => {
+  const f = await fixture()
+  // An execute-only script still needs interpreter read access; use a real ELF
+  // fixture, as the cleanroom does. Never read this reference after chmod 0111.
+  await fs.copyFile("/bin/echo", f.options.reference)
+  await Bun.write(path.join(f.directory, "source"), '#!/bin/sh\nprintf "%s\\n" "$*"\n')
+  await fs.chmod(f.options.reference, 0o111)
+  await f.delivery.act({ action: "probe", probe })
+  const reference = await fs.lstat(f.options.reference)
+  await fs.symlink(f.options.reference, path.join(f.directory, "executable"))
+  expect(
+    await f.delivery.act({ action: "handoff", summary: "rebuilt source, independent host verification pending" }),
+  ).toMatchObject({
+    state: "ready",
+    probes: 1,
+    authoritativeCompletion: false,
+  })
+  expect((await fs.lstat(path.join(f.directory, "executable"))).isSymbolicLink()).toBe(false)
+  const after = await fs.lstat(f.options.reference)
+  expect({ mode: after.mode, mtime: after.mtimeMs, size: after.size, inode: after.ino }).toEqual({
+    mode: reference.mode,
+    mtime: reference.mtimeMs,
+    size: reference.size,
+    inode: reference.ino,
+  })
+  expect(after.mode & 0o777).toBe(0o111)
+})
+
+test("a freshly rebuilt executable still cannot discharge a failed retained probe", async () => {
+  const f = await fixture()
+  await f.delivery.act({ action: "probe", probe })
+  expect(await f.delivery.act({ action: "handoff", summary: "build and validator pass" })).toMatchObject({
+    state: "open",
+    reason: "Retained public counterexamples remain",
+    failures: [{ title: probe.title, matches: false }],
+  })
+  expect(await Bun.file(path.join(f.directory, "executable")).exists()).toBe(true)
+  expect(await f.delivery.status()).toMatchObject({ state: "open", probes: 1 })
+})
+
+test.each(["call cancellation", "original deadline"] as const)(
+  "%s fences a rebuild's child processes without admitting stale readiness",
+  async (kind) => {
+    const f = await fixture()
+    await fs.copyFile(f.options.reference, path.join(f.directory, "source"))
+    await f.delivery.act({ action: "probe", probe })
+    await fs.copyFile(f.options.reference, path.join(f.directory, "executable"))
+    await Bun.write(
+      path.join(f.directory, "compile.sh"),
+      "echo $$ > compiler.pid\nsleep 60 &\necho $! > child.pid\nwait\ncp source executable\nchmod +x executable\n",
+    )
+    const call = new AbortController()
+    if (kind === "original deadline") f.options.deadline = Date.now() + 500
+    const deadline = f.options.deadline
+    const active = f.delivery.act({ action: "handoff", summary: "compile in progress" }, call.signal)
+    const timer = kind === "call cancellation" ? setTimeout(() => call.abort(), 250) : undefined
+    await expect(active).rejects.toThrow("cancelled or original deadline")
+    clearTimeout(timer)
+    expect(await Bun.file(path.join(f.directory, "child.pid")).exists()).toBe(true)
+    const pids = await Promise.all(
+      ["compiler.pid", "child.pid"].map((name) => Bun.file(path.join(f.directory, name)).text()),
+    )
+    expect(f.options.deadline).toBe(deadline)
+    expect(f.controller.signal.aborted).toBe(false)
+    expect(await Bun.file(path.join(f.directory, "executable")).exists()).toBe(false)
+    for (const pid of pids) {
+      const state = await Bun.file(`/proc/${Number(pid)}/stat`)
+        .text()
+        .then(
+          (text) => text.slice(text.lastIndexOf(")") + 2).split(" ")[0],
+          () => "gone",
+        )
+      expect(["gone", "Z"]).toContain(state)
+    }
+    expect((await Bun.file(path.join(f.options.state, "delivery.jsonl")).text()).includes('"type":"handoff"')).toBe(
+      false,
+    )
+    if (kind === "original deadline") {
+      await expect(f.delivery.act({ action: "status" })).rejects.toThrow("deadline")
+      return
+    }
+    expect(await f.delivery.status()).toMatchObject({ state: "open", probes: 1 })
+    await Bun.write(path.join(f.directory, "compile.sh"), "cp source executable\nchmod +x executable\n")
+    expect(await f.delivery.act({ action: "handoff", summary: "repaired within the same deadline" })).toMatchObject({
+      state: "ready",
+    })
+    expect(f.options.deadline).toBe(deadline)
+  },
+)
+
 test("all cases replay, IDs deduplicate, and mutation invalidates handoff", async () => {
   const f = await fixture()
   await fs.copyFile(f.options.reference, path.join(f.directory, "source"))

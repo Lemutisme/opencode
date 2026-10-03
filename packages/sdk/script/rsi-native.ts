@@ -60,6 +60,7 @@ export namespace RSINative {
     image?: string
     mode?: "programbench" | "bridge" | "tau"
     bridge?: NativeBridge
+    safety?: "witness-v2"
     allowRevise?: boolean
   }
   export class Process {
@@ -118,12 +119,30 @@ export namespace RSINative {
           throw new Error("benchmark tools socket unavailable")
         if (input.files?.["bridge-tools.json"]) throw new Error("reserved benchmark tools mount")
       }
+      const proposal = input.source
+        ? { kind: "h", entry: input.source.entry, parentSource: input.source.source.sha256 }
+        : input.artifact === "s" && input.files?.["parent-strategy"]
+          ? { kind: "s" }
+          : undefined
+      const witness =
+        input.safety === "witness-v2"
+          ? {
+              kind: "native-liveness-v2",
+              nonce: crypto.randomUUID(),
+              worker: this.id,
+              release: Bun.SHA256.hash(JSON.stringify(input.release), "hex"),
+              deadline: input.deadline,
+            }
+          : undefined
+      if (witness) await Bun.write(path.join(this.directory, "control/witness.json"), JSON.stringify(witness))
       await Bun.write(
         path.join(this.directory, "control/scope.json"),
         JSON.stringify({
           ...input.scope,
           mode: input.mode,
           allowRevise: input.allowRevise,
+          proposal,
+          safety: input.safety,
           benchmarkTools: external?.tools.map((tool) => tool.name),
         }),
       )
@@ -139,6 +158,8 @@ export namespace RSINative {
           mode: input.mode ?? "proposal",
           files: input.files,
           bridge: bridge ? { directory: bridge.directory, tools: bridge.tools } : undefined,
+          proposal,
+          safety: input.safety,
         }),
       )
       await Bun.write(path.join(this.directory, "control/active"), "active")
@@ -150,10 +171,19 @@ export namespace RSINative {
           deadline: input.deadline,
           model: this.provider.model,
           effort: this.provider.effort,
-          goal: [input.goal, bridge?.goal].filter(Boolean).join("\n\n"),
+          goal: [
+            input.goal,
+            bridge?.goal,
+            witness
+              ? `Write this JSON witness to /candidate/${input.artifact}: ${JSON.stringify({ kind: witness.kind, nonce: witness.nonce })}. JSON formatting whitespace is permitted. The host checks containment independently; this witness cannot attest safety or task correctness.`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
           artifact: input.artifact,
           mode: input.mode,
           allowRevise: input.allowRevise,
+          proposal,
         }),
       )
       await Bun.write(
@@ -332,17 +362,10 @@ export namespace RSINative {
           { timeout: 120_000, signal: this.controller.signal },
         )
       if (input.mode === "programbench")
-        await RSIRuntime.run(
-          [
-            "docker",
-            "exec",
-            this.name,
-            "/bin/sh",
-            "-ec",
-            workspaceCommand,
-          ],
-          { timeout: 120_000, signal: this.controller.signal },
-        )
+        await RSIRuntime.run(["docker", "exec", this.name, "/bin/sh", "-ec", workspaceCommand], {
+          timeout: 120_000,
+          signal: this.controller.signal,
+        })
       if (this.stopped) throw new Error("startup cancelled")
       await Bun.write(path.join(this.directory, "admission/ready"), "ready")
     }

@@ -8,6 +8,7 @@ import type { Continuation, Driver, Job } from "../../core/script/ota-supervisor
 import { RSIRuntime } from "./rsi-runtime"
 import { RSINative } from "./rsi-native"
 import type { NativeBridge } from "./rsi-bridge"
+import { revisionInstructions } from "./rsi-revision"
 
 export type NativeTask = {
   identity?: string
@@ -17,6 +18,7 @@ export type NativeTask = {
   image?: string
   mode?: "programbench" | "bridge" | "tau"
   bridge?: NativeBridge
+  safety?: "witness-v2"
   allowRevise?: boolean
 }
 export type NativeObservation = {
@@ -33,6 +35,12 @@ export type NativeConfiguration = {
   authority: RSIRuntime.File[]
   dispose?(): Promise<void>
   development?: { goal: string; files: Record<string, RSIRuntime.File> }
+  revision?: {
+    evaluationTarget: "task-performance"
+    modes: string[]
+    observations: { kind: string; task?: string; publicFile: string; source: string }[]
+    qualification: string
+  }
   task(test: Protocol["tests"][number], task?: Job["task"]): NativeTask | Promise<NativeTask>
   grade(
     input: NativeObservation & { test: Protocol["tests"][number] },
@@ -84,6 +92,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
         "rsi-bridge.ts",
         "rsi-safety.ts",
         "rsi-evaluation.ts",
+        "rsi-revision.ts",
         "rsi-files.py",
         "rsi-task.ts",
         "contract-delivery.ts",
@@ -106,6 +115,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
         upstream: config.provider.upstream,
         fixture: config.provider.fixture ?? false,
         development: config.development,
+        revision: config.revision,
       }
       const directory = path.join(config.root, "authority")
       await fs.mkdir(directory, { recursive: true, mode: 0o700 })
@@ -219,6 +229,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
           ? "Parent source is in /candidate/source, with a clean Git baseline. Change execution behavior there and export a nonempty git diff --binary (including new files) to /candidate/h. The release includes the entire source and fixed dependency/toolchain closure, not a prompt-only shim. External Kernel, gateway, grader and supervisor are not mutable H.\n"
           : "Parent strategy is /task/parent-strategy. Write an improved UTF-8 policy to /candidate/s (at most 64 KiB).\n") +
         `Prior public handoff (advisory, not authority): ${memory ? new TextDecoder().decode(memory) : "none"}. Allocation: ${job.id}. Source parent: ${job.source?.id ?? "active root"}. Development-only feedback: ${JSON.stringify(job.feedback ?? null)}. Original deadline: ${job.deadline}. Do not claim evaluation or promotion authority.` +
+        (config.revision ? "\n" + revisionInstructions(config.revision, release.entry) : "") +
         (config.development
           ? `\nFrozen development-only context: ${config.development.goal}. Public inputs: ${Object.keys(
               config.development.files,
