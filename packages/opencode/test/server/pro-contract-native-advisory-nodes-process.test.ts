@@ -6,7 +6,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { RelativePath } from "@opencode-ai/core/schema"
 import type { NativeAdvisoryStore } from "../../../sdk-next/src/native-advisory-store"
 import { nativeAdvisoryProcess } from "../fixture/native-advisory-process"
-import { pollWithTimeout, testEffect } from "../lib/effect"
+import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { raw, reply, TestLLMServer } from "../lib/llm-server"
 
 const it = testEffect(Layer.mergeAll(TestLLMServer.layer, NodeServices.layer, FetchHttpClient.layer))
@@ -38,6 +38,106 @@ const replay = {
   artifacts: [RelativePath.make("answer.txt")],
 }
 
+it.live(
+  "native blocked routing allows two submission reviews and preserves the streak across advisory pauses",
+  () =>
+    Effect.gen(function* () {
+      const fixture = yield* nativeAdvisoryProcess()
+      const llm = yield* TestLLMServer
+      const id = "pct_native_advisory_blocked_routing"
+      const firstReport = Promise.withResolvers<void>()
+      const secondReview = Promise.withResolvers<void>()
+      const secondReport = Promise.withResolvers<void>()
+      yield* llm.push(
+        ready(),
+        ...review(),
+        reply().tool("contract_report_blocked", { reason: "Need an unavailable input" }).wait(firstReport.promise),
+        // Distinct submission statements exercise two real review jobs.
+        ready("The second attempt independently assessed the candidate"),
+        reply().tool("read", { path: "materials.json" }).wait(secondReview.promise),
+        reply().tool("read", { path: "candidate/answer.txt" }),
+        reply().text(opinion).stop(),
+        reply()
+          .tool("contract_report_blocked", { reason: "The next Session independently confirms the obstacle" })
+          .wait(secondReport.promise),
+      )
+      yield* fixture.issue(id, { defaultNodes: true, replay })
+      yield* awaitWithTimeout(llm.wait(5), "First submission review did not resume its worker", "20 seconds")
+      const first = yield* fixture.binding(id)
+      expect(first).toMatchObject({
+        attempts: 1,
+        generation: 2,
+        blockedRouting: "escalate-after-repeat",
+        blockedStreak: 0,
+        admission: { open: true },
+      })
+      yield* Effect.sync(() => firstReport.resolve())
+      yield* awaitWithTimeout(llm.wait(7), "Second attempt did not pause for a submission review", "20 seconds").pipe(
+        Effect.tapError(() =>
+          Effect.gen(function* () {
+            yield* fixture.archive(id, {
+              stage: "second-review",
+              hits: yield* llm.hits,
+              ledger: yield* fixture.ledger(id),
+            })
+          }),
+        ),
+      )
+      const paused = yield* fixture.binding(id)
+      expect(paused).toMatchObject({ attempts: 2, blockedStreak: 1, dispatched: false, admission: { open: false } })
+      expect(paused.sessionID).not.toBe(first.sessionID)
+      yield* Effect.sync(() => secondReview.resolve())
+      yield* awaitWithTimeout(llm.wait(10), "Second submission review did not resume its worker", "20 seconds")
+      const second = yield* fixture.binding(id)
+      expect(second).toMatchObject({
+        attempts: 2,
+        generation: 4,
+        sessionID: paused.sessionID,
+        blockedStreak: 1,
+        admission: { open: true },
+      })
+      const requests = yield* fixture.requests(id)
+      expect(requests).toHaveLength(2)
+      expect(requests.map((request) => request.attempt).sort()).toEqual([1, 2])
+      expect(new Set(requests.map((request) => request.execution.sessionID))).toEqual(
+        new Set([first.sessionID, second.sessionID]),
+      )
+      requests.forEach((request) =>
+        expect(request).toMatchObject({
+          phase: "resumed",
+          trigger: { type: "submission" },
+          outcome: { status: "complete", jobStatus: "completed" },
+          deliveryState: { inbox: "promoted" },
+        }),
+      )
+      yield* Effect.sync(() => secondReport.resolve())
+      yield* pollWithTimeout(
+        fixture.ledger(id).pipe(Effect.map((events) => events.find((event) => event.command.type === "escalate"))),
+        "Native advisory did not route repeated blocked attempts to the issuer",
+        "20 seconds",
+      )
+      const stopped = yield* fixture.binding(id)
+      expect(stopped).toMatchObject({ attempts: 2, blockedStreak: 0, dispatched: false })
+      expect(yield* fixture.host.command("root-info", id)).toMatchObject({
+        status: "escalated",
+        escalation: { reason: expect.stringContaining("Blocked in 2 consecutive attempts") },
+      })
+      yield* Effect.sleep("3 seconds")
+      expect(yield* fixture.binding(id)).toEqual(stopped)
+      expect(yield* fixture.requests(id)).toEqual(requests)
+      expect(yield* llm.calls).toBe(10)
+      const ledger = yield* fixture.ledger(id)
+      expect(ledger.filter((event) => event.command.type === "report-ready")).toHaveLength(0)
+      expect(
+        ledger
+          .filter((event) => ["report-blocked", "escalate"].includes(event.command.type))
+          .map((event) => event.command.type),
+      ).toEqual(["report-blocked", "report-blocked", "escalate"])
+      yield* fixture.archive(id, { first, paused, second, stopped, hits: yield* llm.hits, ledger })
+    }),
+  60_000,
+)
+
 for (const mode of ["submission", "lost-return", "defect-after", "interrupted-check"] as const)
   it.live(
     `native node ${mode}: retains real evidence, reads frozen claims, and resumes the original Session`,
@@ -53,12 +153,14 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
           ready(),
         )
         const input = yield* fixture.issue(id, {
+          blockedRouting: "escalate",
           defaultNodes: mode !== "interrupted-check",
           nodes: { version: 1, submission: false, midcourse: { afterMs: 1 } },
           replay,
         })
         yield* llm.wait(1)
         const before = yield* fixture.binding(id)
+        expect(before.blockedRouting).toBe("escalate")
         if (mode === "lost-return") yield* fixture.host.command("checkpoint-arm", "node-error-after")
         if (mode === "defect-after") yield* fixture.host.command("checkpoint-arm", "node-defect-after")
         if (mode === "interrupted-check") {
@@ -90,6 +192,7 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
         expect(yield* fixture.binding(id)).toMatchObject({
           attempts: 1,
           generation: 2,
+          blockedRouting: "escalate",
           sessionID: before.sessionID,
           actionsUsed: mode === "interrupted-check" ? 2 : 1,
         })

@@ -137,6 +137,50 @@ const finishReview = Effect.fnUntraced(function* (
 
 describe("Research final delivery production workflow", () => {
   it.live(
+    "retains Research blocked waiting without a native streak or automatic retry",
+    () =>
+      Effect.gen(function* () {
+        const fixture = yield* contractProcess
+        const llm = yield* TestLLMServer
+        const input = yield* prepare(fixture)
+        const host = yield* fixture.startHost(true, { research: true })
+        const reason = "Research requires external input before it can continue"
+        yield* llm.push(reply().tool("contract_report_blocked", { reason }))
+        yield* host.command("research-issue", input.id, input)
+        const stopped = yield* stage(host, input.id, "unavailable")
+        // Strict Research keeps its existing generic closure message; the ledger retains the blocked reason.
+        expect(stopped.reason).toBe("Worker stopped without a delivery request; explicit recovery is required")
+        const binding = yield* pollWithTimeout(
+          fixture
+            .binding(input.id)
+            .pipe(
+              Effect.map((binding) => (!binding.dispatched && binding.admission?.open === false ? binding : undefined)),
+            ),
+          "Research did not close its blocked worker",
+          "10 seconds",
+        )
+        expect(binding).toMatchObject({ driver: "research-final:1", blockedStreak: 0, attempts: 1 })
+        expect(binding.blockedRouting).toBeUndefined()
+        expect(binding.pendingOutcome).toBeUndefined()
+        expect(yield* host.command("root-info", input.id)).toMatchObject({
+          status: "active",
+          blocked: { reason },
+          spec: { budget: input.spec.budget },
+        })
+        // Observe beyond retryDelay: this host driver still requires explicit recovery.
+        yield* Effect.sleep("3 seconds")
+        expect(yield* fixture.binding(input.id)).toEqual(binding)
+        expect(yield* llm.calls).toBe(1)
+        expect(
+          (yield* fixture.ledger(input.id))
+            .filter((event) => ["report-blocked", "escalate"].includes(event.command.type))
+            .map((event) => event.command),
+        ).toMatchObject([{ type: "report-blocked", reason }])
+      }),
+    30_000,
+  )
+
+  it.live(
     "executes worker, real verifier and independent review, then requires external exact recognition",
     () =>
       Effect.gen(function* () {

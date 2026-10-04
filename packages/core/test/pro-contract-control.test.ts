@@ -3,7 +3,7 @@ import { $ } from "bun"
 import { watch } from "fs"
 import path from "path"
 import { eq } from "drizzle-orm"
-import { Cause, Clock, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Clock, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { AgentV2 } from "../src/agent"
 import { Database } from "../src/database/database"
@@ -26,6 +26,7 @@ import { ProviderV2 } from "../src/provider"
 import { AbsolutePath, RelativePath } from "../src/schema"
 import { SessionTable } from "../src/session/sql"
 import { ToolRegistry } from "../src/tool/registry"
+import { Hash } from "../src/util/hash"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 import { toolIdentity } from "./lib/tool"
@@ -391,6 +392,85 @@ describe("Contract control authorization", () => {
       }),
     )
   })
+
+  it.live("A0: bash can corrupt a protected input and git checkout restores passing contract_check", () =>
+    Effect.gen(function* () {
+      const original = "Approved task input\nKeep these exact bytes.\n"
+      const state = yield* setup({
+        ...ProContract.defaultSpec("Check the approved input", yield* Clock.currentTimeMillis),
+        authority: ["filesystem.read", "filesystem.write", "process.execute"],
+        evidence: {
+          type: "principal",
+          replay: {
+            checks: [
+              { argv: [process.execPath, "-e", "process.stdout.write('check executed')"], timeout: 5000, exit: 0 },
+            ],
+            protected: [{ path: RelativePath.make("TASK.md"), hash: Hash.sha256(original) }],
+            artifacts: [],
+          },
+        },
+      })
+      yield* Effect.promise(async () => {
+        await Bun.write(path.join(state.directory, "TASK.md"), original)
+        await $`git init`.cwd(state.directory).quiet()
+        await $`git add -- TASK.md`.cwd(state.directory).quiet()
+        await $`git -c user.name=Test -c user.email=test@example.test -c commit.gpgsign=false commit -m "approved input"`
+          .cwd(state.directory)
+          .quiet()
+      })
+      yield* Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const tools = yield* registry.materialize()
+        const verifier = yield* ProContractReplay.Service
+        for (const step of [
+          { name: "damage", command: "printf 'damaged input\\n' > TASK.md", passed: false, checks: 0 },
+          { name: "restore", command: "git checkout -- TASK.md", passed: true, checks: 1 },
+        ]) {
+          const shell = yield* tools.settle({
+            sessionID: state.binding.sessionID,
+            ...toolIdentity,
+            contractExecution: state.execution,
+            call: {
+              type: "tool-call",
+              id: `bash-${step.name}`,
+              name: "bash",
+              input: { command: step.command, timeout: 5000 },
+            },
+          })
+          expect(shell.result.type).not.toBe("error")
+          expect(shell.output?.structured).toMatchObject({ exit: 0 })
+          const bytes = yield* Effect.promise(() => Bun.file(path.join(state.directory, "TASK.md")).text())
+          expect(bytes === original).toBe(step.passed)
+          const checked = yield* tools.settle({
+            sessionID: state.binding.sessionID,
+            ...toolIdentity,
+            contractExecution: state.execution,
+            call: { type: "tool-call", id: `check-${step.name}`, name: "contract_check", input: {} },
+          })
+          expect(checked.result.type).not.toBe("error")
+          expect(checked.output?.structured).toMatchObject({ replay: { passed: step.passed }, settled: false })
+          const result = Schema.decodeUnknownSync(Schema.Struct({ replay: ProContract.ReplayResult }))(
+            checked.output?.structured,
+          )
+          const report = yield* verifier.report({
+            contractID: state.binding.contractID,
+            evidenceHash: result.replay.evidenceHash,
+          })
+          expect(report.passed).toBe(step.passed)
+          expect(report.checks).toHaveLength(step.checks)
+          expect(report.protected).toMatchObject([
+            { path: "TASK.md", exists: true, hash: Hash.sha256(bytes), expectedHash: Hash.sha256(original) },
+          ])
+          if (step.passed)
+            expect(report.checks[0].observation.receipt).toMatchObject({ execution: "completed", exit: 0 })
+        }
+      }).pipe(Effect.provide(LocationServiceMap.Service.get(state.location)))
+      const contract = (yield* state.contracts.get(state.binding.contractID))!
+      expect(contract.status).toBe("active")
+      expect(contract.handoff).toBeUndefined()
+      expect(yield* state.bindings.get(state.binding.contractID)).toMatchObject({ attempts: 1, actionsUsed: 4 })
+    }),
+  )
 
   const replays = ["success", "failure", "unavailable", "timeout"]
   replays.forEach((outcome) => {

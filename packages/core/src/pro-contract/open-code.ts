@@ -41,6 +41,8 @@ export type Binding = {
   readonly model: Model.Ref
   readonly executionPolicy?: string
   readonly driver?: string
+  readonly blockedRouting?: "retry" | "escalate" | "escalate-after-repeat"
+  readonly blockedStreak?: number
   readonly admission?: {
     readonly open: boolean
     readonly version: number
@@ -103,6 +105,7 @@ export interface Interface {
     readonly model: Model.Ref
     readonly executionPolicy?: string
     readonly driver?: string
+    readonly blockedRouting?: Binding["blockedRouting"]
     readonly now: number
   }) => Effect.Effect<ProContract.IssueReceipt & { readonly execution?: Binding }>
   readonly create: (input: {
@@ -111,6 +114,7 @@ export interface Interface {
     readonly location: Location.Ref
     readonly model: Model.Ref
     readonly executionPolicy?: string
+    readonly blockedRouting?: Binding["blockedRouting"]
     readonly nextActionAt: number
   }) => Effect.Effect<Binding>
   readonly activate: (contractID: Schema.ID, revision: number, now: number) => Effect.Effect<void>
@@ -323,6 +327,12 @@ const layer = Layer.effect(
         leaseOwner: undefined,
         leaseExpiresAt: undefined,
         pendingOutcome: undefined,
+        blockedStreak:
+          decision.type === "escalate" ||
+          exhausted ||
+          (decision.type === "retry" && decision.attempt === "new" && !row.binding.pendingOutcome)
+            ? 0
+            : row.binding.blockedStreak,
         promptID: decision.type === "escalate" || exhausted ? row.binding.promptID : SessionMessage.ID.create(),
         nextActionAt: decision.type === "retry" ? now + row.contract.spec.resolution.retryDelay : now,
         attemptKey: decision.type === "retry" && decision.attempt === "new" ? "" : attemptKey(row.contract),
@@ -339,6 +349,7 @@ const layer = Layer.effect(
         leaseOwner: undefined,
         leaseExpiresAt: undefined,
         pendingOutcome: undefined,
+        blockedStreak: 0,
         promptID: SessionMessage.ID.create(),
         nextActionAt: now,
       })
@@ -395,9 +406,17 @@ const layer = Layer.effect(
     const create = Effect.fn("ProContractOpenCode.create")(function* (
       input: Parameters<Interface["create"]>[0] & { readonly driver?: string },
     ) {
+      const rejection = blockedRoutingRejection(input.blockedRouting, input.driver ?? ProContractDriver.native.identity)
+      if (rejection) return yield* Effect.die(rejection)
       const binding: Binding = {
         ...input,
         driver: input.driver ?? ProContractDriver.native.identity,
+        blockedRouting:
+          input.blockedRouting ??
+          ((input.driver ?? ProContractDriver.native.identity) === ProContractDriver.native.identity
+            ? "escalate-after-repeat"
+            : undefined),
+        blockedStreak: 0,
         admission: {
           open: (input.driver ?? ProContractDriver.native.identity) === ProContractDriver.native.identity,
           version: 0,
@@ -459,13 +478,17 @@ const layer = Layer.effect(
               () =>
                 Effect.gen(function* () {
                   if (!drivers.get(driver)) return "Contract execution driver is unavailable"
+                  const rejection = blockedRoutingRejection(input.blockedRouting, driver)
+                  if (rejection) return rejection
                   const stored = yield* get(input.id)
                   if (
                     stored &&
                     (driverID(stored) !== driver ||
                       !ProContractRecognition.same(stored.location, input.location) ||
                       !ProContractRecognition.same(stored.model, input.model) ||
-                      stored.executionPolicy !== input.executionPolicy)
+                      stored.executionPolicy !== input.executionPolicy ||
+                      (input.blockedRouting !== undefined &&
+                        (stored.blockedRouting ?? "retry") !== input.blockedRouting))
                   )
                     return "contract execution binding does not match"
                   return undefined
@@ -479,6 +502,7 @@ const layer = Layer.effect(
               model: input.model,
               executionPolicy: input.executionPolicy,
               driver,
+              blockedRouting: input.blockedRouting,
               nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
             })
             return { ...receipt, execution: binding }
@@ -556,7 +580,9 @@ const layer = Layer.effect(
             if (!row || row.contract.revision !== revision || !isOpen(row) || row.binding.pendingOutcome) return
             const driver = drivers.get(driverID(row.binding))
             if (!driver || (yield* permit(row, driver, "activate", time)) !== true) return
-            yield* contracts.activate(contractID, revision, time)
+            const receipt = yield* contracts.activate(contractID, revision, time)
+            // Idle bindings bypass retirement during institutional transitions.
+            if (receipt.decision.type === "accepted") yield* save({ ...row.binding, blockedStreak: 0 })
           }),
         ),
       claim: (contractID, now) =>
@@ -821,10 +847,24 @@ const layer = Layer.effect(
             const row = yield* read(identity.contractID)
             const driver = row && drivers.get(driverID(row.binding))
             if (!row || !driver) return yield* Effect.die("Authorized Contract driver disappeared")
+            const binding =
+              driver.identity === ProContractDriver.native.identity
+                ? { ...row.binding, blockedStreak: (row.binding.blockedStreak ?? 0) + 1 }
+                : row.binding
             const decision = yield* invoke(row, "blocked", () =>
-              outcomeDecision(driver, row, { type: "blocked", reason }, now),
+              outcomeDecision(driver, { ...row, binding }, { type: "blocked", reason }, now),
             )
-            if (decision) yield* save({ ...row.binding, pendingOutcome: { decision, reason } })
+            if (decision)
+              yield* save({
+                ...binding,
+                pendingOutcome: {
+                  decision,
+                  reason:
+                    driver.identity === ProContractDriver.native.identity && decision.type === "escalate"
+                      ? `Blocked in ${binding.blockedStreak === 1 ? "1 attempt" : `${binding.blockedStreak} consecutive attempts`}; routed to the issuer: ${reason}`
+                      : reason,
+                },
+              })
             return receipt
           }),
         ),
@@ -841,6 +881,13 @@ export const node = makeGlobalNode({
 })
 
 type Row = { binding: Binding; contract: ProContract.Contract; context: Schema.RecognitionContext | null }
+
+function blockedRoutingRejection(routing: Binding["blockedRouting"], driver: string) {
+  if (routing === undefined) return
+  if (!["retry", "escalate", "escalate-after-repeat"].includes(routing))
+    return "blockedRouting must be retry, escalate, or escalate-after-repeat"
+  if (driver !== ProContractDriver.native.identity) return "blockedRouting requires the native Contract driver"
+}
 
 function driverID(binding: Binding) {
   return binding.driver ?? ProContractDriver.native.identity

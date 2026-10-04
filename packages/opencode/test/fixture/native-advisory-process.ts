@@ -1,6 +1,7 @@
 import { expect } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
+import type { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import type { NativeAdvisoryStore } from "../../../sdk-next/src/native-advisory-store"
 import { guidance } from "../../../sdk-next/src/native-advisory"
 import { contractProcess } from "./contract-process"
@@ -47,6 +48,7 @@ export const nativeAdvisoryProcess = Effect.fnUntraced(function* (checkpoints = 
     id: string,
     options?: {
       ordinary?: boolean
+      blockedRouting?: ProContractOpenCode.Binding["blockedRouting"]
       time?: Partial<NativeAdvisoryStore.Configuration["time"]>
       reviewerModel?: { providerID: string; id: string }
       materials?: ReadonlyArray<string>
@@ -62,6 +64,7 @@ export const nativeAdvisoryProcess = Effect.fnUntraced(function* (checkpoints = 
       now: Date.now(),
       location: { directory: fixture.directory },
       model: { providerID: "local", id: "researcher" },
+      ...(options?.blockedRouting === undefined ? {} : { blockedRouting: options.blockedRouting }),
       spec: {
         trigger: { type: "immediate" },
         goal: "Inspect the native material",

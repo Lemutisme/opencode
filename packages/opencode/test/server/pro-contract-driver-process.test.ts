@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
+import path from "node:path"
 import { NodeServices } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { contractProcess } from "../fixture/contract-process"
@@ -9,6 +10,98 @@ import { httpError, reply, TestLLMServer } from "../lib/llm-server"
 const it = testEffect(Layer.mergeAll(TestLLMServer.layer, NodeServices.layer, FetchHttpClient.layer))
 
 describe("Contract driver production lifecycle", () => {
+  it.live(
+    "routes two native blocked Sessions to the issuer and resumes through authenticated HTTP",
+    () =>
+      Effect.gen(function* () {
+        const fixture = yield* contractProcess
+        const llm = yield* TestLLMServer
+        const server = yield* fixture.start()
+        const firstReport = Promise.withResolvers<void>()
+        const secondReport = Promise.withResolvers<void>()
+        const id = "pct_native_blocked_routing"
+        const deadline = Date.now() + 120_000
+        yield* llm.push(
+          reply().tool("contract_report_blocked", { reason: "Dependency unavailable" }).wait(firstReport.promise),
+          reply()
+            .tool("contract_report_blocked", { reason: "Independent attempt confirms missing input" })
+            .wait(secondReport.promise),
+        )
+        yield* server.request("/api/contract", {
+          id,
+          scope: "native-blocked-process",
+          goal: "Inspect the assigned input",
+          location: { directory: fixture.directory },
+          model: { providerID: "local", id: "researcher" },
+          authority: ["filesystem.read"],
+          budget: { deadline },
+          resolution: { retryDelay: 100 },
+        })
+        yield* awaitWithTimeout(llm.wait(1), "First native attempt did not start", "20 seconds")
+        const first = yield* fixture.binding(id)
+        expect(first).toMatchObject({ attempts: 1, blockedStreak: 0, blockedRouting: "escalate-after-repeat" })
+        yield* Effect.sync(() => firstReport.resolve())
+        yield* awaitWithTimeout(llm.wait(2), "Second native attempt did not start", "20 seconds")
+        const second = yield* fixture.binding(id)
+        expect(second).toMatchObject({ attempts: 2, blockedStreak: 1 })
+        expect(second.sessionID).not.toBe(first.sessionID)
+        yield* Effect.sync(() => secondReport.resolve())
+        expect(yield* server.status(id, "escalated")).toMatchObject({
+          escalation: {
+            reason:
+              "Blocked in 2 consecutive attempts; routed to the issuer: Independent attempt confirms missing input",
+          },
+        })
+        yield* server.idle(second.sessionID)
+        const stopped = yield* fixture.binding(id)
+        expect(stopped).toMatchObject({ attempts: 2, blockedStreak: 0, dispatched: false })
+        const events = yield* fixture.ledger(id)
+        expect(
+          events
+            .filter((event) => ["report-blocked", "escalate"].includes(event.command.type))
+            .map((event) => event.command.type),
+        ).toEqual(["report-blocked", "report-blocked", "escalate"])
+        // Exceed retryDelay plus several production scheduler intervals.
+        yield* Effect.sleep("3 seconds")
+        expect(yield* fixture.binding(id)).toEqual(stopped)
+        expect(yield* fixture.ledger(id)).toEqual(events)
+        expect(yield* llm.calls).toBe(2)
+        const sessions = Schema.decodeUnknownSync(
+          Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+        )(yield* server.request("/api/session"))
+        expect(new Set(sessions.data.map((session) => session.id))).toEqual(
+          new Set([first.sessionID, second.sessionID]),
+        )
+
+        yield* llm.push(
+          reply().tool("contract_report_ready", { summary: "Input restored by issuer", uncertainties: [] }),
+        )
+        yield* server.request(`/api/contract/${id}/resume`, {})
+        yield* awaitWithTimeout(llm.wait(3), "HTTP resume did not start a third Session", "20 seconds")
+        expect(yield* server.status(id, "verification")).toMatchObject({ spec: { budget: { deadline } } })
+        const resumed = yield* fixture.binding(id)
+        expect(resumed.sessionID).not.toBe(first.sessionID)
+        expect(resumed.sessionID).not.toBe(second.sessionID)
+        expect(resumed.blockedStreak).toBe(0)
+        const context = yield* server.context(resumed.sessionID)
+        expect(context.find((message) => message.type === "user")?.text).toContain(
+          "Previous attempt blocked:\nIndependent attempt confirms missing input",
+        )
+        expect(yield* llm.calls).toBe(3)
+        if (process.env.OPENCODE_NATIVE_ADVISORY_ARTIFACTS) {
+          const hits = yield* llm.hits
+          const ledger = yield* fixture.ledger(id)
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(process.env.OPENCODE_NATIVE_ADVISORY_ARTIFACTS!, "native-blocked-routing.json"),
+              JSON.stringify({ first, second, stopped, resumed, sessions, context, hits, ledger }, null, 2),
+            ),
+          )
+        }
+      }),
+    60_000,
+  )
+
   it.live(
     "persists repeated waits across SIGKILL and fails closed without the host driver",
     () =>

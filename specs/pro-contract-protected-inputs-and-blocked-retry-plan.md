@@ -346,3 +346,95 @@ cd packages/core && OPENCODE_DB="$(mktemp -d)/opencode.db" bun test test/pro-con
 - research 宿主计划层的 `additionalProtected`（第八轮的类型）不在本轮范围。
 - 静默结束（`completed`）导致的新 attempt 循环是现有的原生行为，B(iii′) 不处理。blocked 与静默结束交替出现时不会触发路由。
 - 本地部署仍然是协作式的（Constitution 的过渡债务），执行者可以读写工作区的 `.git`。
+
+## 10. 实施记录
+
+2026-10-03，实施者完成 B(iii′) 与 A0 仓库内刻画用例，停在未提交工作树，等待 Claude 把关。
+
+本轮基于 `native-advisory` 当前 HEAD `cb80e3195dc967a8c2b008efde176edc78e3f472`。开工时工作树干净；修改前按上一轮方式保存了全部 6,694 个 tracked / non-ignored untracked 路径的文件归档、SHA-256、模式、HEAD、分支、Git 状态及 index/worktree 二进制补丁，另保存 index entries。见[基线目录](/workspace/opencode-blocked-routing-baseline-20261003T061536909343Z)和[基线元数据](/workspace/opencode-blocked-routing-baseline-20261003T061536909343Z/metadata.json)。原规划正文保持原文，本节只追加在末尾。
+
+改动清单：
+
+- `packages/core/src/pro-contract/open-code.ts`：新增可选的 `Binding.blockedRouting`、`Binding.blockedStreak` 和 `issue` / `create` 签发选项。新 native binding 默认 `escalate-after-repeat`；host driver 不被赋予该默认路由。幂等 `issue` 只比较显式给出的路由，省略时保留已存值，包括历史缺省。接受 blocked 后先计算新计数交给 driver，仅在 driver 成功决定后保存计数与 pending outcome。`settle`、`retire` 按 §3.3 保留或清零；native escalation 原因包含计数和最后一次原因，`report-blocked` ledger 保留各自原文。
+- `packages/core/src/pro-contract/driver.ts`：native driver 读取路由与计数；缺省及 `retry` 延续既有行为，`escalate` 首次升级，`escalate-after-repeat` 在连续第二次及以后升级。其他六种 outcome 的决定保持不变，driver identity 仍为 `native:1`。
+- `packages/core/test/pro-contract-driver.test.ts`：覆盖 7 种 outcome、4 种路由、5 种计数（缺省、0、1、2、3），共 140 个纯函数决策组合；真实 store 生命周期覆盖连续 blocked、issuer `resume`、`completed` / `invalid-session` 清零、交付和机构性转移 `retire`、三类同 attempt 重试、立即升级、历史 binding、显式 `retry`、deadline、第二 owner 接管、幂等 `issue` / `create`、`maxAttempts` 先后触发、报告拒绝及 driver 故障。
+- `packages/core/test/pro-contract-control.test.ts`：新增 A0 刻画用例。临时 git 工作区提交批准的 `TASK.md` 后，经真实 ToolRegistry 调用 bash 改坏文件；`contract_check` 判失败且实际 replay `checks` 为 0。再经 bash 执行 `git checkout -- TASK.md`，字节和冻结哈希恢复，检查通过且实际运行 1 项 check，合同仍 active、没有交付。本项只有测试改动。
+- `packages/opencode/test/fixture/native-advisory-process.ts`：仅按需透传 `blockedRouting` 签发选项。
+- `packages/opencode/test/server/pro-contract-driver-process.test.ts`、`pro-contract-native-advisory-nodes-process.test.ts`：新增真实宿主、脚本化 LLM 进程用例。HTTP 默认签发在两次 blocked 后升级，等 3 秒仍只有两个 worker Session；Principal 认证 HTTP `resume` 启动第三个 Session，首条输入保留上次 blocked 原因。native advisory 在两个 attempt 中各完成一次交付前审阅，第二次审阅暂停和恢复前后计数均为 1，随后第二次 blocked 升级，不再自动启动 worker 或审阅。
+
+按 change gate 说明：
+
+| 项目 | 本次实施及证据 |
+| --- | --- |
+| 维护的不变量 | outstanding work 无法执行时保留明确的 issuer 路由；escalated 不结算义务，issuer `resume` / `release` 权限不变，obligation conservation 与 residual control 不变。 |
+| 缺少改动的反例 | deadline-only native 合同即使相邻两个独立 Session 都报告 blocked，仍自动开第三个及后续 attempt，直到 deadline。新增生命周期与进程用例锁定第二次后停止的边界。 |
+| 层级选择 | 本边界可由 execution adapter 实施，因此保持 kernel reducer 原样，复用已有 `escalate` / `resume` 命令和 ledger。没有增加 kernel 状态或命令语义。 |
+| 纯函数 / kernel 验证 | `native.outcome` 的 140 个决策组合；原有 `pro-contract.test.ts` 的 kernel 用例及 `pro-contract-constitution.test.ts` 原样通过。 |
+| 真实边界验证 | 真实 store 的 `reportBlocked` / `complete` / `sweep` / lease takeover / `resume`；真实宿主与本地脚本 provider 的 HTTP 恢复、无第三个自动 Session、native advisory 暂停恢复。 |
+| 新增和删除的概念 | 新增两个可选 binding 字段、进程内签发选项和 native blocked 决策分支及计数维护；没有删除概念，保留历史 retry 分支。 |
+| A0 | 本轮只有现有行为的刻画测试，不增加写入拦截、恢复工具或 replay 判定，Core change gate 不适用。 |
+
+验证使用既有 Bun 1.3.14。每次测试调用均在相应 package 目录启动，并设置独立 `OPENCODE_DB`；所有测试组及类型检查依次运行，没有并行组。Core / opencode preload 仍会按既有实现把测试进程的数据库设为 `:memory:`，宿主进程夹具使用各自临时磁盘数据库。全部 provider 交互来自本地脚本或已有录制，没有调用真实模型。
+
+| 验证组 | 结果与日志 |
+| --- | --- |
+| Core：全部 ProContract、session-runner、A0（18 个文件） | 412 项通过，0 失败；[日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/core-regression-final-02.log) |
+| opencode：全部 ProContract 宿主进程测试（14 个文件） | 156 项通过，1 失败；[日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/opencode-process-regression-final.log) |
+| sdk-next：native-advisory、native-advisory-strength、contract-jobs | 65 项通过，0 失败；[日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/sdk-regression-final.log) |
+| Core `bun typecheck` | 通过；[日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/core-typecheck-final.log) |
+| opencode `bun typecheck` | 通过；[日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/opencode-typecheck-final.log) |
+| sdk-next `bun typecheck` | 通过；[日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/sdk-typecheck-final.log) |
+| 七个 TypeScript 改动文件的 Prettier 检查 | 通过；[日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/format-final.log) |
+
+指定回归合计 **633 项通过、1 失败**，三个 package 的类型检查全部通过；定向及修正过程的测试没有重复计入总数。
+
+进程回归唯一失败是本轮未修改的 `pro-contract-research-process.test.ts` 用例 `classifies a killed verifier as unknown and retries only through explicit lineage`，报 `ExecutionDenied: Cannot audit an execution whose cleanup may still be active`。当前实现单独复跑仍失败；完整基线副本在 `/tmp` 两次、`/workspace` 一次均通过。随后在原工作树路径仅临时恢复两个生产文件的基线内容，同一未修改用例再次报相同错误，证明该失败无需本轮生产改动也会出现。两个文件随后已恢复，哈希与完整回归及类型检查使用的实现一致。
+
+现有用例在观察到 `unavailable` 后立即发起 `recover`，而 `audit` 还检查 job 租约和本地活动；具体时序根因尚未完全定位，本轮没有修改或弱化该用例及范围外实现。该失败没有从完整回归结果中扣除，回归不能标为全绿。详见[原路径基线对照日志](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/research-baseline-current-path-01.log)、[临时恢复与还原核验](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/baseline-current-path-control.json)和[完整诊断](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/research-regression-diagnosis.json)。
+
+完整命令、独立数据库位置、退出码、日志哈希、失败经过和进程证据索引见[验证汇总](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/VERIFICATION.md)及[机器可读记录](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/verification.json)。[相对保存基线的补丁](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/baseline-delta.patch)已在独立基线文件副本上正向应用并核对结果，也已在当前工作树反向检查。[保留核验](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/baseline-preservation.json)记录逐文件范围、HEAD / 分支 / index 未变以及原规划正文保留；[受测源码哈希](/workspace/opencode-blocked-routing-validation-20261003T061536909343Z/tested-sources.json)固定本轮源码。
+
+与规划的一致性及实施时核实的细节：
+
+- 功能范围按 §6；按本轮用户明确指令，A0 的准备脚本提交步骤、仓库外签发模板及 §7.1 下一轮预检留到下一轮，本轮未实施或运行。
+- issuer `resume` 按现有语义创建新 Session，但不增加 binding 的 `attempts` 数值。测试以新 Session、保留 blocked brief 和重置后的计数为证据，没有改变既有 attempt 计量。修订会拒绝旧 execution 的 `complete`，由既有 scheduler `sweep` 调用 `retire` 清零。
+- native advisory 对相同快照及相同提交声明会命中已有意见缓存。新进程用例给第二个 attempt 使用不同的提交声明，从而实际启动第二次审阅，核验两次暂停恢复；缓存机制原样保留。
+- 初始验证中修正过新增测试对工具输出 `structured` 层、缺省字段、resume 计数、brief 换行、修订后的 sweep 和审阅缓存的假设；原失败日志均保留。这些修正没有引入规划外生产改动。
+- 未改 `kernel.ts`、`replay.ts`、`file-mutation.ts`、工具文件、Schema、Protocol、Server 或实验准备脚本；未运行 `bun run generate`，未提交或推送，未触碰冻结 cohort 或历史实验材料。静默 completed 与 blocked 交替不会触发连续 blocked 路由，A0 仍依赖执行者选择 git 恢复，残余风险与 §9 一致。
+
+### 10.1 Claude 把关后的定向修复（2026-10-04）
+
+本轮按 Principal 转达的 S1、M1–M4、advisory 透传及文档要求修复。开工时 HEAD 仍为 `cb80e3195dc967a8c2b008efde176edc78e3f472`，工作树已有上一轮的 8 个修改文件，均先纳入[完整基线](/workspace/opencode-blocked-routing-review-baseline-20261004T071511582681Z)。本轮增量涉及 1 个生产文件、3 个测试文件和本节追加文字；原规划正文和此前实施记录保留原字节。
+
+**对规划 §3.3 的更正：**原文说 challenge、resume 等机构性转移之后，计数会经由 `retire` 清零，这一说法不完整。`retire` 只处理已派发的 binding，`sweep` 会跳过未派发的 binding，因此两次 attempt 之间的空闲期发生机构性转移时，不会走该清零路径。本轮在 `ProContractOpenCode.activate` 中补齐：仅在 kernel 接受 `contracts.activate` 后清零 `blockedStreak`；激活被拒绝时保留原计数。已派发 binding 的 `retire` 路径不变。此处更正实施事实，§3.3 正文保持原样。
+
+| 审查项 | 修复及对应验证 |
+| --- | --- |
+| S1 | `open-code.ts` 的 accepted activation 清零。Core 真实 store 用例依次执行：C 的 attempt 1 blocked，空闲计数为 1；依赖 D 被 challenge，C 被 escalate；Principal resume C；恢复依赖并成功激活后计数为 0，第一次 blocked 仍为 `retry/new`。同时验证已 active 和依赖未恢复两种被拒激活均不清零。修补前已确定性复现计数仍为 1 的失败，保留 [S1 修补前日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/baseline-s1.log)。 |
+| M1 | 签发只接受 `retry`、`escalate`、`escalate-after-repeat` 或省略。非法值在 `issue` 的事务 guard 中形成拒绝回执；兼容 `create` 在写入前拒绝。覆盖空串、拼写错误、null、数字、布尔、对象和数组，确认没有创建非法 binding。 |
+| M2 | 第一次 blocked 的升级原因改为 `Blocked in 1 attempt; routed to the issuer: …`；只有多次才写 `consecutive attempts`。Core 同时精确断言 pending outcome 和合同 escalation 原因。 |
+| M3 | 重复签发比较时把旧 binding 缺省视同 `retry`；显式 `retry` 接受，另外两值拒绝。更新原 `does not upgrade an old binding` 用例，确认省略和显式等价重试都不补写或升级旧字段，兼容 `create` 也保留原 binding。 |
+| M4 | 非原生 driver 显式给出任意有效 `blockedRouting` 都在签发时拒绝，首次及重复签发都有测试。`reportBlocked` 只对 `native:1` 增加计数；既有 host wait / same-attempt 用例断言不累加。新增真实 Research 严格模式进程用例：blocked 后根合同仍 active、账本保留原因、binding 计数为 0、等待显式恢复，超过 `retryDelay` 后仍无新 Session 或额外 provider 调用，`budget` 保持原值。Research 生产代码没有改动。 |
+| advisory 透传 | 四个原有节点进程场景（submission、lost-return、defect-after、interrupted-check）改为通过 `NativeAdvisory.issue` 传入非默认 `escalate`，并在审阅前后断言实际持久化值。原两次 blocked / 两次审阅用例继续覆盖缺省 `escalate-after-repeat`，没有删减原边界。 |
+
+Change gate：本轮只修正执行适配层的计数、输入校验和兼容性，不增加 kernel 状态或命令；义务守恒、issuer 权限、原 deadline 和预算不变，不增加累计上限。生产增量仅在 `packages/core/src/pro-contract/open-code.ts`；kernel、reducer、Research 严格状态机、SDK / advisory 源码、评测网关及测试夹具均未修改。原 kernel 与 constitution 回归继续覆盖既有不变量。
+
+所有指定回归组和类型检查依次运行，每次设置独立 `OPENCODE_DB`，没有并行。Core / opencode preload 仍按既有实现使用测试进程内 `:memory:`；宿主夹具仍使用各自临时磁盘数据库。Bun 版本为 1.3.14，provider 仅为本地确定性服务或已有录制。
+
+| 验证组 | 本次结果 | 日志 |
+| --- | --- | --- |
+| Core：18 个文件 | 423 项通过，0 失败 | [日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/core-regression.log) |
+| opencode：14 个进程测试文件 | 158 项通过，0 失败 | [日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/opencode-process-regression.log) |
+| sdk-next：3 个文件 | 65 项通过，0 失败 | [日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/sdk-regression.log) |
+| Core `bun typecheck` | 通过 | [日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/core-typecheck.log) |
+| opencode `bun typecheck` | 通过 | [日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/opencode-typecheck.log) |
+| sdk-next `bun typecheck` | 通过 | [日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/sdk-typecheck.log) |
+| 本轮 4 个 TypeScript 文件的 Prettier 检查 | 通过 | [日志](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/format-check.log) |
+
+指定回归合计 **646 项通过、0 失败**；Core 新增 11 项、Research 进程新增 1 项，其余用例复用或加强。定向运行不重复计入总数。既有 killed-verifier 用例本次在完整回归中通过；这不表示它的时序问题已修复。
+
+关于既有时序问题：Claude 已用独立数据库重跑原来的 634 项并全部通过，但用例 `classifies a killed verifier as unknown and retries only through explicit lineage` 存在时序不稳定：Claude 在不含本次实现的 HEAD、原工作树路径单独运行它仍会失败，在完整回归中又能通过。这说明它是既有时序相关问题，与本次修复无关，本轮不处理。该用例逐字保留，不修改或弱化断言。此前实施记录和失败日志同样保留。
+
+新增 Research 用例首次定向运行时，把严格模式的既有通用关闭提示误写成 advisory 专用提示；核对源码后只更正新增断言，随后定向通过。该次失败保留在 [focused-process.log](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/focused-process.log)，更正后的日志为 [focused-research.log](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/focused-research.log)。
+
+本次交付为[相对本轮保存工作树的增量补丁](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/incremental.patch)、[验证汇总](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/VERIFICATION.md)和[完整命令及机器记录](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/verification.json)。[保留核验](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/baseline-preservation.json)及[补丁应用核验](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/patch-verification.json)证明 HEAD / 分支 / index 未变，基线中的其他文件及既有修改保留，规划文档严格追加。未提交、未推送、未调用真实模型，也未做演练或试运行；完成后等待 Claude 复核。

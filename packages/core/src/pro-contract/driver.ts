@@ -43,12 +43,15 @@ export const native: Driver = Object.freeze({
   activate: () => true,
   claim: () => true,
   heartbeat: () => true,
-  outcome: ({ outcome }) =>
-    outcome.type === "terminal-error"
+  outcome: (view) =>
+    view.outcome.type === "terminal-error" ||
+    (view.outcome.type === "blocked" &&
+      (view.binding.blockedRouting === "escalate" ||
+        (view.binding.blockedRouting === "escalate-after-repeat" && (view.binding.blockedStreak ?? 0) >= 2)))
       ? { type: "escalate" }
       : {
           type: "retry",
-          attempt: ["completed", "invalid-session", "blocked"].includes(outcome.type) ? "new" : "same",
+          attempt: ["completed", "invalid-session", "blocked"].includes(view.outcome.type) ? "new" : "same",
         },
 })
 
