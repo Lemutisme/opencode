@@ -40,6 +40,22 @@ def standing(scope):
         raise ValueError("incumbent_changed")
     if state["job"].get("purpose") != scope.get("purpose"):
         raise ValueError("execution_purpose_changed")
+    producer = state["job"].get("producer")
+    if producer != scope.get("producer"):
+        raise ValueError("research_producer_changed")
+    if producer:
+        if not producer.get("support") and producer["pair"] != state["active"]["pair"]:
+            raise ValueError("research_producer_unqualified")
+        if producer.get("support"):
+            grant = state["kernel"]["contracts"].get(producer["support"], {})
+            pair_hash = hashlib.sha256(json.dumps(
+                {"s": producer["pair"]["s"], "h": producer["pair"]["h"]},
+                separators=(",", ":"),
+            ).encode()).hexdigest()
+            if (grant.get("status") != "discharged" or grant.get("scope") != scope["protocol"]
+                or grant.get("handoff", {}).get("subjectHash") != pair_hash
+                or not grant.get("attestationID")):
+                raise ValueError("research_support_withdrawn")
     task = state.get("task")
     if task and scope.get("task") != {"id": task["id"], "checkpoint": task["checkpoint"]}:
         raise ValueError("task_checkpoint_changed")

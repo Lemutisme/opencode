@@ -83,6 +83,27 @@ class AdmissionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cancelled"):
             gateway.standing(self.scope)
 
+    def test_research_producer_requires_exact_live_scope_and_subject(self):
+        producer = {"id": "node", "pair": {"s": "s", "h": "research-h"}, "slot": "h", "support": "research"}
+        digest = hashlib.sha256(json.dumps(producer["pair"], separators=(",", ":")).encode()).hexdigest()
+        grant = {"status": "discharged", "scope": "p", "handoff": {"subjectHash": digest}, "attestationID": "a"}
+        self.state["job"]["producer"] = producer
+        self.state["kernel"]["contracts"]["research"] = grant
+        self.save()
+        scope = {**self.scope, "producer": producer}
+        gateway.standing(scope)
+        with self.assertRaisesRegex(ValueError, "producer_changed"):
+            gateway.standing(self.scope)
+        for change in [{"status": "escalated"}, {"scope": "other"}, {"handoff": {"subjectHash": "other"}}, {"attestationID": None}]:
+            self.state["kernel"]["contracts"]["research"] = {**grant, **change}
+            self.save()
+            with self.assertRaisesRegex(ValueError, "research_support"):
+                gateway.standing(scope)
+        self.state["job"]["producer"] = {k: v for k, v in producer.items() if k != "support"}
+        self.save()
+        with self.assertRaisesRegex(ValueError, "unqualified"):
+            gateway.standing({**scope, "producer": self.state["job"]["producer"]})
+
     def test_task_continuation_binds_checkpoint_purpose_and_task_contract(self):
         self.state["task"] = {"id": "original-task", "checkpoint": "checkpoint-1", "contractID": "task-contract"}
         self.state["kernel"]["contracts"]["task-contract"] = {"status": "active"}

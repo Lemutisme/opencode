@@ -4,7 +4,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Schema } from "effect"
 import { RSIRuntime } from "./rsi-runtime"
-import type { Pair } from "../../core/script/ota-rsi"
+import type { Pair, Producer } from "../../core/script/ota-rsi"
 import { bridgeTools } from "./rsi-bridge"
 import type { NativeBridge } from "./rsi-bridge"
 
@@ -35,6 +35,7 @@ export namespace RSINative {
     job: string
     phase: "running" | "evaluating"
     incumbent: Pair
+    producer?: Producer
     purpose?: "continuation"
     task?: { id: string; checkpoint: string }
   }

@@ -72,6 +72,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
       phase,
       incumbent: current.active.pair,
       purpose: current.job.purpose,
+      producer: current.job.producer,
       task: current.task ? { id: current.task.id, checkpoint: current.task.checkpoint } : undefined,
     }
   }
@@ -168,7 +169,12 @@ export function nativeDriver(config: NativeConfiguration): Driver {
       const execution = scope("running")
       if (job.id !== execution.job || job.epoch !== execution.epoch) throw new Error("stale native job")
       const parent = job.source?.pair ?? job.pair
-      const release = await RSIRuntime.release(job.pair.h)
+      const producer = job.producer?.pair ?? job.pair
+      const expected = execution.producer?.pair ?? execution.incumbent
+      const identities = await Promise.all([RSIRuntime.ref(producer.s), RSIRuntime.ref(producer.h)])
+      if (identities[0].sha256 !== expected.s || identities[1].sha256 !== expected.h)
+        throw new Error("research producer bytes do not match issuer admission")
+      const release = await RSIRuntime.release(producer.h)
       const worker = create()
       const task = job.task ? await config.continuation?.task(job) : undefined
       if (job.task && !task) throw new Error("task scope requires a trusted continuation adapter")
@@ -181,7 +187,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
           .launch({
             ...task,
             release,
-            strategy: job.pair.s,
+            strategy: producer.s,
             deadline: job.deadline,
             scope: execution,
             allowRevise: job.allowRevise ?? true,
@@ -228,7 +234,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
         (source
           ? "Parent source is in /candidate/source, with a clean Git baseline. Change execution behavior there and export a nonempty git diff --binary (including new files) to /candidate/h. The release includes the entire source and fixed dependency/toolchain closure, not a prompt-only shim. External Kernel, gateway, grader and supervisor are not mutable H.\n"
           : "Parent strategy is /task/parent-strategy. Write an improved UTF-8 policy to /candidate/s (at most 64 KiB).\n") +
-        `Prior public handoff (advisory, not authority): ${memory ? new TextDecoder().decode(memory) : "none"}. Allocation: ${job.id}. Source parent: ${job.source?.id ?? "active root"}. Development-only feedback: ${JSON.stringify(job.feedback ?? null)}. Original deadline: ${job.deadline}. Do not claim evaluation or promotion authority.` +
+        `Research producer: ${job.producer?.id ?? "incumbent"}; incumbent and adoption authority are unchanged by research parent selection. Prior public handoff (advisory, not authority): ${memory ? new TextDecoder().decode(memory) : "none"}. Allocation: ${job.id}. Source parent: ${job.source?.id ?? "active root"}. Development-only feedback: ${JSON.stringify(job.feedback ?? null)}. Original deadline: ${job.deadline}. Do not claim evaluation or promotion authority.` +
         (config.revision ? "\n" + revisionInstructions(config.revision, release.entry) : "") +
         (config.development
           ? `\nFrozen development-only context: ${config.development.goal}. Public inputs: ${Object.keys(
@@ -243,7 +249,7 @@ export function nativeDriver(config: NativeConfiguration): Driver {
       await worker
         .launch({
           release,
-          strategy: job.pair.s,
+          strategy: producer.s,
           deadline: job.deadline,
           artifact: job.mutable,
           goal,

@@ -12,6 +12,11 @@ export type Protocol = {
   // Pin the external issuer/containment/evaluator closure, NOT the mutable
   // OpenCode worker runtime. That runtime belongs to H and changes with H.
   trusted: string
+  // New cohorts opt into purpose-bound evidence and independent support records.
+  evidence?: "bound-v1"
+  firstChange?: Slot
+  // A finite proposal schedule, NOT a request/tool/money allowance.
+  research?: { proposals: number }
   // Width one is linear; larger widths explore a breadth-first source tree.
   expansion?: { width: number }
   completion?: { selections: number; successorHandoff: true; stopOnRejection: boolean }
@@ -50,6 +55,7 @@ export type Evidence = {
   baseline: { subject: string; rows: Evidence["rows"] }
   // Reference to issuer-recorded execution/accounting, including incomplete usage.
   receipt: string
+  binding?: string
   // Both versions must have been evaluated from this same task checkpoint.
   checkpoint?: string
 }
@@ -65,7 +71,13 @@ export type Lineage = {
   parent: string
   pair: Pair
   outcome: "selected" | "rejected"
+  slot?: Slot
+  evaluation?: string
+  researchSupport?: string
+  checkpoint?: string
+  reasons?: string[]
 }
+export type Producer = { id: string; pair: Pair; slot: Slot; support?: string; checkpoint?: string }
 export type State = {
   revision: number
   protocol: string
@@ -94,6 +106,10 @@ export type State = {
     purpose?: "continuation"
     allowRevise?: boolean
     source?: { id: string; pair: Pair }
+    producer?: Producer
+    history?: string
+    inputMemory?: Boot["memory"]
+    checkpoint?: string
   }
   stopped?: string
   quarantine: string[]
@@ -119,6 +135,20 @@ export class OTA {
 
   constructor(path: string, protocol: Protocol, seed: Pair) {
     requireHash(protocol.trusted)
+    if (protocol.evidence !== undefined && protocol.evidence !== "bound-v1") throw new Error("unknown evidence binding")
+    if (protocol.firstChange !== undefined && !["s", "h"].includes(protocol.firstChange))
+      throw new Error("invalid first partition")
+    if (
+      protocol.research &&
+      (protocol.evidence !== "bound-v1" ||
+        !protocol.expansion ||
+        protocol.completion ||
+        protocol.stopOnPrimaryImprovement ||
+        protocol.deployment ||
+        !Number.isSafeInteger(protocol.research.proposals) ||
+        protocol.research.proposals < 1)
+    )
+      throw new Error("research producers require bound evidence, source expansion and a separate finite campaign")
     if (protocol.expansion && (!Number.isSafeInteger(protocol.expansion.width) || protocol.expansion.width < 1))
       throw new Error("expansion width must be a positive integer")
     if (
@@ -237,7 +267,7 @@ export class OTA {
           protocol: this.digest,
           seed,
           kernel: ProContractKernel.empty,
-          active: { slot: "s", pair: seed, memory: { id: "e1" } },
+          active: { slot: opposite(protocol.firstChange ?? "h"), pair: seed, memory: { id: "e1" } },
           epoch: 1,
           trial: false,
           quarantine: [],
@@ -322,6 +352,20 @@ export class OTA {
       .map((row) => JSON.parse(row.value))
   }
 
+  completedProposals() {
+    return this.history().filter(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "type" in event &&
+        (event.type === "qualification" || event.type === "preparation-rejected"),
+    ).length
+  }
+
+  researchParent() {
+    return this.protocol.research ? researchProducer(this.read(), this.protocol.expansion!.width) : undefined
+  }
+
   begin(revision: number, now: number) {
     return this.change(revision, now, "begin", (state) => {
       if (state.job) throw new Error("an admitted job already exists")
@@ -334,6 +378,10 @@ export class OTA {
         (state.task.revisions ?? 0) >= this.protocol.deployment.revisions
       )
         throw new Error("task revision schedule exhausted; no further source proposal")
+      if (this.protocol.research && this.completedProposals() >= this.protocol.research.proposals)
+        throw new Error("research proposal schedule exhausted")
+      const producer = this.protocol.research ? researchProducer(state, this.protocol.expansion!.width) : undefined
+      if (this.protocol.research && !producer) throw new Error("research frontier exhausted")
       state.job = {
         id: `job-${state.revision + 1}-${state.epoch}`,
         deadline: Math.min(now + SIX_HOURS, this.protocol.deployment?.deadline ?? now + SIX_HOURS),
@@ -341,6 +389,15 @@ export class OTA {
         heartbeat: now,
         sequence: -1,
         phase: "running",
+        ...(this.protocol.evidence
+          ? {
+              history: hash(JSON.stringify(this.history())),
+              inputMemory: producer
+                ? { id: producer.id, checkpoint: producer.checkpoint }
+                : structuredClone(state.active.memory),
+            }
+          : {}),
+        ...(producer ? { producer } : {}),
         ...(state.task?.needsContinuation
           ? {
               purpose: "continuation" as const,
@@ -349,7 +406,11 @@ export class OTA {
                 : {}),
             }
           : this.protocol.expansion
-            ? { source: expansionParent(state, this.protocol.expansion.width) }
+            ? {
+                source: producer
+                  ? { id: producer.id, pair: producer.pair }
+                  : expansionParent(state, this.protocol.expansion.width),
+              }
             : {}),
       }
     })
@@ -364,7 +425,11 @@ export class OTA {
       if (!Number.isSafeInteger(sequence) || sequence <= state.job!.sequence) throw new Error("replayed activity")
       state.job!.heartbeat = now
       state.job!.sequence = sequence
-      if (now - state.job!.started >= this.protocol.probationMs) state.trial = false
+      if (
+        (!state.job!.producer || subject(state.job!.producer.pair) === subject(state.active.pair)) &&
+        now - state.job!.started >= this.protocol.probationMs
+      )
+        state.trial = false
     })
   }
 
@@ -379,9 +444,10 @@ export class OTA {
       state.job!.phase = "evaluating"
       if (checkpoint) {
         requireHash(checkpoint)
-        state.active.memory.checkpoint = checkpoint
+        if (state.job!.producer) state.job!.checkpoint = checkpoint
+        else state.active.memory.checkpoint = checkpoint
       }
-      state.trial = false
+      if (!state.job!.producer || subject(state.job!.producer.pair) === subject(state.active.pair)) state.trial = false
     })
   }
 
@@ -496,6 +562,7 @@ export class OTA {
         throw new Error("task evidence cannot deploy a campaign pair")
       requireStanding(state, state.active)
       requirePair(pair)
+      if (subject(pair) === subject(state.active.pair)) throw new Error("candidate is the unchanged incumbent")
       if (
         this.protocol.expansion &&
         state.lineage?.some(
@@ -503,15 +570,47 @@ export class OTA {
         )
       )
         throw new Error("this exact pair was already evaluated under this incumbent")
-      const target = opposite(state.active.slot)
-      if (
-        pair[state.active.slot] !== state.active.pair[state.active.slot] ||
-        pair[target] === state.active.pair[target]
-      )
+      const origin = state.job.producer ?? state.active
+      requireStanding(state, origin)
+      const target = opposite(origin.slot)
+      if (pair[origin.slot] !== origin.pair[origin.slot] || pair[target] === origin.pair[target])
         throw new Error("only the inactive partition may change")
       if (state.quarantine.includes(subject(pair))) throw new Error("failed boot is quarantined")
       if (evidence.baseline.subject !== subject(state.active.pair)) throw new Error("baseline is not the current pair")
+      if (this.protocol.evidence && evidence.binding !== comparisonBinding(state, pair))
+        throw new Error("comparison binding changed: producer, history, checkpoint or incumbent")
       const decision = qualify(this.protocol, this.digest, pair, evidence, state.retainedFull)
+      const evaluation = this.protocol.evidence
+        ? attest(
+            state,
+            commands,
+            `evaluation_${hash(JSON.stringify([state.protocol, evidence.job, evidence.receipt]))}`,
+            "Record this complete scoped comparison, not permission to deploy",
+            hash(JSON.stringify(evidence)),
+            evidence.receipt,
+            [],
+            now,
+          )
+        : undefined
+      const development = decision.panels.filter((panel) => panel.panel === "development")
+      const researchSupport =
+        this.protocol.research &&
+        decision.safety &&
+        (this.protocol.scope === "mechanics" ||
+          (development.length > 0 &&
+            development.every((panel) => panel.eligible) &&
+            development.some((panel) => panel.improved)))
+          ? attest(
+              state,
+              commands,
+              `research_${hash(JSON.stringify([state.protocol, evidence.job, subject(pair)]))}`,
+              "Permit this exact version to produce research proposals only, never original-task execution",
+              subject(pair),
+              evidence.receipt,
+              [{ contractID: ProContract.ID.make(evaluation!), revision: 1 }],
+              now,
+            )
+          : undefined
       const passed = decision.eligible
       if (state.task && this.protocol.deployment?.revisions !== undefined) {
         state.task.revisions = (state.task.revisions ?? 0) + 1
@@ -525,6 +624,9 @@ export class OTA {
           parent: state.job.source.id,
           pair,
           outcome: passed ? "selected" : "rejected",
+          ...(this.protocol.evidence
+            ? { slot: target, evaluation, researchSupport, reasons: decision.reasons, checkpoint: state.job.checkpoint }
+            : {}),
         })
       }
       if (decision.safety) state.retainedFull = [...new Set([...state.retainedFull, ...decision.baselineFull])]
@@ -533,7 +635,9 @@ export class OTA {
         trigger: { type: "immediate" },
         goal: "Authorize this exact pair under the frozen safety and full-pass-first performance gate, subject to health withdrawal",
         brief: JSON.stringify({ protocol: this.digest, pair, job: state.job.id, target }),
-        requires: [], // Parentage is not evidence dependency: rollback must remain possible.
+        // Evaluation is support; source ancestry is not. Health rollback can
+        // challenge this authorization without falsifying the measured results.
+        requires: evaluation ? [{ contractID: ProContract.ID.make(evaluation), revision: 1 }] : [],
         authority: [],
         // Issuer-only atomic settlement; not a renewed model-execution allowance.
         budget: { deadline: now + 60_000 },
@@ -597,7 +701,11 @@ export class OTA {
         slot: target,
         pair,
         support: id,
-        memory: { id: `e${state.epoch + 1}`, parent: state.active.memory.id, origin: state.active.memory.checkpoint },
+        memory: {
+          id: `e${state.epoch + 1}`,
+          parent: state.active.memory.id,
+          origin: state.job.checkpoint ?? state.active.memory.checkpoint,
+        },
       }
       state.epoch += 1
       state.trial = true
@@ -617,7 +725,9 @@ export class OTA {
       requireStanding(state, state.active)
       requirePair(pair)
       requireHash(receipt)
-      if (pair[state.active.slot] !== state.active.pair[state.active.slot]) throw new Error("active partition changed")
+      const origin = state.job.producer ?? state.active
+      requireStanding(state, origin)
+      if (pair[origin.slot] !== origin.pair[origin.slot]) throw new Error("active partition changed")
       const id = ProContract.ID.make(`pct_ota_build_${hash(JSON.stringify([state.protocol, state.job.id, pair]))}`)
       const spec = ProContract.Spec.make({
         trigger: { type: "immediate" },
@@ -713,10 +823,79 @@ export class OTA {
             state.job.allowRevise = (state.task.revisions ?? 0) < this.protocol.deployment.revisions
           delete state.job.source
         }
-        if (!state.task && this.protocol.expansion)
-          state.job.source = expansionParent(state, this.protocol.expansion.width)
+        if (!state.task && this.protocol.expansion) {
+          const producer = this.protocol.research ? researchProducer(state, this.protocol.expansion.width) : undefined
+          if (this.protocol.research && !producer) {
+            state.stopped = "research frontier exhausted after rollback"
+            delete state.job
+            return { reason }
+          }
+          state.job.source = producer
+            ? { id: producer.id, pair: producer.pair }
+            : expansionParent(state, this.protocol.expansion.width)
+          state.job.producer = producer
+          delete state.job.checkpoint
+          if (this.protocol.evidence) {
+            state.job.history = hash(JSON.stringify(this.history()))
+            state.job.inputMemory = producer
+              ? { id: producer.id, checkpoint: producer.checkpoint }
+              : structuredClone(state.active.memory)
+          }
+        }
       }
       return { reason }
+    })
+  }
+
+  failResearch(revision: number, reason: string, now: number) {
+    return this.change(revision, now, "research-failed", (state, commands) => {
+      const producer = state.job?.producer
+      if (!producer || subject(producer.pair) === subject(state.active.pair) || !producer.support)
+        throw new Error("no separate research producer")
+      const support = state.kernel.contracts[producer.support]
+      if (support?.status === "discharged")
+        apply(state, commands, {
+          type: "challenge",
+          actor: issuer,
+          contractID: support.id,
+          challenge: {
+            revision: support.revision,
+            subjectHash: subject(producer.pair),
+            evidenceHash: hash(JSON.stringify({ reason, now })),
+            disclosure: "sealed",
+            time: now,
+          },
+        })
+      state.quarantine.push(subject(producer.pair))
+      delete state.job
+      return { producer, reason }
+    })
+  }
+
+  withdrawEvaluation(revision: number, evaluation: string, reason: string, now: number) {
+    return this.change(revision, now, "evaluation-withdrawn", (state, commands) => {
+      const record = state.kernel.contracts[evaluation]
+      if (
+        !record ||
+        !evaluation.startsWith("pct_ota_evaluation_") ||
+        record.status !== "discharged" ||
+        !record.handoff ||
+        !reason.trim()
+      )
+        throw new Error("a live evaluation and concrete withdrawal reason are required")
+      apply(state, commands, {
+        type: "challenge",
+        actor: issuer,
+        contractID: record.id,
+        challenge: {
+          revision: record.revision,
+          subjectHash: record.handoff.subjectHash,
+          evidenceHash: hash(JSON.stringify({ evaluation, reason, now })),
+          disclosure: "sealed",
+          time: now,
+        },
+      })
+      return { evaluation, reason }
     })
   }
 
@@ -851,7 +1030,20 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
       },
     ]
   })
+  const reasons = [
+    ...(!safety ? ["safety-failed"] : []),
+    ...panels.flatMap((panel) => [
+      ...panel.regressed.map((task) => `task-regressed:${task}`),
+      ...panel.lost.map((task) => `full-pass-lost:${task}`),
+      ...panel.missingRequired.map((task) => `required-full-missing:${task}`),
+      ...(!panel.eligible && !panel.regressed.length && !panel.lost.length && !panel.missingRequired.length
+        ? [`panel-gate:${panel.panel}`]
+        : []),
+    ]),
+    ...(panels.length && !panels.some((panel) => panel.improved) ? ["no-strict-improvement"] : []),
+  ]
   return {
+    reasons,
     eligible:
       safety &&
       panels.every((panel) => panel.eligible) &&
@@ -869,6 +1061,113 @@ export function qualify(protocol: Protocol, digest: string, pair: Pair, evidence
     allFull: panels.length > 0 && safety && panels.every((panel) => panel.full.length === panel.totalTasks),
     scope: protocol.scope,
   }
+}
+
+/** The protocol's trusted manifest binds environment, evaluator and provider;
+ * the job adds the exact input history and original task/allowance. A binding
+ * authorizes no reuse: it names what THIS comparison actually measured.
+ */
+export function comparisonBinding(state: State, pair: Pair) {
+  if (!state.job?.history) throw new Error("missing frozen comparison history")
+  return hash(
+    JSON.stringify({
+      protocol: state.protocol,
+      incumbent: state.active.pair,
+      candidate: pair,
+      producer: state.job.producer ?? { pair: state.active.pair, slot: state.active.slot },
+      source: state.job.source,
+      history: state.job.history,
+      inputMemory: state.job.inputMemory,
+      job: state.job.id,
+      deadline: state.job.deadline,
+      task: state.task ? { id: state.task.id, checkpoint: state.task.checkpoint } : undefined,
+    }),
+  )
+}
+
+function researchProducer(state: State, width: number): Producer | undefined {
+  const root = subject(state.active.pair)
+  const nodes = (state.lineage ?? []).filter((node) => subject(node.root) === root)
+  const candidates: Producer[] = [
+    { id: root, pair: state.active.pair, slot: state.active.slot, support: state.active.support },
+    ...nodes
+      .filter(
+        (node) =>
+          node.researchSupport &&
+          state.kernel.contracts[node.researchSupport]?.status === "discharged" &&
+          !state.quarantine.includes(subject(node.pair)),
+      )
+      .map((node) => ({
+        id: node.id,
+        pair: node.pair,
+        slot: node.slot!,
+        support: node.researchSupport,
+        checkpoint: node.checkpoint,
+      })),
+  ]
+  // Failed/withdrawn candidates remain history but cannot execute as parents.
+  return candidates.find((node) => nodes.filter((child) => child.parent === node.id).length < width)
+}
+
+function attest(
+  state: State,
+  commands: ProContractKernel.Command[],
+  key: string,
+  goal: string,
+  artifact: string,
+  evidence: string,
+  requires: ProContract.Requirement[],
+  now: number,
+) {
+  const id = ProContract.ID.make(`pct_ota_${key}`)
+  const spec = ProContract.Spec.make({
+    trigger: { type: "immediate" },
+    goal,
+    brief: state.protocol,
+    requires,
+    authority: [],
+    budget: { deadline: now + 60_000 },
+    evidence: { type: "principal", claim: goal },
+    resolution: { maxAttempts: 1, retryDelay: 0 },
+  })
+  apply(state, commands, {
+    type: "issue",
+    actor: issuer,
+    draft: {
+      id,
+      issuer,
+      executor: "issuer-verifier",
+      scope: state.protocol,
+      spec,
+      specHash: ProContractKernel.hashSpec(spec),
+    },
+  })
+  apply(state, commands, { type: "activate", actor: "institution", contractID: id, revision: 1, time: now })
+  apply(state, commands, {
+    type: "report-ready",
+    actor: "institution",
+    contractID: id,
+    revision: 1,
+    subjectHash: artifact,
+    summary: goal,
+    uncertainties: ["Scoped evidence, not general correctness."],
+    time: now,
+  })
+  apply(state, commands, {
+    type: "discharge",
+    actor: issuer,
+    contractID: id,
+    attestation: {
+      id: ProContract.AttestationID.make(`pca_${key}`),
+      revision: 1,
+      specHash: ProContractKernel.hashSpec(spec),
+      subjectHash: artifact,
+      evidenceHash: evidence,
+      verifierID: issuer,
+      class: "principal",
+    },
+  })
+  return id
 }
 
 /** Source ancestry is not execution standing. Only the active pair runs the
@@ -905,7 +1204,7 @@ function requirePair(pair: Pair) {
   requireHash(pair.h)
 }
 
-function requireStanding(state: State, boot: Boot) {
+function requireStanding(state: State, boot: Pick<Boot, "pair" | "support">) {
   if (!boot.support) return // Explicitly authorized seed, NOT a performance attestation.
   const support = state.kernel.contracts[boot.support]
   if (support?.status !== "discharged" || support.handoff?.subjectHash !== subject(boot.pair))
@@ -933,6 +1232,8 @@ function taskContractID(protocol: string, task: string) {
 }
 
 function requireJob(state: State, epoch: number, job: string, now: number) {
+  requireStanding(state, state.active)
+  if (state.job?.producer) requireStanding(state, state.job.producer)
   if (state.epoch !== epoch || state.job?.id !== job) throw new Error("stale activation or job")
   if (now >= state.job.deadline) throw new Error("original job deadline reached")
 }

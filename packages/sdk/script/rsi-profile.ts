@@ -32,6 +32,8 @@ const Profile = Schema.Struct({
   effort: Schema.String,
   upstream: Schema.String,
   expansionWidth: Schema.Int,
+  firstChange: Schema.optional(Schema.Literals(["s", "h"])),
+  research: Schema.optional(Schema.Struct({ proposals: Schema.Int })),
   tests: Schema.Array(
     Schema.Struct({
       id: Schema.String,
@@ -179,6 +181,9 @@ export async function configure(root: string) {
   const driver = nativeDriver(native)
   const protocol: Protocol = {
     trusted: await driver.fingerprint(),
+    evidence: "bound-v1",
+    firstChange: input.firstChange,
+    research: input.research,
     scope: "performance",
     performanceRule: "task-pareto",
     expansion: { width: input.expansionWidth },

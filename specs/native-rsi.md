@@ -11,10 +11,10 @@ Integration base: upstream V2 **2.0.22**, `41516c78c8387a86e998a90043265a33a8702
 (merged on 2026-10-02). Historical qualifications remain bound to their original
 source snapshots; merging upstream does not renew them.
 
-| Scope           | Implemented                                                                                                                                                                    | Not established                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| Within-task RSI | ProgramBench task-scoped S/H selection, checkpoints, same-task continuation, original deadline and Kernel completion; scripted container qualification passed | Real-model gains are unproven; τ/TB environment forks are not qualified and fail closed. |
-| Across-task RSI | Native proposals/releases, paired selection, finite closure, independent audit and ProgramBench/τ³/TB4 adapters; real paired evaluation has run | No successful real-model recursive succession or RSI performance gain has been established. |
+| Scope           | Implemented                                                                                                                                                   | Not established                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Within-task RSI | ProgramBench task-scoped S/H selection, checkpoints, same-task continuation, original deadline and Kernel completion; scripted container qualification passed | Real-model gains are unproven; τ/TB environment forks are not qualified and fail closed.    |
+| Across-task RSI | Native proposals/releases, paired selection, finite closure, independent audit and ProgramBench/τ³/TB4 adapters; real paired evaluation has run               | No successful real-model recursive succession or RSI performance gain has been established. |
 
 The RSI worker composes the existing ProgramBench delivery tools instead of
 launching the old fixed worker. Qualification ran real SDK/Session, builds,
@@ -22,6 +22,65 @@ containers, checkpoints and Kernel settlement with scripted responses and synthe
 scores. It establishes mechanism execution, not learned improvements or benchmark
 generalization. No model-weight self-training is implemented or claimed. A disk
 reserve failure blocks execution, not permission to relax the guard or delete history.
+
+## Bound evidence and research execution
+
+Merged upstream V2 through `f72a103a4b94fb9a467294877bf6243dd99c6bdc` on
+2026-10-04. This does not alter or requalify any historical cohort.
+
+New native profiles use `evidence: "bound-v1"` internally. The comparison binds
+its protocol/trusted manifest (provider, environment, evaluator and input files),
+incumbent, candidate, actual producer, source parent, admitted history, checkpoint
+and original job allowance. A different binding cannot settle the comparison.
+Complete measurements receive their own Evaluation Contract; adoption explicitly
+requires that live evaluation. `withdrawEvaluation` withdraws dependent research
+and adoption grants, not raw observations or unrelated descendants. Health
+rollback still challenges the activation, not the original measurement.
+
+An optional `firstChange: "s"` starts with strategy rather than harness changes.
+For cross-task research, freeze `research: {proposals: 2}` with `expansionWidth`.
+This is a finite proposal schedule, not a provider/action/money cap. It is separate
+from `completion`, `deployment` and `stopOnPrimaryImprovement`:
+
+```text
+incumbent S0/H0 → H1 complete comparison
+  → development-eligible + safe: research-only grant; confirmation may reject adoption
+  → actual S0/H1 executes as producer → produces S1
+  → complete S1/H1 compared with incumbent S0/H0 → separate adoption decision
+```
+
+A research parent must have complete evidence, safety, and a development panel
+with no regressions and a strict gain (mechanics fixtures use their declared safety
+checks). Research selection does not weaken task-Pareto adoption. Failed or
+withdrawn parents remain in history but cannot execute; an exhausted frontier
+stops rather than silently exceeding the frozen tree width. Parent failure fences
+and withdraws that research permission without rolling back a healthy incumbent.
+Every physical request checks the frozen producer and its live grant; native start
+also hashes the actual S/H files against admission. Mutation is relative to the
+producer, whereas adoption always compares the entire pair with incumbent.
+
+Decision receipts retain all measured task regressions, full-pass losses and
+safety/no-improvement reasons. Only development details may return to a proposer;
+confirmation diagnostics stay host-only. Whole-candidate results are not causal
+credit for each component. Raw observations, comparisons and deployment authority
+remain different things: a hash is not a semantic equivalence certificate.
+
+The new research terminal condition is `research proposal schedule completed`,
+not `recursive closure completed`; it cannot authorize the old final audit.
+Historical profiles without these Core options retain source-only expansion.
+No Dream-RSI controller optimizer or EnvHarness curriculum generator is claimed;
+this implementation supplies the live producer/evidence boundaries they require.
+
+From `packages/sdk`, qualify the exact production seed (no worker overlay):
+
+```sh
+bun script/rsi-learning-qualify.ts NEW_ROOT PRODUCTION_RELEASE GATEWAY
+```
+
+The scripted provider generates a real marker H patch, executes it as a
+non-adopted research parent, and generates S. Scores are deliberately synthetic:
+this qualifies builds, native execution, isolation and the two-role chain, not
+learning effectiveness or official benchmark performance.
 
 ## One source graph, one admission gate
 

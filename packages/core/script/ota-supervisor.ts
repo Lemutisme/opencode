@@ -1,8 +1,8 @@
 import { constants } from "node:fs"
 import { mkdir, open, readdir, rename, statfs } from "node:fs/promises"
 import path from "node:path"
-import { hash, opposite, OTA, SIX_HOURS, subject } from "./ota-rsi.js"
-import type { Evidence, Pair, Protocol, Slot, State } from "./ota-rsi.js"
+import { comparisonBinding, hash, opposite, OTA, SIX_HOURS, subject } from "./ota-rsi.js"
+import type { Evidence, Pair, Producer, Protocol, Slot, State } from "./ota-rsi.js"
 
 export type Readmission = {
   manifest: string
@@ -20,6 +20,7 @@ export type Job = {
   deadline: number
   pair: { s: string; h: string }
   source?: { id: string; pair: { s: string; h: string } }
+  producer?: Producer
   output: string
   memory: State["active"]["memory"]
   purpose?: "continuation"
@@ -30,6 +31,7 @@ export type Job = {
     developmentPassed?: number
     developmentTotal?: number
     development?: { task: string; replicate: string; passed: number; total: number; baselinePassed: number }[]
+    reasons?: string[]
     preparationFailure?: string
   }
 }
@@ -177,6 +179,10 @@ export async function supervise(
     await bounded(driver.fence(), 30_000)
     const state = ota.read()
     if (state.stopped) return state
+    if (state.job?.producer && subject(state.job.producer.pair) !== subject(state.active.pair)) {
+      ota.failResearch(state.revision, "research producer interrupted; fenced without retry", Date.now())
+      return await halt("research producer interrupted")
+    }
     if (state.job || state.trial) {
       if (
         (state.trial || (ota.protocol.completion && state.job?.phase === "running")) &&
@@ -226,6 +232,10 @@ export async function supervise(
       await verify()
       if (await cancelled()) return await halt("cancelled")
       const current = ota.read()
+      if (ota.protocol.research && !current.job && ota.completedProposals() >= ota.protocol.research.proposals)
+        return await halt("research proposal schedule completed")
+      if (ota.protocol.research && !current.job && !ota.researchParent())
+        return await halt("research frontier exhausted")
       const state = current.job ? current : ota.begin(current.revision, Date.now())
       if (Date.now() >= state.job!.deadline) return await halt("original job deadline reached")
       const name = `${state.job!.id}-e${state.epoch}`
@@ -235,15 +245,18 @@ export async function supervise(
       const job: Job = {
         id: state.job!.id,
         epoch: state.epoch,
-        slot: state.active.slot,
-        mutable: opposite(state.active.slot),
+        slot: state.job!.producer?.slot ?? state.active.slot,
+        mutable: opposite(state.job!.producer?.slot ?? state.active.slot),
         deadline: state.job!.deadline,
         pair: await artifacts.pair(state.active.pair),
         ...(state.job!.source
           ? { source: { id: state.job!.source.id, pair: await artifacts.pair(state.job!.source.pair) } }
           : {}),
+        ...(state.job!.producer
+          ? { producer: { ...state.job!.producer, pair: await artifacts.pair(state.job!.producer.pair) } }
+          : {}),
         output,
-        memory: state.active.memory,
+        memory: state.job!.inputMemory ?? state.active.memory,
         ...(state.job!.purpose ? { purpose: state.job!.purpose } : {}),
         ...(state.job!.allowRevise !== undefined ? { allowRevise: state.job!.allowRevise } : {}),
         ...(state.task ? { task: { id: state.task.id, checkpoint: state.task.checkpoint } } : {}),
@@ -266,6 +279,7 @@ export async function supervise(
       ) {
         const value = previous.details as {
           passed: boolean
+          decision?: { reasons?: string[] }
           evidence: {
             rows: { id: string; passed: number; total: number }[]
             baseline: { rows: { id: string; passed: number }[] }
@@ -276,6 +290,15 @@ export async function supervise(
         )
         job.feedback = {
           eligible: value.passed,
+          // Confirmation details stay host-only. Even a reason can leak a label.
+          reasons: value.decision?.reasons?.filter(
+            (reason) =>
+              reason === "safety-failed" ||
+              reason === "panel-gate:development" ||
+              ["task-regressed:development:", "full-pass-lost:development:", "required-full-missing:development:"].some(
+                (prefix) => reason.startsWith(prefix),
+              ),
+          ),
           developmentPassed: development.reduce((sum, row) => sum + row.passed, 0),
           developmentTotal: development.reduce((sum, row) => sum + row.total, 0),
           development: development.map((row) => {
@@ -304,6 +327,10 @@ export async function supervise(
           await record(name + "-startup-failure", { error: String(error), usageIncomplete: true })
           await bounded(driver.fence(), 30_000)
           const live = ota.read()
+          if (state.job!.producer && subject(state.job!.producer.pair) !== subject(state.active.pair)) {
+            ota.failResearch(live.revision, `research startup failed: ${error}`, Date.now())
+            throw error
+          }
           if (!live.fallback || Date.now() >= job.deadline || (await cancelled())) throw error
           ota.rollback(live.revision, `startup failed: ${error}`, Date.now())
           return undefined
@@ -348,6 +375,10 @@ export async function supervise(
       if (outcome === "full-pass improvement confirmed") return await halt(outcome)
       if (outcome !== "handoff") {
         const live = ota.read()
+        if (state.job!.producer && subject(state.job!.producer.pair) !== subject(state.active.pair)) {
+          ota.failResearch(live.revision, outcome, Date.now())
+          return await halt(`research producer failed: ${outcome}`)
+        }
         if (outcome === "cancelled" || outcome === "original job deadline reached" || !live.fallback)
           return await halt(outcome)
         ota.rollback(live.revision, outcome, Date.now())
@@ -414,7 +445,7 @@ export async function supervise(
         await bounded(driver.fence(), 30_000)
         ota.rejectPreparation(
           ota.read().revision,
-          { ...state.active.pair, [job.mutable]: proposal },
+          { ...(state.job!.producer?.pair ?? state.active.pair), [job.mutable]: proposal },
           materialization.reason,
           materialization.receipt,
           Date.now(),
@@ -429,9 +460,9 @@ export async function supervise(
       }
       const replacement = await artifacts.put(materialization)
       await record(name + "-materialization", { proposed: proposal, materialized: replacement })
-      const pair = { ...state.active.pair, [job.mutable]: replacement }
+      const pair = { ...(state.job!.producer?.pair ?? state.active.pair), [job.mutable]: replacement }
       if (
-        (ota.protocol.completion && subject(pair) === subject(state.active.pair)) ||
+        ((ota.protocol.completion || ota.protocol.research) && subject(pair) === subject(state.active.pair)) ||
         (ota.protocol.expansion &&
           ota
             .read()
@@ -538,14 +569,21 @@ export async function supervise(
         protocol: ota.digest,
         subject: subject(pair),
         job: job.id,
+        ...(ota.protocol.evidence ? { binding: comparisonBinding(ota.read(), pair) } : {}),
         ...(state.task ? { checkpoint: state.task.checkpoint } : {}),
         rows: tables.candidate,
         baseline: { subject: subject(state.active.pair), rows: tables.baseline },
         receipt: await record(name + "-evaluation", {
           pair,
           tables,
+          ...(ota.protocol.evidence
+            ? { binding: comparisonBinding(ota.read(), pair), history: state.job!.history, protocol: ota.digest }
+            : {}),
           producer: {
-            pair: state.active.pair,
+            pair: state.job!.producer?.pair ?? state.active.pair,
+            incumbent: state.active.pair,
+            source: state.job!.source,
+            researchSupport: state.job!.producer?.support,
             job: job.id,
             epoch: job.epoch,
             mutable: job.mutable,
@@ -559,6 +597,7 @@ export async function supervise(
       // All worker processes, including evaluator-owned ones, must be gone.
       await bounded(driver.fence(), 30_000)
       const selected = ota.settle(ota.read().revision, pair, evidence, Date.now())
+      await record(name + "-decision", ota.history().at(-1))
       if (ota.protocol.completion?.stopOnRejection && subject(selected.active.pair) !== subject(pair))
         return await halt("recursive closure rejected: qualification", {
           producer: job,
@@ -663,7 +702,11 @@ export function recursiveSelections(ota: OTA) {
       evidence.baseline.subject !== subject(root)
     )
       return invalid("selection evidence names another producer or candidate")
-    const support = events[0].commands?.find((command) => command.type === "discharge")?.contractID
+    const support = events[0].commands?.find(
+      (command) =>
+        command.type === "discharge" &&
+        command.contractID === `pct_ota_${hash(JSON.stringify([ota.digest, evidence.job, subject(node.pair)]))}`,
+    )?.contractID
     if (
       !support ||
       state.kernel.contracts[support]?.status !== "discharged" ||
