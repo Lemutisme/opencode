@@ -562,7 +562,7 @@ export class OTA {
         throw new Error("task evidence cannot deploy a campaign pair")
       requireStanding(state, state.active)
       requirePair(pair)
-      if (subject(pair) === subject(state.active.pair)) throw new Error("candidate is the unchanged incumbent")
+      if (subject(pair) === subject(state.active.pair)) throw new Error("inactive proposal is the unchanged incumbent")
       if (
         this.protocol.expansion &&
         state.lineage?.some(
