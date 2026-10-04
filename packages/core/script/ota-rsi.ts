@@ -34,6 +34,9 @@ export type Protocol = {
     // Experimental active control: one real revision request resumes the
     // unchanged incumbent, without producing or evaluating a modification.
     control?: "resume"
+    // Missing optional comparison is not a performance rejection. A separately
+    // frozen host policy may resume the incumbent after a fenced provider fault.
+    recovery?: "provider-unavailable"
   }
   scope: "mechanics" | "performance"
   performanceRule?: "panel-margin" | "task-pareto"
@@ -99,6 +102,7 @@ export type State = {
     status: "open" | "delivered" | "blocked"
     revisions?: number
     resumeControlUsed?: boolean
+    adaptationClosed?: string
   }
   job?: {
     id: string
@@ -187,6 +191,15 @@ export class OTA {
       )
         throw new Error("resume-only control requires exactly one revision opportunity")
       requireHash(protocol.deployment.checkpoint)
+      if (
+        protocol.deployment.recovery !== undefined &&
+        (protocol.deployment.recovery !== "provider-unavailable" ||
+          protocol.evidence !== "bound-v1" ||
+          protocol.deployment.control ||
+          !Number.isSafeInteger(protocol.deployment.revisions) ||
+          protocol.deployment.revisions! < 1)
+      )
+        throw new Error("evaluation recovery requires bound evidence and a positive task revision schedule")
       if (
         protocol.deployment.revisions !== undefined &&
         (!Number.isSafeInteger(protocol.deployment.revisions) ||
@@ -770,6 +783,38 @@ export class OTA {
     })
   }
 
+  // No evaluation/adoption Contract is created: missing observations cannot
+  // qualify or reject a candidate. The original task and its standing survive.
+  abandonAdaptation(
+    revision: number,
+    input: { epoch: number; job: string; pair: Pair; checkpoint: string; receipt: string },
+    now: number,
+  ) {
+    return this.change(revision, now, "adaptation-incomplete", (state) => {
+      if (this.protocol.deployment?.recovery !== "provider-unavailable")
+        throw new Error("task evaluation recovery is not authorized")
+      requireTask(this.protocol, state, now)
+      requireJob(state, input.epoch, input.job, now)
+      if (
+        !state.task ||
+        state.task.needsContinuation ||
+        state.task.adaptationClosed ||
+        state.job!.phase !== "evaluating" ||
+        state.job!.purpose === "continuation" ||
+        state.task.checkpoint !== input.checkpoint
+      )
+        throw new Error("current optional task comparison required")
+      requirePair(input.pair)
+      requireHash(input.receipt)
+      if (input.pair[state.active.slot] !== state.active.pair[state.active.slot])
+        throw new Error("active partition changed")
+      state.task.adaptationClosed = input.receipt
+      state.task.needsContinuation = true
+      delete state.job
+      return { ...input, reason: "provider-unavailable", comparisonComplete: false, incumbent: state.active.pair }
+    })
+  }
+
   expired(state: State, now: number) {
     if (!state.job || state.job.phase !== "running") return false
     const timeout = state.job.sequence < 0 ? this.protocol.startupMs : this.protocol.heartbeatMs
@@ -1216,6 +1261,7 @@ function requireStanding(state: State, boot: Pick<Boot, "pair" | "support">) {
 function revisionAvailable(protocol: Protocol, task: NonNullable<State["task"]>) {
   return (
     !task.resumeControlUsed &&
+    !task.adaptationClosed &&
     (protocol.deployment?.revisions === undefined || (task.revisions ?? 0) < protocol.deployment.revisions)
   )
 }

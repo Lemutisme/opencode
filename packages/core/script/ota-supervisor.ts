@@ -12,6 +12,29 @@ export type Readmission = {
 }
 
 export type Accounting = { source: string; knownCost: string | null; incomplete: boolean; checkpoint?: string }
+// Only trusted adapters create these after all owned solver/grader cleanup has
+// acknowledged. A worker error message or a missing score is not this witness.
+export class EvaluationInterrupted extends Error {
+  constructor(
+    readonly kind: "provider-unavailable" | "peer-cancelled",
+    readonly receipt: string,
+    readonly accounting: Accounting,
+  ) {
+    super(`evaluation incomplete: ${kind}`)
+  }
+}
+
+export class EvaluationCancelled extends Error {
+  constructor() {
+    super("evaluation peer cancelled")
+  }
+}
+
+export class EvaluationBatchFailure extends AggregateError {
+  constructor(readonly failures: unknown[]) {
+    super(failures, String(failures[0]), { cause: failures[0] })
+  }
+}
 export type Job = {
   id: string
   epoch: number
@@ -79,6 +102,9 @@ export type Driver = {
     valid: boolean
     accounting: Accounting
   }>
+  // Validate the original checkpoint closure and consult the operator's shared
+  // outage/cancellation policy. This does not grant candidate adoption.
+  recover?(input: { job: Job; interruptions: EvaluationInterrupted[] }): Promise<void>
 }
 
 /** Content-addressed, host-only storage. Mutable files are imported only AFTER
@@ -177,6 +203,8 @@ export async function supervise(
   try {
     await verify()
     await bounded(driver.fence(), 30_000)
+    if (ota.protocol.deployment?.recovery && !driver.recover)
+      throw new Error("task evaluation recovery requires a trusted recovery guard")
     const state = ota.read()
     if (state.stopped) return state
     if (state.job?.producer && subject(state.job.producer.pair) !== subject(state.active.pair)) {
@@ -508,7 +536,7 @@ export async function supervise(
       const assignments = ota.protocol.tests.flatMap((test) =>
         (["baseline", "candidate"] as const).map((version) => ({ test, version })),
       )
-      await evaluationWorkers(
+      const evaluation = await evaluationWorkers(
         assignments,
         ota.protocol.evaluationConcurrency ?? 1,
         async ({ test, version }, batch) => {
@@ -523,45 +551,111 @@ export async function supervise(
           if (Date.now() >= request.deadline) throw new Error("original task deadline reached before evaluation")
           await record(`${name}-${version}-test-${hash(test.id)}-admission`, request)
           const abort = new AbortController()
-          const stop = () => abort.abort()
+          const stop = () => abort.abort(new EvaluationCancelled())
           batch.addEventListener("abort", stop, { once: true })
+          if (batch.aborted) stop()
           const waiting = { done: false }
           const watchdog = async () => {
             while (!waiting.done) {
-              if (batch.aborted || (await cancelled()) || Date.now() >= request.deadline) {
+              if (batch.aborted) {
+                stop()
+                throw abort.signal.reason
+              }
+              if ((await cancelled()) || Date.now() >= request.deadline) {
                 abort.abort()
                 throw new Error("evaluation cancelled or original deadline reached")
               }
               await Bun.sleep(100)
             }
           }
-          const work = driver.evaluate({ ...request, signal: abort.signal })
+          const work = Promise.resolve().then(() => driver.evaluate({ ...request, signal: abort.signal }))
           const watch = watchdog()
-          try {
-            const result = await Promise.race([work, watch])
-            if (!result || Date.now() >= request.deadline) throw new Error("incomplete or late evaluation")
-            await record(`${name}-${version}-test-${hash(test.id)}-result`, {
-              ...result,
-              accounting: requireAccounting(result.accounting),
-            })
-            if (!result.valid) throw new Error("invalid evaluator evidence; do not drop a failed assignment")
-            tables[version].push({ id: test.id, passed: result.passed, total: result.total, valid: result.valid })
-          } finally {
-            waiting.done = true
-            abort.abort()
-            batch.removeEventListener("abort", stop)
-            await watch.catch(() => undefined)
-            // Abort is not an acknowledgement. Drain before any promotion/rollback.
-            await bounded(
-              work.then(
-                () => undefined,
-                () => undefined,
-              ),
-              60_000,
-            )
-          }
+          const observed = work.then(
+            (result) => ({ result }),
+            (error: unknown) => ({ error }),
+          )
+          const first = await Promise.race([
+            observed,
+            watch.then(
+              () => ({ error: new Error("evaluation observation ended without a result") }),
+              (error: unknown) => ({ error }),
+            ),
+          ])
+          waiting.done = true
+          abort.abort()
+          batch.removeEventListener("abort", stop)
+          await watch.catch(() => undefined)
+          // Retain the evaluator's terminal error, including a late cleanup
+          // failure after a peer abort. The watcher is not a fence receipt.
+          const terminal = await bounded(observed, 60_000)
+          const faults = [
+            ...new Set([
+              ...("error" in first && !(first.error instanceof EvaluationCancelled) ? [first.error] : []),
+              ...("error" in terminal ? [terminal.error] : []),
+            ]),
+          ]
+          if (faults.length > 1) throw new AggregateError(faults, "evaluation observation and terminal failure")
+          if (faults.length) throw faults[0]
+          if ("error" in terminal) throw terminal.error
+          const result = terminal.result
+          if (Date.now() >= request.deadline) throw new Error("incomplete or late evaluation")
+          await record(`${name}-${version}-test-${hash(test.id)}-result`, {
+            ...result,
+            accounting: requireAccounting(result.accounting),
+          })
+          if (!result.valid) throw new Error("invalid evaluator evidence; do not drop a failed assignment")
+          tables[version].push({ id: test.id, passed: result.passed, total: result.total, valid: result.valid })
         },
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
       )
+      if (evaluation !== undefined) {
+        const failures = evaluation instanceof EvaluationBatchFailure ? evaluation.failures : [evaluation]
+        const interruptions = failures.filter(
+          (error): error is EvaluationInterrupted => error instanceof EvaluationInterrupted,
+        )
+        const receipt = await record(name + "-evaluation-incomplete", {
+          pair,
+          proposal,
+          materialized: replacement,
+          tables,
+          assignments,
+          failures: failures.map((error) =>
+            error instanceof EvaluationInterrupted
+              ? { kind: error.kind, receipt: error.receipt, accounting: requireAccounting(error.accounting) }
+              : { error: String(error) },
+          ),
+          producer: job,
+          comparisonComplete: false,
+        })
+        if (
+          ota.protocol.deployment?.recovery !== "provider-unavailable" ||
+          !driver.recover ||
+          interruptions.length !== failures.length ||
+          !interruptions.some((error) => error.kind === "provider-unavailable")
+        )
+          throw evaluation
+        await bounded(driver.fence(), 30_000)
+        await verify()
+        await Promise.all(interruptions.map((error) => artifacts.get(error.receipt)))
+        if (await cancelled()) return await halt("cancelled before task recovery")
+        await bounded(driver.recover({ job, interruptions }), 30_000)
+        await verify()
+        if (await cancelled()) return await halt("cancelled before task recovery")
+        ota.abandonAdaptation(
+          ota.read().revision,
+          {
+            epoch: job.epoch,
+            job: job.id,
+            pair,
+            checkpoint: job.task!.checkpoint,
+            receipt,
+          },
+          Date.now(),
+        )
+        continue
+      }
       await verify()
       await artifacts.pair(pair)
       if (await cancelled()) return await halt("cancelled before switch")
@@ -881,5 +975,5 @@ export async function evaluationWorkers<T>(
       }
     }),
   )
-  if (failures.length) throw failures[0]
+  if (failures.length) throw new EvaluationBatchFailure(failures)
 }

@@ -6,6 +6,7 @@ import { RSIRuntime } from "./rsi-runtime"
 import { RSITask } from "./rsi-task"
 import { containmentTask, containmentScore } from "./rsi-safety"
 import type { NativeConfiguration, NativeObservation } from "./rsi-driver"
+import { GradingCancelled } from "./rsi-driver"
 
 const Manifest = Schema.Struct({
   // Explicit operator threat model. Official completeness is not tamper resistance.
@@ -23,24 +24,76 @@ const Manifest = Schema.Struct({
   ),
 })
 const Score = Schema.Struct({
-  passed: Schema.Int,
-  total: Schema.Int,
+  passed: Schema.NullOr(Schema.Int),
+  total: Schema.NullOr(Schema.Int),
   valid: Schema.Boolean,
+  instance: Schema.String,
+  deadline: Schema.Number,
+  configHash: Schema.String,
   cleanupAcknowledged: Schema.Literal(true),
   scoringTrust: Schema.Literal("official-programbench-normal-use"),
   hostileCandidateQualified: Schema.Literal(false),
   failure: Schema.NullOr(Schema.String),
-  executedTests: Schema.Int,
-  terminalFailure: Schema.NullOr(
-    Schema.Struct({
-      kind: Schema.Literal("candidate_build"),
-      officialError: Schema.String,
-      stage: Schema.String,
-      exitCode: Schema.Int,
-      executedTests: Schema.Literal(0),
-    }),
+  executedTests: Schema.optional(Schema.Int),
+  terminalFailure: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        kind: Schema.Literal("candidate_build"),
+        officialError: Schema.String,
+        stage: Schema.String,
+        exitCode: Schema.Int,
+        executedTests: Schema.Literal(0),
+      }),
+    ),
   ),
 })
+
+// Parse the trusted terminal report and independent grader fence BEFORE honoring
+// cancellation. Otherwise a peer abort can conceal cleanup_unacknowledged.
+export async function readProgramBenchScore(
+  output: string,
+  expected: { instance: string; deadline: number; configHash: string; exitCode: number },
+  signal: AbortSignal,
+) {
+  const result = Schema.decodeUnknownSync(Schema.fromJsonString(Score))(
+    await Bun.file(path.join(output, "RESULT.json")).text(),
+  )
+  const fence = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ acknowledged: Schema.Literal(true) })))(
+    await Bun.file(path.join(output, "FENCE.json")).text(),
+  )
+  if (
+    !fence.acknowledged ||
+    result.instance !== expected.instance ||
+    result.deadline !== expected.deadline ||
+    result.configHash !== expected.configHash
+  )
+    throw new Error("ProgramBench result identity or cleanup mismatch")
+  if (!result.valid && result.failure === "cancelled" && signal.aborted && expected.exitCode === 1)
+    throw new GradingCancelled(
+      await RSIRuntime.ref(path.join(output, "RESULT.json")),
+      await RSIRuntime.ref(path.join(output, "FENCE.json")),
+      signal.reason,
+    )
+  if (
+    expected.exitCode !== 0 ||
+    !result.valid ||
+    result.total === null ||
+    result.passed === null ||
+    result.total <= 0 ||
+    result.passed < 0 ||
+    result.passed > result.total ||
+    result.executedTests === undefined
+  )
+    throw new Error("invalid ProgramBench result")
+  if (
+    result.terminalFailure &&
+    (result.passed !== 0 || result.executedTests !== 0 || result.failure !== "candidate_build")
+  )
+    throw new Error("terminal ProgramBench failure cannot report executed or passing tests")
+  signal.throwIfAborted()
+  if (Date.now() >= expected.deadline) throw new Error("late ProgramBench result")
+  return { ...result, passed: result.passed, total: result.total }
+}
 
 export async function programBench(root: string, reference: RSIRuntime.File) {
   await RSIRuntime.checked(reference)
@@ -100,20 +153,16 @@ export async function programBench(root: string, reference: RSIRuntime.File) {
     if (input.signal.aborted) cancel()
     try {
       const code = await child.exited
-      input.signal.throwIfAborted()
-      if (Date.now() >= input.deadline) throw new Error("late ProgramBench result")
-      if (code !== 0) throw new Error(`ProgramBench scoring invalid; retained ${output}`)
-      const result = Schema.decodeUnknownSync(Schema.fromJsonString(Score))(
-        await Bun.file(path.join(output, "RESULT.json")).text(),
+      return await readProgramBenchScore(
+        output,
+        {
+          instance: task.id,
+          deadline: input.deadline,
+          configHash: task.grader.sha256,
+          exitCode: code,
+        },
+        input.signal,
       )
-      if (!result.valid || result.total <= 0 || result.passed < 0 || result.passed > result.total)
-        throw new Error("invalid ProgramBench result")
-      if (
-        result.terminalFailure &&
-        (result.passed !== 0 || result.executedTests !== 0 || result.failure !== "candidate_build")
-      )
-        throw new Error("terminal ProgramBench failure cannot report executed or passing tests")
-      return result
     } finally {
       clearTimeout(timer)
       input.signal.removeEventListener("abort", cancel)

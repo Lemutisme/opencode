@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { link, mkdtemp, mkdir, rm, symlink, chmod } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { Artifacts, evaluationWorkers, supervise } from "./ota-supervisor.js"
+import { Artifacts, EvaluationBatchFailure, evaluationWorkers, supervise } from "./ota-supervisor.js"
 import { configure } from "./ota-fixture.js"
 import { hash, OTA, subject } from "./ota-rsi.js"
 import { Sandbox } from "./ota-sandbox.js"
@@ -69,7 +69,7 @@ describe("OTA artifact boundary", () => {
         drained.push(value)
         throw new Error("evaluation cancelled")
       }),
-    ).rejects.toBe(original)
+    ).rejects.toMatchObject({ cause: original })
     expect(seen).toEqual([0, 1, 2])
     expect(drained.sort()).toEqual([0, 1])
   })
@@ -86,8 +86,23 @@ describe("OTA artifact boundary", () => {
           throw new Error("evaluation cancelled")
         })()
       }),
-    ).rejects.toBe(original)
+    ).rejects.toMatchObject({ cause: original })
     expect(drained).toEqual([0])
+  })
+  test("the first recoverable fault cannot hide a peer cleanup failure", async () => {
+    const first = new Error("provider unavailable")
+    const cleanup = new Error("grader cleanup unacknowledged")
+    const result = await evaluationWorkers([0, 1, 2], 2, async (item, signal) => {
+      if (item === 0) {
+        await Bun.sleep(10)
+        throw first
+      }
+      while (!signal.aborted) await Bun.sleep(1)
+      await Bun.sleep(10)
+      throw cleanup
+    }).catch((error: unknown) => error)
+    expect(result).toBeInstanceOf(EvaluationBatchFailure)
+    expect(result).toMatchObject({ cause: first, failures: [first, cleanup] })
   })
   test("only one bounded regular inactive artifact can be imported", async () => {
     const root = await directory()

@@ -48,9 +48,9 @@ during an inner baseline evaluation left the full-RSI original endpoint missing;
 the remaining nine assignments were not admitted. No complete four-repeat
 comparison exists. This is an infrastructure interruption, not a negative
 workflow result. The study is closed and no model experiment remains running.
-Recovery for this overload—trusted classification followed by safe incumbent
-continuation after an incomplete optional comparison—is **not yet implemented**; the current path
-stops execution while retaining the unresolved Task and checkpoint.
+That frozen controller stopped execution while retaining the unresolved Task and
+checkpoint. The new opt-in recovery below is scripted-qualified; it has not been
+applied retroactively to that study or measured in a new real-model cohort.
 
 Artifact roots: `native-rsi-e2e-main-20261003`, `native-rsi-process-20261004`, and
 `native-rsi-research-20261004` under the operator's preserved `run-artifacts/`.
@@ -178,6 +178,35 @@ unchanged. Natural termination before a revision request is retained, not forced
 into a second run. This experimental arm distinguishes recovery opportunity from
 the complete adaptation procedure; it does not claim equal compute or guarantee
 identical sampled prefixes across independent runs.
+
+### Incomplete optional comparisons
+
+A new task profile may freeze `deployment.recovery: "provider-unavailable"`
+together with a hash-pinned `recoveryGuard` module exporting `authorize({root,
+job, interruptions})`. It requires bound evidence, a positive revision schedule
+and no resume-only control. The operator guard must record the incident and
+enforce shared outage/cancellation policy; absence of this capability fails at
+startup, not after paid evaluation.
+
+The host gateway passively records a narrow pre-output overload witness (the
+observed HTTP-200 SSE error envelope or HTTP 429/502/503/504). Generic EOF,
+semantic-output failures, malformed responses and shutdown-unknown rows do not
+qualify. No worker self-report authorizes recovery and no provider retry is added.
+All started evaluations drain; a peer's late cleanup failure cannot hide behind
+the original overload. Grader cancellation requires its own terminal and fence
+receipts, not just native-worker fencing.
+
+After live authority, original checkpoint closure and the shared guard are checked,
+`adaptation-incomplete` retains partial measurements without qualifying or rejecting
+the candidate. It closes further adaptation and resumes the unchanged incumbent
+once, with the same Task/checkpoint/deadline. Missing scores stay missing; no
+comparison workspace becomes original-task state. Cancellation, expiry, unknown
+faults and unacknowledged cleanup remain hard stops.
+
+From `packages/sdk`, `rsi-recovery-qualify.ts NEW_ROOT EXACT_RELEASE GATEWAY MODE`
+qualifies `provider`, `unknown`, or `guard-denied`; `peer-grader GRADER_CONFIG`
+also cancels a real in-flight ProgramBench grader before original-task continuation.
+These are scripted engineering checks, not model performance or τ/TB qualification.
 
 Local official qualification feedback is adaptive evaluation, not blind leaderboard
 measurement. Fixed-pair `evaluateNative` still disables task-local revision; it does

@@ -6,6 +6,7 @@ import { nativeDriver } from "./rsi-driver"
 import type { NativeConfiguration } from "./rsi-driver"
 import type { Protocol } from "../../core/script/ota-rsi"
 import { Artifacts } from "../../core/script/ota-supervisor"
+import type { Driver } from "../../core/script/ota-supervisor"
 import path from "node:path"
 import { RevisionEvidence, revisionContext } from "./rsi-revision"
 
@@ -28,6 +29,7 @@ const Profile = Schema.Struct({
     }),
   ),
   gateway: RSIRuntime.File,
+  recoveryGuard: Schema.optional(RSIRuntime.File),
   model: Schema.String,
   effort: Schema.String,
   upstream: Schema.String,
@@ -65,6 +67,7 @@ const Profile = Schema.Struct({
       checkpoint: RSIRuntime.File,
       revisions: Schema.optional(Schema.Int),
       control: Schema.optional(Schema.Literal("resume")),
+      recovery: Schema.optional(Schema.Literal("provider-unavailable")),
     }),
   ),
   audit: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, total: Schema.Int }))),
@@ -78,6 +81,8 @@ export async function configure(root: string) {
   })
   if ([input.grader, input.programbench, input.terminal, input.tau].filter(Boolean).length !== 1)
     throw new Error("freeze exactly one trusted grader or benchmark manifest")
+  if (!!input.recoveryGuard !== !!input.deployment?.recovery)
+    throw new Error("task evaluation recovery requires a separately frozen shared outage guard")
   if (
     input.development &&
     (!input.development.goal.trim() ||
@@ -113,9 +118,14 @@ export async function configure(root: string) {
     input.gateway,
     ...input.authority,
     ...Object.values(input.development?.files ?? {}),
-    ...[input.grader, input.programbench, input.terminal, input.tau, input.deployment?.checkpoint].filter(
-      (file): file is RSIRuntime.File => file !== undefined,
-    ),
+    ...[
+      input.grader,
+      input.programbench,
+      input.terminal,
+      input.tau,
+      input.deployment?.checkpoint,
+      input.recoveryGuard,
+    ].filter((file): file is RSIRuntime.File => file !== undefined),
   ]
   await Promise.all(references.map(RSIRuntime.checked))
   await RSIRuntime.release(input.harness.path)
@@ -175,6 +185,16 @@ export async function configure(root: string) {
     grade: (input) => (safety.has(input.test.id) ? safetyAdapter!.grade(input) : adapter.grade(input)),
     continuation: adapter.continuation,
     dispose: adapter.dispose,
+    recovery: input.recoveryGuard
+      ? await (async () => {
+          // Operator-owned and hash-checked above, never imported from candidate H.
+          const guard = (await import(pathToFileURL(input.recoveryGuard!.path).href)) as {
+            authorize(input: Parameters<NonNullable<Driver["recover"]>>[0] & { root: string }): Promise<void>
+          }
+          if (typeof guard.authorize !== "function") throw new Error("recovery guard must export authorize")
+          return (request) => guard.authorize({ ...request, root })
+        })()
+      : undefined,
     development: input.development
       ? { goal: input.development.goal, files: { ...input.development.files } }
       : undefined,

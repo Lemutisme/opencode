@@ -14,6 +14,151 @@ import hashlib
 from contextlib import closing
 
 
+class ProviderResponse:
+    """Bounded, passive observation of upstream bytes; never worker testimony."""
+    def __init__(self):
+        self.pending = bytearray()
+        self.failure = None
+        self.unknown = False
+        self.digest = hashlib.sha256()
+
+    def write(self, data):
+        self.digest.update(data)
+        if self.unknown:
+            return
+        self.pending.extend(data)
+        while b"\n" in self.pending:
+            line, _, self.pending = self.pending.partition(b"\n")
+            if len(line) > 65536:
+                self.unknown = True
+                self.pending.clear()
+                return
+            self.line(line.strip())
+        if len(self.pending) > 65536:
+            self.unknown = True
+            self.pending.clear()
+
+    def line(self, line):
+        if not line or line.startswith(b":"):
+            return
+        if line in (b"event: error", b"event: response.created", b"event: response.in_progress"):
+            return
+        if line.startswith(b"data:"):
+            line = line[5:].strip()
+        if line == b"[DONE]" and self.failure:
+            return
+        try:
+            value = json.loads(line, object_pairs_hook=self.unique_fields)
+        except (ValueError, UnicodeDecodeError):
+            self.unknown = True
+            return
+        if not isinstance(value, dict):
+            self.unknown = True
+            return
+        error = value.get("error")
+        if (isinstance(error, dict) and str(error.get("code")) == "500"
+            and isinstance(error.get("message"), str)
+            and "servers are currently overloaded" in error["message"].lower()
+            and set(value) <= {"error", "type"}
+            and value.get("type") in (None, "error") and not self.failure):
+            self.failure = "500"
+            return
+        response = value.get("response")
+        if (not self.failure and value.get("type") in ("response.created", "response.in_progress")
+            and isinstance(response, dict) and response.get("output") == [] and not response.get("error")):
+            return
+        # Includes reasoning/tool/text deltas, completed output, unknown events
+        # and malformed envelopes. EOF alone can never authorize task recovery.
+        self.unknown = True
+
+    @staticmethod
+    def unique_fields(pairs):
+        value = {}
+        for name, field in pairs:
+            if name in value:
+                raise ValueError("ambiguous provider error")
+            value[name] = field
+        return value
+
+    def finish(self):
+        if self.pending:
+            self.line(bytes(self.pending).strip())
+            self.pending.clear()
+        if self.unknown or not self.failure:
+            return None
+        return {"code": self.failure, "frame_sha256": self.digest.hexdigest()}
+
+
+class ObservedWriter:
+    def __init__(self, writer, observation):
+        self.writer = writer
+        self.observation = observation
+
+    def write(self, data):
+        self.observation.write(data)
+        return self.writer.write(data)
+
+    def __getattr__(self, name):
+        return getattr(self.writer, name)
+
+
+def observed_gateway(module):
+    class Handler(module.Handler):
+        def send_response(self, code, message=None):
+            self.provider_status = code
+            return super().send_response(code, message)
+
+        def end_headers(self):
+            super().end_headers()
+            observation = getattr(self.server.observation, "response", None)
+            if getattr(self, "provider_status", None) == 200 and observation:
+                self.wfile = ObservedWriter(self.wfile, observation)
+
+    class Gateway(module.Gateway):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.observation = threading.local()
+            self.RequestHandlerClass = Handler
+            self.db.execute("""CREATE TABLE provider_failure (
+                request_id INTEGER PRIMARY KEY, kind TEXT NOT NULL, status INTEGER NOT NULL,
+                code TEXT NOT NULL, frame_sha256 TEXT NOT NULL)""")
+            self.db.commit()
+
+        def record(self, pid, body):
+            request = super().record(pid, body)
+            self.observation.request = request
+            self.observation.response = ProviderResponse()
+            return request
+
+        def finish(self, request_id, status, outcome, usage, **kwargs):
+            super().finish(request_id, status, outcome, usage, **kwargs)
+            if getattr(self.observation, "request", None) != request_id:
+                return
+            response = self.observation.response
+            failure = response.finish() if status == 200 else None
+            if (status in (429, 502, 503, 504) and outcome == "upstream_http_" + str(status)
+                and kwargs.get("close_reason") == "http_status"):
+                failure = {"code": str(status), "frame_sha256": hashlib.sha256(str(status).encode()).hexdigest()}
+            # A connection error, terminal response or concurrent shutdown is not
+            # interchangeable with an observed pre-output provider error.
+            if not failure or kwargs.get("error") is not None or usage is not None:
+                return
+            if status == 200 and (outcome != "transport_failed" or kwargs.get("close_reason") != "eof_without_terminal"):
+                return
+            with self.lock:
+                # shutdown may already have sealed this row as unknown. A late
+                # handler cannot reinterpret that durable terminal observation.
+                row = self.db.execute("SELECT status,outcome,close_reason,terminal_at FROM request WHERE id=?",
+                                      (request_id,)).fetchone()
+                if row != (status, outcome, kwargs.get("close_reason"), None):
+                    return
+                self.db.execute("INSERT INTO provider_failure VALUES (?,?,?,?,?)", (
+                    request_id, "provider-unavailable", status, failure["code"], failure["frame_sha256"],
+                ))
+                self.db.commit()
+    return Gateway
+
+
 def standing(scope):
     if (Path(scope["database"]).parent / "CANCEL").exists():
         raise ValueError("campaign_cancelled")
@@ -169,7 +314,7 @@ def main():
     spec.loader.exec_module(module)
     scope = json.loads(Path(args.scope).read_text())
 
-    class Gateway(module.Gateway):
+    class Gateway(observed_gateway(module)):
         def record(self, pid, body):
             standing(scope)
             if not (Path(args.scope).parent / "active").exists():

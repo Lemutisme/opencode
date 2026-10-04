@@ -3,9 +3,10 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
-import { programBench } from "./rsi-programbench"
+import { programBench, readProgramBenchScore } from "./rsi-programbench"
+import { GradingCancelled } from "./rsi-driver"
 import { RSIRuntime } from "./rsi-runtime"
-import { Artifacts, evaluationWorkers } from "../../core/script/ota-supervisor"
+import { Artifacts, EvaluationCancelled, evaluationWorkers } from "../../core/script/ota-supervisor"
 
 const roots: string[] = []
 afterEach(async () => {
@@ -60,6 +61,45 @@ test("task-local qualification feedback requires explicit frozen opt-in", async 
   const adapter = await programBench(f.root, f.reference)
   expect(adapter.continuation).toBeDefined()
 })
+
+test.each(["acknowledged", "missing-fence", "bad-fence", "bad-result", "wrong-deadline", "unknown-failure"])(
+  "peer cancellation requires the independent grader terminal and fence: %s",
+  async (kind) => {
+    const f = await fixture()
+    const deadline = Date.now() + 10_000
+    const signal = AbortSignal.abort(new EvaluationCancelled())
+    await Bun.write(
+      path.join(f.root, "RESULT.json"),
+      JSON.stringify({
+        passed: null,
+        total: null,
+        valid: false,
+        instance: "public-task",
+        deadline: kind === "wrong-deadline" ? deadline + 1 : deadline,
+        configHash: f.grader.sha256,
+        cleanupAcknowledged: kind !== "bad-result",
+        failure: kind === "unknown-failure" ? "cleanup_unacknowledged" : "cancelled",
+        scoringTrust: "official-programbench-normal-use",
+        hostileCandidateQualified: false,
+      }),
+    )
+    if (kind !== "missing-fence")
+      await Bun.write(path.join(f.root, "FENCE.json"), JSON.stringify({ acknowledged: kind !== "bad-fence" }))
+    const result = await readProgramBenchScore(
+      f.root,
+      {
+        instance: "public-task",
+        deadline,
+        configHash: f.grader.sha256,
+        exitCode: 1,
+      },
+      signal,
+    ).catch((error: unknown) => error)
+    expect(result instanceof GradingCancelled).toBe(kind === "acknowledged")
+    if (kind === "acknowledged") expect(result).toMatchObject({ cause: signal.reason })
+    else expect(result).toBeInstanceOf(Error)
+  },
+)
 
 test("continuation and evaluation reject a checkpoint that changes the frozen task goal", async () => {
   const f = await fixture({ taskFeedback: "qualification-outcomes" })
@@ -142,6 +182,90 @@ test("safety is independently bound to host containment and fencing, not the wor
   })
   await expect(adapter.grade({ ...input, deadline: Date.now() - 1 })).rejects.toThrow("late")
 })
+
+test.skipIf(!process.env.OPENCODE_RSI_PB_GRADER)(
+  "a real in-flight grader acknowledges its own container fence before peer cancellation returns",
+  async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "rsi-pb-cancel-"))
+    roots.push(root)
+    const grader = await RSIRuntime.ref(process.env.OPENCODE_RSI_PB_GRADER!)
+    const config = Schema.decodeUnknownSync(
+      Schema.fromJsonString(Schema.Struct({ instance: Schema.String, image: Schema.String })),
+    )(await Bun.file(grader.path).text())
+    await Bun.write(
+      path.join(root, "manifest.json"),
+      JSON.stringify({
+        scoringTrust: "official-programbench-normal-use",
+        tasks: [
+          {
+            id: config.instance,
+            tests: ["cancel"],
+            goal: "Engineering cancellation fixture",
+            image: config.image,
+            grader,
+          },
+        ],
+      }),
+    )
+    const adapter = await programBench(root, await RSIRuntime.ref(path.join(root, "manifest.json")))
+    await fs.mkdir(path.join(root, "candidate/workspace"), { recursive: true })
+    await Bun.write(path.join(root, "candidate/workspace/compile.sh"), "#!/bin/sh\nsleep 60\nexit 1\n")
+    await Bun.write(path.join(root, "candidate/workspace/validate.sh"), "#!/bin/sh\nexit 0\n")
+    await Bun.write(path.join(root, "FENCED.json"), JSON.stringify({ fixture: "no solver launched" }))
+    const abort = new AbortController()
+    const pending = adapter
+      .grade({
+        test: { id: "cancel", total: 539 },
+        artifact: new TextEncoder().encode("engineering fixture"),
+        run: root,
+        state: path.join(root, "state"),
+        deadline: Date.now() + 120_000,
+        signal: abort.signal,
+        release: {
+          kind: "native-v2-release-v1",
+          source: grader,
+          dependencies: grader,
+          bun: grader,
+          rg: grader,
+          image: config.image,
+          entry: "fixture.ts",
+        },
+      })
+      .catch((error: unknown) => error)
+    const started = { container: false }
+    try {
+      const until = Date.now() + 60_000
+      while (!started.container && Date.now() < until) {
+        const grades = await fs.readdir(path.join(root, "grades")).catch(() => [])
+        for (const name of grades) {
+          const control = Bun.file(path.join(root, "grades", name, "control.json"))
+          if (!(await control.exists())) continue
+          const value = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ token: Schema.String })))(
+            await control.text(),
+          )
+          started.container = !!(
+            await RSIRuntime.run(["docker", "ps", "-q", "--filter", `label=opencode.rsi-grade=${value.token}`])
+          ).trim()
+        }
+        if (!started.container) await Bun.sleep(50)
+      }
+      expect(started.container).toBe(true)
+    } finally {
+      abort.abort(new EvaluationCancelled())
+      const result = await pending
+      expect(result).toBeInstanceOf(GradingCancelled)
+      if (result instanceof GradingCancelled) {
+        expect(await Bun.file(result.fence.path).json()).toMatchObject({ acknowledged: true })
+        expect(await Bun.file(result.result.path).json()).toMatchObject({
+          valid: false,
+          failure: "cancelled",
+          cleanupAcknowledged: true,
+        })
+      }
+    }
+  },
+  120_000,
+)
 
 test.skipIf(!process.env.OPENCODE_RSI_PB_GRADER)(
   "official terminal build zeros retain failure annotations and do not cancel another fixed repeat",

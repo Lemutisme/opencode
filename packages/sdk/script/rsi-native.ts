@@ -9,6 +9,16 @@ import { bridgeTools } from "./rsi-bridge"
 import type { NativeBridge } from "./rsi-bridge"
 
 export namespace RSINative {
+  export class ExecutionFailed extends Error {
+    constructor() {
+      super("native H execution failed")
+    }
+  }
+  export class Cancelled extends Error {
+    constructor() {
+      super("native execution cancelled")
+    }
+  }
   // The official reference can be execute-only. Never read/copy it into the
   // mutable workspace; preserve the black-box boundary with a symlink instead.
   export const workspaceCommand =
@@ -376,7 +386,8 @@ export namespace RSINative {
         const state = JSON.parse(await RSIRuntime.run(["docker", "inspect", "--format", "{{json .State}}", this.name]))
         if (!state.Running) {
           await RSIRuntime.run(["docker", "logs", this.name], { output: path.join(this.directory, "worker.log") })
-          if (state.OOMKilled || state.ExitCode !== 0) throw new Error("native H execution failed")
+          if (state.OOMKilled) throw new Error("native H execution exhausted host memory")
+          if (state.ExitCode !== 0) throw new ExecutionFailed()
           await this.close()
           const handoff = await readHandoff(path.join(this.directory, "state/handoff.json"))
           if (handoff.deadline !== this.deadline) throw new Error("handoff deadline changed")
@@ -384,7 +395,7 @@ export namespace RSINative {
         }
         await Bun.sleep(100)
       }
-      throw new Error("native execution cancelled")
+      throw new Cancelled()
     }
     async progress() {
       const file = path.join(this.directory, "control/requests.db")
@@ -456,11 +467,15 @@ export namespace RSINative {
       }
       const db = new Database(file, { readonly: true })
       db.exec("PRAGMA busy_timeout=4000")
-      const rows = db.query("SELECT * FROM request").all()
+      const rows = db.query<{ peer_pid: number | null; usage: string | null }, []>("SELECT * FROM request").all()
       db.close()
       const output = path.join(this.directory, "ACCOUNTING.json")
       await Bun.write(output, JSON.stringify({ rows, fixture: !!this.provider.fixture }))
-      return { source: output, knownCost: this.provider.fixture ? "0" : null, incomplete: !this.provider.fixture }
+      return {
+        source: output,
+        knownCost: this.provider.fixture ? "0" : null,
+        incomplete: !this.provider.fixture || rows.some((row) => row.peer_pid !== null && row.usage === null),
+      }
     }
   }
   export async function readHandoff(file: string) {

@@ -66,6 +66,112 @@ function proposal(ota: OTA) {
 }
 
 describe("task-local RSI authority", () => {
+  test("incomplete optional comparison closes adaptation without a score or adoption", async () => {
+    const { ota, file } = await fixture({
+      ...protocol,
+      evidence: "bound-v1",
+      deployment: { ...protocol.deployment!, revisions: 2, recovery: "provider-unavailable" },
+    })
+    const first = continuation(ota)
+    const input = proposal(ota)
+    const before = ota.read()
+    const incomplete = ota.abandonAdaptation(
+      before.revision,
+      {
+        epoch: before.epoch,
+        job: before.job!.id,
+        pair: input.pair,
+        checkpoint: first.handoff.checkpoint,
+        receipt: hash("fenced missing comparison"),
+      },
+      before.clock + 1,
+    )
+    expect(incomplete.kernel).toEqual(before.kernel)
+    expect(incomplete.active).toEqual(before.active)
+    expect(incomplete.epoch).toBe(before.epoch)
+    expect(incomplete.lineage).toEqual(before.lineage)
+    expect(incomplete.task).toMatchObject({
+      status: "open",
+      revisions: 0,
+      needsContinuation: true,
+      checkpoint: first.handoff.checkpoint,
+      adaptationClosed: hash("fenced missing comparison"),
+    })
+    expect(incomplete.job).toBeUndefined()
+    expect(ota.history().at(-1)).toMatchObject({
+      type: "adaptation-incomplete",
+      details: { reason: "provider-unavailable", comparisonComplete: false, pair: input.pair, incumbent: seed },
+    })
+    const reopened = new OTA(file, ota.protocol, seed)
+    databases.push(reopened)
+    const next = reopened.begin(incomplete.revision, incomplete.clock + 1)
+    expect(next.job).toMatchObject({ purpose: "continuation", allowRevise: false, deadline: 10_000 })
+    expect(() => continuation(reopened)).toThrow("revision schedule exhausted")
+    const ready = reopened.read()
+    expect(
+      reopened.continued(
+        ready.revision,
+        ready.epoch,
+        ready.job!.id,
+        {
+          previous: ready.task!.checkpoint,
+          checkpoint: hash("final task output"),
+          receipt: hash("final independent verification"),
+          outcome: "delivered",
+        },
+        ready.clock + 1,
+      ).task!.status,
+    ).toBe("delivered")
+  })
+
+  test.each(["not-enabled", "running", "checkpoint", "job", "epoch", "partition", "deadline", "receipt"])(
+    "%s cannot authorize incomplete-comparison recovery",
+    async (kind) => {
+      const { ota } = await fixture({
+        ...protocol,
+        evidence: "bound-v1",
+        deployment: {
+          ...protocol.deployment!,
+          revisions: 1,
+          ...(kind !== "not-enabled" ? { recovery: "provider-unavailable" as const } : {}),
+        },
+      })
+      continuation(ota)
+      if (kind === "running") ota.begin(ota.read().revision, ota.read().clock + 1)
+      const input = kind === "running" ? { pair: seed } : proposal(ota)
+      const before = ota.read()
+      expect(() =>
+        ota.abandonAdaptation(
+          before.revision,
+          {
+            epoch: before.epoch + (kind === "epoch" ? 1 : 0),
+            job: kind === "job" ? "foreign" : before.job!.id,
+            pair: kind === "partition" ? { ...input.pair, s: hash("changed active partition") } : input.pair,
+            checkpoint: kind === "checkpoint" ? hash("foreign checkpoint") : before.task!.checkpoint,
+            receipt: kind === "receipt" ? "not-hash" : hash("receipt"),
+          },
+          kind === "deadline" ? 10_000 : before.clock + 1,
+        ),
+      ).toThrow()
+      expect(ota.read()).toEqual(before)
+    },
+  )
+
+  test.each([undefined, 0])("recovery requires an explicit positive revision schedule: %s", (revisions) => {
+    expect(
+      () =>
+        new OTA(
+          ":memory:",
+          {
+            ...protocol,
+            evidence: "bound-v1",
+            deployment: { ...protocol.deployment!, revisions, recovery: "provider-unavailable" },
+          },
+          seed,
+        ),
+    ).toThrow("evaluation recovery")
+  })
+
   test.each([-1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
     "rejects invalid task revision schedule %s",
     (revisions) => {

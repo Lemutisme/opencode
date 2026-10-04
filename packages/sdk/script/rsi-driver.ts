@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite"
 import { hash } from "../../core/script/ota-rsi"
 import type { Protocol, State } from "../../core/script/ota-rsi"
 import type { Continuation, Driver, Job } from "../../core/script/ota-supervisor"
+import { Artifacts, EvaluationCancelled, EvaluationInterrupted } from "../../core/script/ota-supervisor"
 import { RSIRuntime } from "./rsi-runtime"
 import { RSINative } from "./rsi-native"
 import type { NativeBridge } from "./rsi-bridge"
@@ -29,11 +30,23 @@ export type NativeObservation = {
   deadline: number
   signal: AbortSignal
 }
+export class GradingCancelled extends Error {
+  constructor(
+    readonly result: RSIRuntime.File,
+    readonly fence: RSIRuntime.File,
+    cause: unknown,
+  ) {
+    super("grader cancellation acknowledged", { cause })
+  }
+}
 export type NativeConfiguration = {
   root: string
   provider: RSINative.Provider
   authority: RSIRuntime.File[]
   dispose?(): Promise<void>
+  // Operator-owned shared outage guard, sealed in authority. It must record the
+  // interruption and deny recovery when the wider campaign is cancelled/unhealthy.
+  recovery?: NonNullable<Driver["recover"]>
   development?: { goal: string; files: Record<string, RSIRuntime.File> }
   revision?: {
     evaluationTarget: "task-performance"
@@ -299,6 +312,23 @@ export function nativeDriver(config: NativeConfiguration): Driver {
       }
     },
     evaluate: (input) => evaluateNative(config, input, scope("evaluating")),
+    recover: config.recovery
+      ? async (input) => {
+          const live = scope("evaluating")
+          if (
+            !input.job.task ||
+            live.job !== input.job.id ||
+            live.epoch !== input.job.epoch ||
+            live.task?.checkpoint !== input.job.task.checkpoint ||
+            !config.continuation
+          )
+            throw new Error("no current original task to recover")
+          // The adapter rechecks workspace archive, obligations and frozen goal/image,
+          // not merely the checkpoint manifest hash. No evaluation workspace is reused.
+          await config.continuation.task(input.job)
+          await config.recovery!(input)
+        }
+      : undefined,
   }
 }
 
@@ -316,7 +346,7 @@ export async function evaluateNative(
     void worker.close().catch(() => undefined)
   }
   input.signal.addEventListener("abort", cancel, { once: true })
-  try {
+  const outcome = await (async () => {
     input.signal.throwIfAborted()
     await worker.launch({
       ...task,
@@ -342,16 +372,103 @@ export async function evaluateNative(
       })),
       accounting: await worker.accounting(),
     }
-  } finally {
-    input.signal.removeEventListener("abort", cancel)
-    try {
-      await worker.close()
-    } finally {
-      try {
-        await worker.accounting()
-      } finally {
-        await task.bridge?.finish()
-      }
+  })().then(
+    (result) => ({ result }),
+    (error: unknown) => ({ error }),
+  )
+  input.signal.removeEventListener("abort", cancel)
+  const failures: unknown[] = []
+  // Run every cleanup even after an earlier one fails, but never certify a
+  // recoverable interruption if any cleanup/accounting boundary is unknown.
+  await worker.close().catch((error: unknown) => {
+    failures.push(error)
+  })
+  const accounting = await worker.accounting().catch((error: unknown) => {
+    failures.push(error)
+  })
+  await task.bridge?.finish().catch((error: unknown) => {
+    failures.push(error)
+  })
+  if (failures.length)
+    throw new AggregateError(
+      [...("error" in outcome ? [outcome.error] : []), ...failures],
+      "evaluation cleanup or accounting failed",
+    )
+  if (!("error" in outcome)) return outcome.result
+  const error = outcome.error
+  const provider = error instanceof RSINative.ExecutionFailed ? await providerFailure(worker.directory) : undefined
+  const peer =
+    input.signal.reason instanceof EvaluationCancelled &&
+    (error === input.signal.reason ||
+      error instanceof RSINative.Cancelled ||
+      (error instanceof GradingCancelled && error.cause === input.signal.reason))
+  if (!provider && !peer) throw error
+  const kind = provider ? "provider-unavailable" : "peer-cancelled"
+  const receipt = await new Artifacts(path.join(config.root, "objects")).put(
+    new TextEncoder().encode(
+      JSON.stringify({
+        kind,
+        worker: worker.id,
+        execution: await RSIRuntime.ref(path.join(worker.directory, "EXECUTION.json")),
+        fence: await RSIRuntime.ref(path.join(worker.directory, "FENCED.json")),
+        accounting: await RSIRuntime.ref(accounting!.source),
+        test: input.test.id,
+        deadline: input.deadline,
+        provider,
+        ...(error instanceof GradingCancelled ? { grade: error.result, graderFence: error.fence } : {}),
+      }),
+    ),
+  )
+  throw new EvaluationInterrupted(kind, receipt, accounting!)
+}
+
+// Read only the credential-isolated gateway's durable observation. Candidate
+// Session logs, generic EOFs and self-reported errors never authorize recovery.
+export async function providerFailure(directory: string) {
+  const file = path.join(directory, "control/requests.db")
+  if (!(await Bun.file(file).exists())) return
+  const db = new Database(file, { readonly: true })
+  try {
+    if (!db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='provider_failure'").get()) return
+    const requests = db
+      .query<
+        {
+          id: number
+          outcome: string
+          finished: number | null
+          status: number
+          terminal_at: number | null
+          close_reason: string
+        },
+        []
+      >(
+        "SELECT id,outcome,finished,status,terminal_at,close_reason FROM request WHERE peer_pid IS NOT NULL ORDER BY id",
+      )
+      .all()
+    const last = requests.at(-1)
+    if (!last?.finished || requests.slice(0, -1).some((row) => row.outcome !== "response.completed")) return
+    const failure = db
+      .query<
+        { request_id: number; kind: string; status: number; code: string; frame_sha256: string },
+        [number]
+      >("SELECT request_id,kind,status,code,frame_sha256 FROM provider_failure WHERE request_id=?")
+      .get(last.id)
+    if (!failure || failure.kind !== "provider-unavailable" || !/^[a-f0-9]{64}$/.test(failure.frame_sha256)) return
+    if (last.terminal_at !== null || last.status !== failure.status) return
+    if (failure.status === 200) {
+      if (last.outcome !== "transport_failed" || last.close_reason !== "eof_without_terminal" || failure.code !== "500")
+        return
+      return failure
     }
+    if (
+      ![429, 502, 503, 504].includes(failure.status) ||
+      last.outcome !== `upstream_http_${failure.status}` ||
+      last.close_reason !== "http_status" ||
+      failure.code !== String(failure.status)
+    )
+      return
+    return failure
+  } finally {
+    db.close()
   }
 }
