@@ -7,14 +7,14 @@ scripted qualification is **not evidence of real-model performance improvement**
 
 ## Implementation status
 
-Integration base: upstream V2 **2.0.22**, `41516c78c8387a86e998a90043265a33a870276d`
-(merged on 2026-10-02). Historical qualifications remain bound to their original
+Integration base: upstream V2 **2.0.22**, through `f72a103a4b94fb9a467294877bf6243dd99c6bdc`
+(merged on 2026-10-04). Historical qualifications remain bound to their original
 source snapshots; merging upstream does not renew them.
 
-| Scope           | Implemented                                                                                                                                                   | Not established                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Within-task RSI | ProgramBench task-scoped S/H selection, checkpoints, same-task continuation, original deadline and Kernel completion; scripted container qualification passed | Real-model gains are unproven; τ/TB environment forks are not qualified and fail closed.    |
-| Across-task RSI | Native proposals/releases, paired selection, finite closure, independent audit and ProgramBench/τ³/TB4 adapters; real paired evaluation has run               | No successful real-model recursive succession or RSI performance gain has been established. |
+| Scope           | Implemented                                                                                                                                                   | Not established                                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Within-task RSI | ProgramBench task-scoped S/H selection, checkpoints, same-task continuation, original deadline and Kernel completion; scripted container qualification passed | Workflow gains observed below; adopted-H causal gains and generalization unproven. τ/TB environment forks remain unqualified and fail closed. |
+| Across-task RSI | Native proposals/releases, paired selection, finite closure, independent audit and ProgramBench/τ³/TB4 adapters; real paired evaluation has run               | Current native studies have not established successful real-model recursive succession or across-task RSI gains.                              |
 
 The RSI worker composes the existing ProgramBench delivery tools instead of
 launching the old fixed worker. Qualification ran real SDK/Session, builds,
@@ -23,10 +23,39 @@ scores. It establishes mechanism execution, not learned improvements or benchmar
 generalization. No model-weight self-training is implemented or claimed. A disk
 reserve failure blocks execution, not permission to relax the guard or delete history.
 
-## Bound evidence and research execution
+## Observed results (2026-10-04)
 
-Merged upstream V2 through `f72a103a4b94fb9a467294877bf6243dd99c6bdc` on
-2026-10-04. This does not alter or requalify any historical cohort.
+These are official **test-pass percentages within instances**, not percentages of
+fully solved instances or leaderboard results. All studies used Luna/max; their
+frozen sources and protocols differ and must not be pooled.
+
+| Study                                | Comparison                         | Result                        | Scope                                                                                                      |
+| ------------------------------------ | ---------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Oct 3 task-local i3-style            | Off → full RSI workflow            | **84.42% → 94.25%, +9.83 pp** | Two runs per arm: [447, 463] → [504, 512] / 539; both H candidates rejected, original incumbent continued. |
+| Oct 4 three-arm i3-style, first pair | Off → unchanged-agent continuation | **87.94% → 90.91%, +2.97 pp** | 474 → 490 / 539; only one completed pair, no proposal or H adoption in the continuation arm.               |
+| Oct 4 across-task S-first            | Seed → S1, i3-style                | 87.57% → 87.48%, −0.09 pp     | Two runs per arm; complete paired evaluation.                                                              |
+| Same S-first study                   | Seed → S1, nomino                  | 90.10% → 69.97%, −20.13 pp    | Two runs per arm; S1 rejected and incumbent retained.                                                      |
+
+The positive workflow observations survive zero H adoption: preserving work and
+public probes, then continuing exploration in a fresh Session is promising.
+Extra work and context refresh have not been separated. Historical full RSI used
+3,364 requests versus 228 off (including adaptation/evaluation); the new first
+pair used 298 versus 91. Both used the original six-hour ceiling, not equal compute.
+The positive studies used the historical worker, not the current quiescence fix.
+
+The three-arm study planned four repeats per arm. A provider-reported overload
+during an inner baseline evaluation left the full-RSI original endpoint missing;
+the remaining nine assignments were not admitted. No complete four-repeat
+comparison exists. This is an infrastructure interruption, not a negative
+workflow result. The study is closed and no model experiment remains running.
+Recovery for this overload—trusted classification followed by safe incumbent
+continuation after an incomplete optional comparison—is **not yet implemented**; the current path
+stops execution while retaining the unresolved Task and checkpoint.
+
+Artifact roots: `native-rsi-e2e-main-20261003`, `native-rsi-process-20261004`, and
+`native-rsi-research-20261004` under the operator's preserved `run-artifacts/`.
+
+## Bound evidence and research execution
 
 New native profiles use `evidence: "bound-v1"` internally. The comparison binds
 its protocol/trusted manifest (provider, environment, evaluator and input files),
@@ -89,8 +118,10 @@ Set `expansionWidth` in the operator profile:
 - `1`: extend the previous materialized candidate, including rejected candidates.
 - `2` or more: breadth-first expansion, retaining siblings and descendants.
 
-Only the authorized incumbent executes the proposer. A selected parent provides
-**inactive source bytes**, not deployment authority. Each candidate is compared
+In default source-only mode (without `research`), only the authorized incumbent
+executes the proposer. A selected parent provides **inactive source bytes**, not
+deployment authority. The opt-in research mode above instead permits qualified
+research parents to execute under a separate live grant. Each candidate is compared
 with the current incumbent, not merely its research parent. Exact rejected pairs
 cannot be re-sampled into a lucky promotion under the same incumbent. A switch
 starts a new source root; old lineage and negative evidence remain in SQLite.
