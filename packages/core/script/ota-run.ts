@@ -53,6 +53,7 @@ try {
     state.stopped?.startsWith("cancelled") ||
     state.stopped === "full-pass improvement confirmed" ||
     state.stopped === "recursive closure completed" ||
+    state.stopped === "research proposal schedule completed" ||
     state.stopped === "task delivered"
       ? 0
       : 1
