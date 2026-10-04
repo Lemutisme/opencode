@@ -64,6 +64,7 @@ const Profile = Schema.Struct({
       deadline: Schema.Number,
       checkpoint: RSIRuntime.File,
       revisions: Schema.optional(Schema.Int),
+      control: Schema.optional(Schema.Literal("resume")),
     }),
   ),
   audit: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, total: Schema.Int }))),

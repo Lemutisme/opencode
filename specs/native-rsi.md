@@ -136,6 +136,18 @@ schedule is exhausted, the successor or retained incumbent must finish without
 another revision; the host also rejects forged revision handoffs. This is not a
 provider/tool-call cap or a renewed deadline. It is incompatible with `completion`.
 ProgramBench scores terminal blocked artifacts too, but never calls them delivered.
+A separate active-control profile may freeze `deployment.control: "resume"`
+with `revisions: 1`. The initial solver has the same revision-request tool as
+full RSI. After its actual fenced revision handoff, the host restores the same
+checkpoint with the unchanged incumbent and disables further revision requests.
+It neither invents a candidate rejection nor runs a proposal/qualification. The
+formal proposal count remains zero; `resumeControlUsed` records this one control
+intervention. The original Task Contract, retained obligations and deadline remain
+unchanged. Natural termination before a revision request is retained, not forced
+into a second run. This experimental arm distinguishes recovery opportunity from
+the complete adaptation procedure; it does not claim equal compute or guarantee
+identical sampled prefixes across independent runs.
+
 Local official qualification feedback is adaptive evaluation, not blind leaderboard
 measurement. Fixed-pair `evaluateNative` still disables task-local revision; it does
 not silently nest another search inside a cross-task comparison.

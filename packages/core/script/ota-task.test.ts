@@ -157,6 +157,93 @@ describe("task-local RSI authority", () => {
     },
   )
 
+  test("resume-only control checkpoints then continues the unchanged agent without a proposal or fake rejection", async () => {
+    const { ota, file } = await fixture({
+      ...protocol,
+      deployment: { ...protocol.deployment!, revisions: 1, control: "resume" },
+    })
+    const first = continuation(ota)
+    expect(first.begun.job!.allowRevise).toBe(true)
+    expect(first.state.task).toMatchObject({
+      checkpoint: first.handoff.checkpoint,
+      resumeControlUsed: true,
+      needsContinuation: true,
+      revisions: 0,
+    })
+    expect(first.state.active.pair).toEqual(seed)
+    expect(first.state.kernel.contracts[first.state.task!.contractID].status).toBe("active")
+    expect(ota.history().at(-1)).toMatchObject({
+      type: "task-continuation",
+      details: { outcome: "revise", control: "resume" },
+    })
+    const reopened = new OTA(file, ota.protocol, seed)
+    databases.push(reopened)
+    const next = reopened.begin(first.state.revision, first.state.clock + 1)
+    expect(next.job).toMatchObject({
+      purpose: "continuation",
+      allowRevise: false,
+      deadline: protocol.deployment!.deadline,
+    })
+    expect(next.job!.source).toBeUndefined()
+    expect(() => reopened.handedOff(next.revision, next.epoch, next.job!.id, next.clock + 1)).toThrow("continuation")
+    expect(() => continuation(reopened)).toThrow("revision schedule exhausted")
+    const ready = reopened.read()
+    expect(() =>
+      reopened.settle(
+        ready.revision,
+        { ...seed, h: hash("forged H") },
+        {
+          protocol: reopened.digest,
+          subject: hash("forged"),
+          job: ready.job!.id,
+          receipt: hash("forged receipt"),
+          rows: [],
+          baseline: { subject: subject(seed), rows: [] },
+        },
+        ready.clock + 1,
+      ),
+    ).toThrow("not a source proposal")
+    const done = reopened.continued(
+      ready.revision,
+      ready.epoch,
+      ready.job!.id,
+      {
+        previous: ready.task!.checkpoint,
+        checkpoint: hash("original-task final output"),
+        receipt: hash("official final grade"),
+        outcome: "delivered",
+      },
+      ready.clock + 1,
+    )
+    expect(done.task).toMatchObject({ status: "delivered", revisions: 0, resumeControlUsed: true })
+    expect(done.active.pair).toEqual(seed)
+    expect(reopened.completedProposals()).toBe(0)
+    expect(done.lineage).toBeUndefined()
+    expect(done.kernel.contracts[done.task!.contractID].spec.budget.deadline).toBe(protocol.deployment!.deadline)
+  })
+
+  test.each([0, 2, undefined])("resume-only control rejects an incompatible revision schedule %s", (revisions) => {
+    expect(
+      () =>
+        new OTA(
+          ":memory:",
+          { ...protocol, deployment: { ...protocol.deployment!, revisions, control: "resume" } },
+          seed,
+        ),
+    ).toThrow("one revision opportunity")
+  })
+
+  test("a resume-only run may finish without asking for revision; no forced extra work", async () => {
+    const { ota } = await fixture({
+      ...protocol,
+      deployment: { ...protocol.deployment!, revisions: 1, control: "resume" },
+    })
+    const done = continuation(ota, "delivered")
+    expect(done.state.task!.status).toBe("delivered")
+    expect(done.state.task!.resumeControlUsed).toBeUndefined()
+    expect(ota.completedProposals()).toBe(0)
+  })
+
   test("primary-improvement stopping cannot bypass task successor continuation", () => {
     expect(() => new OTA(":memory:", { ...protocol, stopOnPrimaryImprovement: true }, seed)).toThrow(
       "actual continuation",

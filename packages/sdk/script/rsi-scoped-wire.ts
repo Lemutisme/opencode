@@ -13,7 +13,7 @@ const Request = Schema.Struct({
 export const scopedProbe = { title: "Scripted public reference help; not a benchmark solution", args: ["--help"] }
 export const scopedStrategy = "Next generation policy."
 
-export function scopedWire(root: string, ending: "closure" | "delivery" = "delivery") {
+export function scopedWire(root: string, ending: "closure" | "delivery" = "delivery", plainSeed = false) {
   const records: {
     request: number
     revision: number
@@ -30,7 +30,7 @@ export function scopedWire(root: string, ending: "closure" | "delivery" = "deliv
         return new Response("Not found", { status: 404 })
       const body = Schema.decodeUnknownSync(Request)(await request.json())
       const prompt = JSON.stringify(body.input.find((item) => item.role === "user"))
-      const revision = Number(prompt.match(/RSI_FIXTURE_REVISION=(\d+)/)?.[1] ?? -1)
+      const revision = Number(prompt.match(/RSI_FIXTURE_REVISION=(\d+)/)?.[1] ?? (plainSeed ? 0 : -1))
       const strategy = prompt.includes(scopedStrategy)
       const tools = body.tools.map((tool) => tool.name)
       const outputs = body.input.filter((item) => item.type === "function_call_output")

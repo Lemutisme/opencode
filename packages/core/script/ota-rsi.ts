@@ -31,6 +31,9 @@ export type Protocol = {
     // Optional experimental adaptation schedule, not a model/tool call limit.
     // Finish the original task after these proposals, even when one is rejected.
     revisions?: number
+    // Experimental active control: one real revision request resumes the
+    // unchanged incumbent, without producing or evaluating a modification.
+    control?: "resume"
   }
   scope: "mechanics" | "performance"
   performanceRule?: "panel-margin" | "task-pareto"
@@ -95,6 +98,7 @@ export type State = {
     needsContinuation: boolean
     status: "open" | "delivered" | "blocked"
     revisions?: number
+    resumeControlUsed?: boolean
   }
   job?: {
     id: string
@@ -177,6 +181,11 @@ export class OTA {
         protocol.deployment.deadline - protocol.deployment.started > SIX_HOURS
       )
         throw new Error("task deployment requires one task and its original deadline of at most six hours")
+      if (
+        protocol.deployment.control !== undefined &&
+        (protocol.deployment.control !== "resume" || protocol.deployment.revisions !== 1)
+      )
+        throw new Error("resume-only control requires exactly one revision opportunity")
       requireHash(protocol.deployment.checkpoint)
       if (
         protocol.deployment.revisions !== undefined &&
@@ -371,12 +380,7 @@ export class OTA {
       if (state.job) throw new Error("an admitted job already exists")
       requireTask(this.protocol, state, now)
       requireStanding(state, state.active)
-      if (
-        state.task &&
-        !state.task.needsContinuation &&
-        this.protocol.deployment?.revisions !== undefined &&
-        (state.task.revisions ?? 0) >= this.protocol.deployment.revisions
-      )
+      if (state.task && !state.task.needsContinuation && !revisionAvailable(this.protocol, state.task))
         throw new Error("task revision schedule exhausted; no further source proposal")
       if (this.protocol.research && this.completedProposals() >= this.protocol.research.proposals)
         throw new Error("research proposal schedule exhausted")
@@ -402,7 +406,7 @@ export class OTA {
           ? {
               purpose: "continuation" as const,
               ...(this.protocol.deployment?.revisions !== undefined
-                ? { allowRevise: (state.task.revisions ?? 0) < this.protocol.deployment.revisions }
+                ? { allowRevise: revisionAvailable(this.protocol, state.task) }
                 : {}),
             }
           : this.protocol.expansion
@@ -491,11 +495,7 @@ export class OTA {
       requireHash(handoff.receipt)
       if (handoff.previous !== state.task.checkpoint) throw new Error("task checkpoint changed before handoff")
       if (!["revise", "delivered", "blocked"].includes(handoff.outcome)) throw new Error("invalid task handoff outcome")
-      if (
-        handoff.outcome === "revise" &&
-        this.protocol.deployment?.revisions !== undefined &&
-        (state.task.revisions ?? 0) >= this.protocol.deployment.revisions
-      )
+      if (handoff.outcome === "revise" && !revisionAvailable(this.protocol, state.task))
         throw new Error("task revision schedule exhausted; finish the original task with the incumbent")
       const task = state.kernel.contracts[state.task.contractID]
       if (handoff.outcome === "delivered") {
@@ -536,7 +536,9 @@ export class OTA {
           time: now,
         })
       state.task.checkpoint = handoff.checkpoint
-      state.task.needsContinuation = false
+      const resumeOnly = handoff.outcome === "revise" && this.protocol.deployment?.control === "resume"
+      state.task.needsContinuation = resumeOnly
+      if (resumeOnly) state.task.resumeControlUsed = true
       // This is only a projection of the original task Contract's standing.
       state.task.status =
         state.kernel.contracts[task.id].status === "discharged"
@@ -546,7 +548,7 @@ export class OTA {
             : "blocked"
       state.trial = false
       delete state.job
-      return { ...handoff, task: state.task.id, pair: state.active.pair }
+      return { ...handoff, task: state.task.id, pair: state.active.pair, ...(resumeOnly ? { control: "resume" } : {}) }
     })
   }
 
@@ -820,7 +822,7 @@ export class OTA {
         if (state.task) {
           state.job.purpose = "continuation"
           if (this.protocol.deployment?.revisions !== undefined)
-            state.job.allowRevise = (state.task.revisions ?? 0) < this.protocol.deployment.revisions
+            state.job.allowRevise = revisionAvailable(this.protocol, state.task)
           delete state.job.source
         }
         if (!state.task && this.protocol.expansion) {
@@ -1209,6 +1211,13 @@ function requireStanding(state: State, boot: Pick<Boot, "pair" | "support">) {
   const support = state.kernel.contracts[boot.support]
   if (support?.status !== "discharged" || support.handoff?.subjectHash !== subject(boot.pair))
     throw new Error("boot support was withdrawn")
+}
+
+function revisionAvailable(protocol: Protocol, task: NonNullable<State["task"]>) {
+  return (
+    !task.resumeControlUsed &&
+    (protocol.deployment?.revisions === undefined || (task.revisions ?? 0) < protocol.deployment.revisions)
+  )
 }
 
 function requireTask(protocol: Protocol, state: State, now: number) {
