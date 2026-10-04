@@ -316,3 +316,36 @@ SDK 全套首次执行在既有 embedded 测试中遇到持续的 SQLite 锁等�
 5. 下一轮试运行：等问题 A 的修复合入后再跑两组，新合同把 `resolution.retryDelay` 设为几分钟。
 
 **证据目录：**第一轮在 `/workspace/sbno-native-advisory-preparation-20260924T054618Z/approved-execution-20260927T072425Z/`，第二轮在 `/workspace/sbno-native-advisory-preparation-20260924T054618Z/nodes-preparation-20261001T062410Z/approved-execution-20261001T065720Z/`，两者各有 `RESULTS.md` 和封存清单。
+
+## 2026-10-04：`materials.json` 分行副本实施记录
+
+本轮以实现者身份，基于 `native-advisory` / `b386003b7aa4ea86cb1c25d9de35cdb45034ccd1` 完成分行修复。开工时工作树干净；修改前按既有方式保存全部 6,694 个 tracked / non-ignored untracked 路径的完整归档、逐文件 SHA-256 和模式，以及 HEAD、分支、Git 状态、index/worktree 二进制补丁和 index entries。见[基线元数据](/workspace/opencode-materials-format-baseline-20261004T202623472056Z/metadata.json)。本节只追加，原文和历史材料保持原样。
+
+改动：
+
+- `packages/sdk-next/src/native-advisory-materials.ts`：`prepare` 将规范 JSON 按结构标记确定性分行，使用 2 空格缩进、LF 换行及一个文件末尾换行。字符串标记保持原样，键序与规范文本一致，包括整数形式的键；数组顺序不变。`state.put(materials)` 原样保留，`materials.hash` 仍是规范单行内容的哈希，缓存键、job 输入、审阅记录及附件中的材料身份均不变。
+- `verify` 先通过 `state.bytes(materials.hash)` 读取并校验已存的规范字节，再读取副本。副本只能与规范单行字节或从这些规范字节渲染出的新格式逐字节相等；不会解析副本后比较。旧轮次的单行文件继续通过，其他空白变化、内容变化及重复键仍报 `Review materials copy is corrupt`。
+- `packages/sdk-next/test/native-advisory.test.ts`：新增确定性和兼容性用例，覆盖字段换行、2 空格缩进、末尾换行、字符串中的引号／括号／反斜线／换行／Unicode、重复准备的相同字节、规范哈希与 job 输入／缓存键不变、新旧格式通过。拒绝前导空格、缩进变更、CRLF、缺少或多出末尾换行、旧单行文本附加换行、内容变化及重复键，共 8 种差异。
+- `packages/opencode/test/server/pro-contract-native-advisory-nodes-process.test.ts`：增强已有用例，使用每个字符串低于行上限、合起来超过 2000 字符的执行者声明，并保留一个缺失材料项。脚本 reviewer 显式从第 1 行读取 `materials.json`，触发实际分页读取路径；断言发送到 provider 的工具结果没有行截断、没有分页截断，完整内容等于封存材料，包含 `files`、非空 `missing` 和完整执行者声明。
+
+兼容方式没有新增格式版本或迁移。生产改动仅在材料模块；reviewer 提示、材料清单生成、缺失文件处理、执行者声明的内容及结构位置均保持原样。Core、Research、评测网关、公开 Schema / Protocol / Server 和历史实验材料未改。
+
+已知局限：JSON 字符串仍占一个物理行，字符串内部的换行仍按 JSON 转义。任务 `brief` 等单个长字符串超过 2000 字符时，分页 read 仍可能截断这一行；本次分行不能消除这一限制。`brief` 本身已直接写入 reviewer 提示，该路径保持不变。本次解决的是原单行文档使后续元数据和多项执行者声明一起丢失的问题。
+
+验证均从 package 目录启动，每次调用设置独立 `OPENCODE_DB`，各测试组及类型检查依次运行，没有并行。SDK 单元夹具和 opencode preload 的既有内存数据库机制保持原样；宿主夹具仍使用各自独立的临时磁盘数据库。只使用本地脚本 provider，没有调用真实模型。
+
+| 验证组 | 结果与日志 |
+| --- | --- |
+| SDK：native-advisory、native-advisory-strength、contract-jobs（3 个文件） | 67 项通过，0 失败；[日志](/workspace/opencode-materials-format-validation-20261004T202623472056Z/sdk-regression-final.log) |
+| opencode：native advisory 进程回归（4 个文件） | 41 项通过，0 失败；[日志](/workspace/opencode-materials-format-validation-20261004T202623472056Z/opencode-regression-final.log) |
+| sdk-next `bun typecheck` | 通过；[日志](/workspace/opencode-materials-format-validation-20261004T202623472056Z/sdk-typecheck-final.log) |
+| opencode `bun typecheck` | 通过；[日志](/workspace/opencode-materials-format-validation-20261004T202623472056Z/opencode-typecheck-final.log) |
+| 三个 TypeScript 改动文件的 Prettier 检查 | 通过；[日志](/workspace/opencode-materials-format-validation-20261004T202623472056Z/format-final.log) |
+
+指定回归合计 **108 项通过、0 失败**，两个 package 的类型检查全部通过。定向测试和修复前刻画没有重复计入总数。
+
+修复前，在未修改的生产源码上运行新增断言：SDK 的两个用例失败，进程用例在执行者声明中实际收到 `line truncated to 2000 chars`，`files`、`missing` 尚未出现。修复后同样的两个 SDK 用例及同一进程用例全部通过，再运行上表指定回归。修复前失败日志是刻画证据，未计入最终回归通过数，也未覆盖或删除。
+
+完整命令、退出码、独立数据库路径、日志哈希和前后对照见[验证汇总](/workspace/opencode-materials-format-validation-20261004T202623472056Z/VERIFICATION.md)及[机器可读记录](/workspace/opencode-materials-format-validation-20261004T202623472056Z/verification.json)。[进程读取证据](/workspace/opencode-materials-format-validation-20261004T202623472056Z/materials-read-evidence.json)保留实际 reviewer 工具结果的位置、材料身份和完整读取核对。[增量补丁](/workspace/opencode-materials-format-validation-20261004T202623472056Z/baseline-delta.patch)相对本轮保存的干净基线生成，已在独立基线文件副本正向应用并核对结果，也已在当前工作树反向检查。
+
+HEAD、分支及 index 保持不变，只有一个生产文件、两个相关测试文件和本实施记录发生变化。未提交、未推送、未运行 generate，未调用真实模型；停在送审工作树，等待 Claude 把关。

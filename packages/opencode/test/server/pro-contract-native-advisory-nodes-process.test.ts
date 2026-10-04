@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
 import path from "node:path"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { RelativePath } from "@opencode-ai/core/schema"
@@ -12,13 +12,18 @@ import { raw, reply, TestLLMServer } from "../lib/llm-server"
 const it = testEffect(Layer.mergeAll(TestLLMServer.layer, NodeServices.layer, FetchHttpClient.layer))
 const statement = {
   summary: "Original candidate, with an unchanged submission",
-  uncertainties: ["Only the approved smoke replay was run"],
+  // Each string fits one read-tool line, while their canonical JSON exceeds it.
+  uncertainties: [
+    "Only the approved smoke replay was run",
+    "The material has not been tested on independent inputs. ".repeat(20),
+    "The result does not establish broader generalization. ".repeat(20),
+  ],
 }
 const opinion =
   "I read materials.json and candidate/answer.txt. The captured native material supports the narrow smoke claim; broader conclusions remain unverified. This advice needs no response."
 const ready = (summary = statement.summary) => reply().tool("contract_report_ready", { ...statement, summary })
 const review = () => [
-  reply().tool("read", { path: "materials.json" }),
+  reply().tool("read", { path: "materials.json", offset: 1 }),
   reply().tool("read", { path: "candidate/answer.txt" }),
   reply().text(opinion).stop(),
 ]
@@ -156,6 +161,7 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
           blockedRouting: "escalate",
           defaultNodes: mode !== "interrupted-check",
           nodes: { version: 1, submission: false, midcourse: { afterMs: 1 } },
+          materials: ["answer.txt", "missing-result.txt"],
           replay,
         })
         yield* llm.wait(1)
@@ -207,8 +213,25 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
         expect(JSON.stringify(hits[3].body)).toContain("captured native material")
         expect(JSON.stringify(hits[4].body)).toContain(opinion)
         const material = JSON.parse((yield* fixture.host.command("native-object", request.materials!.hash)) as string)
+        const messages = Schema.decodeUnknownSync(
+          Schema.Struct({
+            messages: Schema.Array(Schema.Struct({ role: Schema.String, content: Schema.optional(Schema.Unknown) })),
+          }),
+        )(hits[2].body).messages
+        const read = Schema.decodeUnknownSync(Schema.Struct({ content: Schema.String, truncated: Schema.Boolean }))(
+          Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(
+            messages.find((message) => message.role === "tool")?.content,
+          ),
+        )
+        expect(read.truncated).toBe(false)
+        expect(read.content).not.toContain("line truncated")
+        expect(Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(read.content)).toEqual(material)
+        expect(material.files).toMatchObject([{ path: "answer.txt" }])
+        expect(material.missing).toEqual(["missing-result.txt"])
+        for (const field of ["files", "missing"]) expect(read.content).toContain(`\n  "${field}":`)
         if (mode !== "interrupted-check") {
           expect(material.executorStatement).toEqual({ trust: "untrusted-executor-statement", ...statement })
+          expect(read.content).toContain('\n  "executorStatement":')
           expect(JSON.stringify(hits[2].body)).toContain("untrusted-executor-statement")
           expect(request.delivery?.input.text).toContain("Delivery has not been recorded")
           expect(request.delivery?.input.text).toContain(statement.summary)

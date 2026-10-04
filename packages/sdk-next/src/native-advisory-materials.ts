@@ -130,7 +130,11 @@ export const make = Effect.gen(function* () {
         : {}),
     }
     const hash = yield* state.put(materials)
-    yield* fs.writeWithDirs(path.join(directory, "materials.json"), ProContractRecognition.canonical(materials), 0o400)
+    yield* fs.writeWithDirs(
+      path.join(directory, "materials.json"),
+      render(ProContractRecognition.canonical(materials)),
+      0o400,
+    )
     return {
       ...snapshot,
       hash,
@@ -145,10 +149,9 @@ export const make = Effect.gen(function* () {
     if (!request.materials)
       return yield* new ProContractDelivery.Denied({ message: "Review materials are unavailable" })
     const materials = request.materials
-    yield* state.bytes(materials.hash)
-    if (
-      Hash.sha256(Buffer.from(yield* fs.readFile(path.join(materials.directory, "materials.json")))) !== materials.hash
-    )
+    const canonical = Buffer.from(yield* state.bytes(materials.hash))
+    const copy = Buffer.from(yield* fs.readFile(path.join(materials.directory, "materials.json")))
+    if (!copy.equals(canonical) && !copy.equals(Buffer.from(render(canonical.toString("utf8")))))
       return yield* new ProContractDelivery.Denied({ message: "Review materials copy is corrupt" })
     const selected = yield* inventory(
       path.join(materials.directory, "candidate"),
@@ -244,3 +247,15 @@ export const make = Effect.gen(function* () {
   })
   return { capture, prepare, verify, collect, environment: reviewer.environment }
 })
+
+function render(canonical: string) {
+  let depth = 0
+  // Preserve canonical key order (including integer-like keys) and string bytes.
+  return `${canonical.replace(/"(?:[^"\\]|\\.)*"|\{\}|\[\]|[{}\[\],:]/g, (token) => {
+    if (token === "{" || token === "[") return `${token}\n${"  ".repeat(++depth)}`
+    if (token === "}" || token === "]") return `\n${"  ".repeat(--depth)}${token}`
+    if (token === ",") return `,\n${"  ".repeat(depth)}`
+    if (token === ":") return ": "
+    return token
+  })}\n`
+}

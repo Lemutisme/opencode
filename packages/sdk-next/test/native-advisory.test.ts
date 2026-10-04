@@ -1135,6 +1135,80 @@ it.effect(
     }),
 )
 
+it.effect("renders deterministic multiline materials while retaining canonical identity", () =>
+  Effect.gen(function* () {
+    const test = yield* setup(["file.txt", "uncreated.txt"])
+    const statement = { summary: '  Exact "summary", {with: [punctuation]}\n第二行\\path', uncertainties: ["B", "A"] }
+    const call = yield* nodeInvocation(test, "formatted-materials", statement)
+    expect(yield* test.native.handler.node!(call.node)).toBe("intercept")
+    const request = (yield* test.state.list(test.input.id))[0]
+    yield* test.native.advance(request.id)
+    const prepared = (yield* test.native.advance(request.id))!
+    const canonical = Buffer.from(yield* test.state.bytes(prepared.materials!.hash))
+    const content: unknown = JSON.parse(canonical.toString("utf8"))
+    const bytes = Buffer.from(yield* test.fs.readFile(path.join(prepared.materials!.directory, "materials.json")))
+    expect(bytes.toString("utf8")).toBe(`${JSON.stringify(content, null, 2)}\n`)
+    for (const field of ["executorStatement", "files", "missing", "evidence"])
+      expect(bytes.toString("utf8")).toContain(`\n  "${field}":`)
+    expect(content).toMatchObject({
+      executorStatement: { trust: "untrusted-executor-statement", ...statement },
+      files: [{ path: "file.txt" }],
+      missing: ["uncreated.txt"],
+      evidence: [],
+    })
+    expect(canonical.toString("utf8")).toBe(ProContractRecognition.canonical(content))
+    expect(prepared.materials!.hash).toBe(Hash.sha256(canonical))
+    expect(Hash.sha256(bytes)).not.toBe(prepared.materials!.hash)
+    expect(prepared.job?.inputHash).toBe(prepared.materials!.hash)
+    expect(prepared.materials!.key).toBe(prepared.actual!.key)
+    const materials = yield* NativeAdvisoryMaterials.make
+    yield* materials.verify(prepared)
+    const repeated = yield* materials.prepare({ ...prepared, id: `${prepared.id}-repeated` })
+    expect(Buffer.from(yield* test.fs.readFile(path.join(repeated.directory, "materials.json")))).toEqual(bytes)
+    expect(repeated.hash).toBe(prepared.materials!.hash)
+    expect(repeated.key).toBe(prepared.materials!.key)
+    yield* materials.verify({ ...prepared, materials: repeated })
+    expect(yield* test.state.get(prepared.id)).toEqual(prepared)
+  }),
+)
+
+it.effect("verifies only exact multiline or legacy canonical materials bytes", () =>
+  Effect.gen(function* () {
+    const test = yield* setup()
+    yield* test.native.handler.command!(test.command)
+    const request = (yield* test.state.list(test.input.id))[0]
+    yield* test.native.advance(request.id)
+    const prepared = (yield* test.native.advance(request.id))!
+    const materials = yield* NativeAdvisoryMaterials.make
+    const file = path.join(prepared.materials!.directory, "materials.json")
+    const canonical = Buffer.from(yield* test.state.bytes(prepared.materials!.hash)).toString("utf8")
+    const rendered = `${JSON.stringify(JSON.parse(canonical), null, 2)}\n`
+    yield* test.fs.chmod(file, 0o600)
+    for (const content of [rendered, canonical]) {
+      yield* test.fs.writeFileString(file, content)
+      yield* materials.verify(prepared)
+    }
+    for (const variant of [
+      { name: "leading whitespace", content: ` ${rendered}` },
+      { name: "changed indentation", content: rendered.replace(/\n  /g, "\n\t") },
+      { name: "CRLF", content: rendered.replace(/\n/g, "\r\n") },
+      { name: "missing final newline", content: rendered.slice(0, -1) },
+      { name: "extra final newline", content: `${rendered}\n` },
+      { name: "newline on legacy text", content: `${canonical}\n` },
+      { name: "changed content", content: rendered.replace('"version": 1', '"version": 2') },
+      { name: "duplicate key", content: canonical.replace('"version":1', '"version":0,"version":1') },
+    ]) {
+      yield* test.fs.writeFileString(file, variant.content)
+      expect(yield* materials.verify(prepared).pipe(Effect.flip), variant.name).toMatchObject({
+        message: "Review materials copy is corrupt",
+      })
+    }
+    yield* test.fs.writeFileString(file, rendered)
+    yield* materials.verify(prepared)
+    expect(yield* test.state.get(prepared.id)).toEqual(prepared)
+  }),
+)
+
 it.effect("the same attempt keeps its consumed slot across Session rotation and a native new attempt rearms it", () =>
   Effect.gen(function* () {
     const test = yield* setup(["file.txt"], undefined, 1)
