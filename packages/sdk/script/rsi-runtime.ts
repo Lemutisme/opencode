@@ -287,19 +287,33 @@ export namespace RSIRuntime {
         stderr: "pipe",
       })
       const stream = copy.stdout.getReader()
+      const abortExport = () => {
+        copy.kill()
+        exporter.kill()
+      }
+      signal.addEventListener("abort", abortExport, { once: true })
+      const exportTimeout = setTimeout(abortExport, 300_000)
       try {
+        signal.throwIfAborted()
         while (true) {
           const chunk = await stream.read()
           if (chunk.done) break
-          exporter.stdin.write(chunk.value)
+          // FileSink.write/end may reject asynchronously; flush does not await
+          // a previously ignored write promise (notably on an early EPIPE).
+          await exporter.stdin.write(chunk.value)
           await exporter.stdin.flush()
         }
+        await exporter.stdin.end()
+        const [copied, exported] = await Promise.all([copy.exited, exporter.exited])
+        signal.throwIfAborted()
+        if (copied || exported) throw new Error("release export failed")
       } finally {
+        clearTimeout(exportTimeout)
+        signal.removeEventListener("abort", abortExport)
+        abortExport()
         await stream.cancel()
-        exporter.stdin.end()
+        await Promise.all([copy.exited, exporter.exited])
       }
-      const [copied, exported] = await Promise.all([copy.exited, exporter.exited])
-      if (copied || exported) throw new Error("release export failed")
       // The compiler may execute candidate preloads. It cannot rewrite the
       // source bytes already exported to the private host directory above.
       await run(

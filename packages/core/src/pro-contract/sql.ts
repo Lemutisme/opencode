@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import type { ProContract } from "@opencode/schema/pro-contract"
 import { Timestamps } from "../database/schema.sql.js"
 import type { Command, Contract, Decision } from "./kernel.js"

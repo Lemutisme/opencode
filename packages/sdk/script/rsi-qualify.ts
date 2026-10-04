@@ -1,7 +1,7 @@
 // Real native V2/container qualification with a scripted provider. No model calls.
 import fs from "node:fs/promises"
 import path from "node:path"
-import { OTA, hash } from "../../core/script/ota-rsi"
+import { OTA } from "../../core/script/ota-rsi"
 import type { Protocol } from "../../core/script/ota-rsi"
 import { Artifacts, supervise } from "../../core/script/ota-supervisor"
 import { nativeDriver } from "./rsi-driver"
