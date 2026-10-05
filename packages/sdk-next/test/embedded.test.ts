@@ -210,3 +210,48 @@ test("embedded client is available as a Layer service", async () => {
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test("embedded hosts retain the database selected when each host is acquired", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-embedded-databases-"))
+  const database = Flag.OPENCODE_DB
+  try {
+    const { AbsolutePath, Agent, Location, OpenCode, Session } = await import("../src")
+    const { Database } = await import("bun:sqlite")
+    const firstID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
+    const secondID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        Flag.OPENCODE_DB = join(directory, "first.sqlite")
+        const first = yield* OpenCode.create()
+        Flag.OPENCODE_DB = join(directory, "second.sqlite")
+        const second = yield* OpenCode.create()
+
+        // The first router and its Location services are initialized after the flag changes.
+        yield* first.sessions.create({
+          id: firstID,
+          agent: Agent.ID.make("build"),
+          location: Location.Ref.make({ directory: AbsolutePath.make(directory) }),
+        })
+        yield* second.sessions.create({
+          id: secondID,
+          agent: Agent.ID.make("plan"),
+          location: Location.Ref.make({ directory: AbsolutePath.make(directory) }),
+        })
+
+        expect((yield* first.sessions.get({ sessionID: firstID })).agent).toBe(Agent.ID.make("build"))
+        expect((yield* second.sessions.get({ sessionID: secondID })).agent).toBe(Agent.ID.make("plan"))
+        expect((yield* Effect.flip(first.sessions.get({ sessionID: secondID })))._tag).toBe("SessionNotFoundError")
+        expect((yield* Effect.flip(second.sessions.get({ sessionID: firstID })))._tag).toBe("SessionNotFoundError")
+      }).pipe(Effect.scoped),
+    )
+
+    using first = new Database(join(directory, "first.sqlite"), { readonly: true })
+    using second = new Database(join(directory, "second.sqlite"), { readonly: true })
+    expect(first.query("SELECT id, agent FROM session").all()).toEqual([{ id: firstID, agent: "build" }])
+    expect(second.query("SELECT id, agent FROM session").all()).toEqual([{ id: secondID, agent: "plan" }])
+  } finally {
+    Flag.OPENCODE_DB = database
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 10_000)
