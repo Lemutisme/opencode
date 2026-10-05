@@ -1,6 +1,8 @@
 import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
+import { mkdir } from "node:fs/promises"
 import { parse } from "./assertions"
+import { exerciseAuthDirectory } from "./environment"
 import { runtime, type Runtime } from "./runtime"
 import type { ActiveScenario, BackendApp, CallResult, CaptureMode, SeededContext } from "./types"
 
@@ -12,13 +14,20 @@ type CallOptions = {
 }
 
 export function call(scenario: ActiveScenario, ctx: SeededContext<unknown>, options: CallOptions = {}) {
-  return Effect.promise(async () =>
-    capture(await app(await runtime(), options).request(toRequest(scenario, ctx)), scenario.capture),
-  )
+  return Effect.promise(async () => {
+    const auth = options.auth ?? (scenario.auth === "protected" ? { password: "httpapi-exercise" } : undefined)
+    const request = toRequest(scenario, ctx)
+    // Exercise protected handlers as an authenticated principal; disabling
+    // server authentication intentionally does not authorize Contract mutations.
+    if (auth?.password && !request.headers.has("authorization"))
+      request.headers.set("authorization", basic(auth.username ?? "opencode", auth.password))
+    return capture(await app(await runtime(), { ...options, auth }).request(request), scenario.capture)
+  })
 }
 
 export function callAuthProbe(scenario: ActiveScenario, credentials: "missing" | "valid" = "missing") {
   return Effect.promise(async () => {
+    await mkdir(exerciseAuthDirectory, { recursive: true })
     const controller = new AbortController()
     return Promise.race([
       Promise.resolve(
@@ -94,6 +103,8 @@ function toAuthProbeRequest(scenario: ActiveScenario, credentials: "missing" | "
   const headers = {
     ...(spec.body === undefined ? {} : { "content-type": "application/json" }),
     ...spec.headers,
+    // Valid auth probes can mutate state; never let instance routes fall back to the checkout.
+    "x-opencode-directory": exerciseAuthDirectory,
     ...(credentials === "valid" ? { authorization: basic("opencode", "secret") } : {}),
   }
   return new Request(new URL(spec.path, "http://localhost"), {

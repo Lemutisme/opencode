@@ -695,6 +695,8 @@ const scenarios: Scenario[] = [
         id: "pct_httpapi",
         scope: "httpapi",
         goal: "Exercise ProContract admission",
+        // This scenario checks admission only; execution is covered by the scripted-provider process suite.
+        trigger: { type: "time", at: Date.now() + 60_000 },
         location: { directory: ctx.directory },
         model: { providerID: "openai", id: "gpt-5.3-codex" },
       },
@@ -710,7 +712,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/attestation", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { evidenceHash: "missing" },
+      body: { revision: 1, specHash: "missing", subjectHash: "missing", evidenceHash: "missing" },
     }))
     .json(404, object, "status"),
   http.protected
@@ -718,7 +720,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/api/contract/{contractID}/challenge", { contractID: "pct_missing" }),
       headers: ctx.headers(),
-      body: { evidenceHash: "missing", disclosure: "sealed" },
+      body: { revision: 1, subjectHash: "missing", evidenceHash: "missing", disclosure: "sealed" },
     }))
     .json(404, object, "status"),
   http.protected
@@ -1548,7 +1550,7 @@ const scenarios: Scenario[] = [
           check(isRecord(body.info) && body.info.role === "assistant", "prompt should return assistant message")
           check(
             Array.isArray(body.parts) && body.parts.some((part) => isRecord(part) && part.text === "fake assistant"),
-            "assistant message should use fake LLM text",
+            `assistant message should use fake LLM text: ${JSON.stringify(body)}`,
           )
           yield* ctx.llmWait(1)
         }),

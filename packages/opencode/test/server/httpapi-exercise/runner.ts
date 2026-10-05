@@ -191,7 +191,12 @@ function withContext<A, E>(
         const result = yield* use({ ...base, state })
         yield* trace(options, scenario, `${label} use done`)
         return result
-      }).pipe(Effect.ensuring(context.llm ? context.llm.reset : Effect.void)),
+      }).pipe(
+        // The server shares layers with this scenario-scoped fixture runtime.
+        // Close it before that runtime, even when keeping the database.
+        Effect.ensuring(Effect.promise(() => disposeApps())),
+        Effect.ensuring(context.llm ? context.llm.reset : Effect.void),
+      ),
     ),
     Effect.ensuring(scenario.reset ? resetState : Effect.void),
   )

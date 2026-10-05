@@ -278,6 +278,10 @@ the executable; do not substitute a binary from a historical cohort.
 
 ## Compatibility and limits
 
+The follow-up [extended evaluation](pro-contract-delivery-evaluation.md) records
+broader package/API coverage, cross-process and upgrade regressions, and the
+embedded-host database fix performed before publishing this branch.
+
 - Attestation clients must now send all four evidence coordinates. Regenerate
   clients; do not preserve an evidence-hash-only call that guesses the subject.
 - General CLI defaults remain 24 hours / four turns / 32 actions without an
