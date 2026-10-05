@@ -6177,14 +6177,8 @@ export type ProContractTrigger =
 export type ProContractCapability = string
 
 export type ProContractBudget = {
-  /**
-   * Exact provider-turn ceiling shared by every attempt.
-   */
-  turns: number
-  /**
-   * Exact tool-action ceiling shared by every attempt.
-   */
-  actions: number
+  turns?: number
+  actions?: number
   /**
    * Absolute Unix timestamp in milliseconds.
    */
@@ -6317,6 +6311,13 @@ export type ProContractOpenCodeExecution = {
 export type ProContractReceipt = {
   frontier: number
   hash: string
+}
+
+export type ProContractAttestationEvidence = {
+  revision: number
+  specHash: string
+  subjectHash: string
+  evidenceHash: string
 }
 
 export type EventModelsDevRefreshed = {
@@ -13949,9 +13950,7 @@ export type V2ProContractExecutionResponses = {
 export type V2ProContractExecutionResponse = V2ProContractExecutionResponses[keyof V2ProContractExecutionResponses]
 
 export type V2ProContractAttestData = {
-  body: {
-    evidenceHash: string
-  }
+  body: ProContractAttestationEvidence
   path: {
     contractID: string
   }

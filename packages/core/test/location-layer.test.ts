@@ -536,7 +536,13 @@ describe("LocationServiceMap", () => {
             expect((yield* contracts.get(contractID))?.handoff).toBeUndefined()
             expect(yield* contracts.quiet("check")).toMatchObject({ quiet: false })
             expect(
-              (yield* contracts.principalAttest({ contractID, evidenceHash: "not-a-handoff" })).decision.type,
+              (yield* contracts.principalAttest({
+                contractID,
+                revision: 1,
+                specHash: ProContract.hashSpec(ProContract.normalizeSpec(spec)),
+                subjectHash: "not-a-handoff",
+                evidenceHash: "not-a-handoff",
+              })).decision.type,
             ).toBe("rejected")
             yield* Effect.promise(() => fs.writeFile(path.join(dir.path, "candidate.txt"), "regressed\n"))
             const ready = yield* settleTool(registry, {

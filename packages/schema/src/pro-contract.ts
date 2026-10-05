@@ -36,11 +36,11 @@ export const Capability = Schema.NonEmptyString.annotate({
 export type Capability = typeof Capability.Type
 
 export const Budget = Schema.Struct({
-  turns: PositiveInt.annotate({
-    description: "Exact provider-turn ceiling shared by every attempt.",
+  turns: PositiveInt.pipe(optional).annotate({
+    description: "Exact provider-turn ceiling shared by every attempt. Omit for no cumulative turn limit.",
   }),
-  actions: PositiveInt.annotate({
-    description: "Exact tool-action ceiling shared by every attempt.",
+  actions: PositiveInt.pipe(optional).annotate({
+    description: "Exact tool-action ceiling shared by every attempt. Omit for no cumulative action limit.",
   }),
   deadline: NonNegativeInt.annotate({ description: "Absolute Unix timestamp in milliseconds." }),
 }).annotate({ identifier: "ProContract.Budget" })
@@ -182,13 +182,18 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "ProContract.Info" })
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 
+export const AttestationEvidence = Schema.Struct({
+  revision: PositiveInt,
+  specHash: Schema.NonEmptyString,
+  subjectHash: Schema.NonEmptyString,
+  evidenceHash: Schema.NonEmptyString,
+}).annotate({ identifier: "ProContract.AttestationEvidence" })
+export interface AttestationEvidence extends Schema.Schema.Type<typeof AttestationEvidence> {}
+
 export const Attestation = Schema.Struct({
   id: AttestationID,
   contractID: ID,
-  revision: PositiveInt,
-  specHash: Schema.String,
-  subjectHash: Schema.NonEmptyString,
-  evidenceHash: Schema.NonEmptyString,
+  ...AttestationEvidence.fields,
   verifierID: Schema.NonEmptyString,
   class: Schema.Literal("principal"),
 }).annotate({ identifier: "ProContract.Attestation" })

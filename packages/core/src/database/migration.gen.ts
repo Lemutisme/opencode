@@ -43,5 +43,6 @@ export const migrations = (
     import("./migration/20260722175817_pro_contract"),
     import("./migration/20260725003944_contract_sessions"),
     import("./migration/20260725235000_contract_phases"),
+    import("./migration/20261005011555_contract_policy"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

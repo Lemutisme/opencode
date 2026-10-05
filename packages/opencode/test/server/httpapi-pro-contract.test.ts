@@ -1,8 +1,42 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { NodeHttpServer } from "@effect/platform-node"
+import { Database } from "@opencode-ai/core/database/database"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { ProContract } from "@opencode-ai/core/pro-contract"
+import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { ProContractGroup } from "@opencode-ai/protocol/groups/pro-contract"
+import { ServerAuth } from "@opencode-ai/server/auth"
+import { ProContractHandler } from "@opencode-ai/server/handlers/pro-contract"
+import { authorizationLayer, principalAuthorizationLayer } from "@opencode-ai/server/middleware/authorization"
+import { schemaErrorLayer } from "@opencode-ai/server/middleware/schema-error"
+import { Clock, Effect, Layer, Option, Schema } from "effect"
+import { HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
+import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { Server } from "../../src/server/server"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
+
+const it = testEffect(
+  HttpRouter.serve(
+    HttpApiBuilder.layer(HttpApi.make("server").add(ProContractGroup)).pipe(
+      Layer.provide(ProContractHandler),
+      Layer.provide([authorizationLayer, principalAuthorizationLayer, schemaErrorLayer]),
+      Layer.provide(ServerAuth.Config.configLayer({ password: Option.some("contract-secret"), username: "opencode" })),
+      Layer.provide(SessionExecution.noopLayer),
+    ),
+    { disableListenLog: true, disableLogger: true },
+  ).pipe(
+    Layer.provideMerge(NodeHttpServer.layerTest),
+    Layer.provideMerge(
+      LayerNode.compile(LayerNode.group([ProContract.node, ProContractOpenCode.node]), [
+        [Database.node, Database.layerFromPath(":memory:")],
+      ]),
+    ),
+  ),
+)
 
 const original = {
   flagPassword: Flag.OPENCODE_SERVER_PASSWORD,
@@ -22,6 +56,117 @@ function authorization() {
 }
 
 describe("ProContract HttpApi", () => {
+  it.live("rejects a delayed attestation for a replaced handoff without recording evidence", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      const now = yield* Clock.currentTimeMillis
+      const contractID = ProContract.ID.make("pct_http_stale_attestation")
+      yield* contracts.issue({
+        id: contractID,
+        scope: "http",
+        spec: ProContract.defaultSpec("Verify the exact delivered candidate", now),
+        executor: "opencode",
+      })
+      expect((yield* contracts.activate(contractID, 1, now)).decision.type).toBe("accepted")
+      expect(
+        (yield* contracts.reportReady({
+          contractID,
+          revision: 1,
+          summary: "Candidate A",
+          uncertainties: [],
+          subjectHash: "subject-a",
+          time: now,
+        })).decision.type,
+      ).toBe("accepted")
+
+      const response = yield* HttpClientRequest.get(`/api/contract/${contractID}`).pipe(
+        HttpClientRequest.setHeader("authorization", authorization()),
+        HttpClient.execute,
+      )
+      expect(response.status).toBe(200)
+      const first = Schema.decodeUnknownSync(Schema.Struct({ data: ProContract.Info }))(yield* response.json)
+      if (!first.data.handoff) return yield* Effect.die("Candidate A was not handed off")
+      const captured = {
+        revision: first.data.revision,
+        specHash: first.data.specHash,
+        subjectHash: first.data.handoff.subjectHash,
+        evidenceHash: "external-evaluation-a",
+      }
+
+      const challenge = yield* HttpClientRequest.post(`/api/contract/${contractID}/challenge`).pipe(
+        HttpClientRequest.setHeader("authorization", authorization()),
+        HttpClientRequest.bodyJsonUnsafe({
+          revision: captured.revision,
+          subjectHash: captured.subjectHash,
+          evidenceHash: "counterexample-a",
+          disclosure: "executor",
+          summary: "Candidate A needs correction",
+        }),
+        HttpClient.execute,
+      )
+      expect(challenge.status).toBe(200)
+      expect((yield* contracts.activate(contractID, 1, now)).decision.type).toBe("accepted")
+      expect(
+        (yield* contracts.reportReady({
+          contractID,
+          revision: 1,
+          summary: "Candidate B",
+          uncertainties: [],
+          subjectHash: "subject-b",
+          time: now,
+        })).decision.type,
+      ).toBe("accepted")
+      const current = yield* contracts.get(contractID)
+      if (!current?.handoff) return yield* Effect.die("Candidate B was not handed off")
+      expect(current).toMatchObject({ status: "verification", handoff: { subjectHash: "subject-b" } })
+
+      const attest = HttpClientRequest.post(`/api/contract/${contractID}/attestation`).pipe(
+        HttpClientRequest.setHeader("authorization", authorization()),
+      )
+      const incomplete = yield* attest.pipe(
+        HttpClientRequest.bodyJsonUnsafe({ evidenceHash: captured.evidenceHash }),
+        HttpClient.execute,
+      )
+      expect(incomplete.status).toBe(400)
+      expect(yield* contracts.get(contractID)).toEqual(current)
+
+      const stale = yield* attest.pipe(HttpClientRequest.bodyJsonUnsafe(captured), HttpClient.execute)
+      expect(stale.status).toBe(409)
+      expect(yield* stale.json).toMatchObject({ message: "attestation subject does not match" })
+      expect(yield* contracts.get(contractID)).toEqual(current)
+      const rejected = (yield* contracts.history({ contractID })).at(-1)
+      expect(rejected).toMatchObject({
+        command: { type: "discharge", attestation: captured },
+        decision: { type: "rejected", reason: "attestation subject does not match" },
+      })
+      if (rejected?.command.type !== "discharge") return yield* Effect.die("Rejection was not audited")
+      expect(yield* contracts.getAttestation(rejected.command.attestation.id)).toBeUndefined()
+      expect((yield* contracts.quiet("http")).quiet).toBe(false)
+
+      const accepted = yield* attest.pipe(
+        HttpClientRequest.bodyJsonUnsafe({
+          revision: current.revision,
+          specHash: current.specHash,
+          subjectHash: current.handoff.subjectHash,
+          evidenceHash: "external-evaluation-b",
+        }),
+        HttpClient.execute,
+      )
+      expect(accepted.status).toBe(200)
+      const discharged = yield* contracts.get(contractID)
+      expect(discharged?.status).toBe("discharged")
+      if (!discharged?.attestationID) return yield* Effect.die("Accepted evidence was not recorded")
+      expect(yield* contracts.getAttestation(discharged.attestationID)).toMatchObject({
+        contractID,
+        revision: current.revision,
+        specHash: current.specHash,
+        subjectHash: current.handoff.subjectHash,
+        evidenceHash: "external-evaluation-b",
+      })
+      expect((yield* contracts.quiet("http")).quiet).toBe(true)
+    }),
+  )
+
   test("rejects a missing dependency without leaving an execution binding", async () => {
     Flag.OPENCODE_SERVER_PASSWORD = "contract-secret"
     process.env.OPENCODE_SERVER_PASSWORD = "contract-secret"
@@ -87,7 +232,10 @@ describe("ProContract HttpApi", () => {
       expect(response.status).toBe(401)
 
       const mutations = [
-        ["/api/contract/pct_missing/attestation", { evidenceHash: "forged" }],
+        [
+          "/api/contract/pct_missing/attestation",
+          { revision: 1, specHash: "forged-spec", subjectHash: "forged-subject", evidenceHash: "forged" },
+        ],
         [
           "/api/contract/pct_missing/challenge",
           {

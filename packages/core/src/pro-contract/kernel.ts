@@ -148,10 +148,8 @@ export function transition(state: State, command: Command): Result {
     if (command.draft.issuer === command.draft.executor) return reject("issuer and executor must be distinct")
     if (command.draft.specHash !== hashSpec(command.draft.spec)) return reject("specification hash does not match")
     const spec = canonicalSpec(command.draft.spec)
-    const replay = spec.evidence.replay
-    if (replay && replay.checks.length === 0 && replay.protected.length === 0 && replay.artifacts.length === 0)
-      return reject("replay policy is empty")
-    if (replay?.checks.some((check) => check.argv.length === 0)) return reject("replay check command is empty")
+    const invalid = replayRejection(spec.evidence.replay)
+    if (invalid) return reject(invalid)
     const existing = state.contracts[command.draft.id]
     if (existing) {
       if (
@@ -333,6 +331,8 @@ export function transition(state: State, command: Command): Result {
     if (command.specHash === contract.specHash) return reject("the proposed revision is unchanged")
     if (command.specHash !== hashSpec(command.spec)) return reject("specification hash does not match")
     const spec = canonicalSpec(command.spec)
+    const invalid = replayRejection(spec.evidence.replay)
+    if (invalid) return reject(invalid)
     if (JSON.stringify(spec.requires) !== JSON.stringify(contract.spec.requires))
       return reject("contract dependencies cannot change during revision")
     return accept({
@@ -351,6 +351,9 @@ export function transition(state: State, command: Command): Result {
     if (command.actor !== contract.issuer) return reject("only the issuer may decide a revision")
     if (!contract.pendingRevision) return reject("no revision petition is pending")
     if (command.accept && dependent) return reject(`contract is required by outstanding contract: ${dependent.id}`)
+    // Pending petitions can have been persisted by an older admission implementation.
+    const invalid = command.accept && replayRejection(contract.pendingRevision.spec.evidence.replay)
+    if (invalid) return reject(invalid)
     return accept({
       ...state,
       contracts: {
@@ -499,4 +502,10 @@ export function quiet(state: State, scope: string) {
   return Object.values(state.contracts).every(
     (contract) => contract.scope !== scope || contract.status === "discharged" || contract.status === "released",
   )
+}
+
+function replayRejection(replay: ProContract.ReplayPolicy | undefined) {
+  if (replay && replay.checks.length === 0 && replay.protected.length === 0 && replay.artifacts.length === 0)
+    return "replay policy is empty"
+  if (replay?.checks.some((check) => check.argv.length === 0)) return "replay check command is empty"
 }

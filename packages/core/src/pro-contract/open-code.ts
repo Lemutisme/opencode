@@ -30,6 +30,13 @@ export type Binding = {
   readonly attemptKey?: string
 }
 
+export type IssueReceipt = Omit<ProContract.IssueReceipt, "event"> & {
+  readonly event?: ProContract.IssueReceipt["event"]
+  readonly execution?: Binding
+}
+
+export type Execution = { readonly binding: Binding; readonly contract: ProContract.Contract }
+
 export interface Interface {
   readonly owner: string
   readonly issue: (input: {
@@ -40,7 +47,7 @@ export interface Interface {
     readonly model: Model.Ref
     readonly executionPolicy?: string
     readonly now: number
-  }) => Effect.Effect<ProContract.IssueReceipt & { readonly execution?: Binding }>
+  }) => Effect.Effect<IssueReceipt>
   readonly create: (input: {
     readonly contractID: Schema.ID
     readonly revision: number
@@ -52,6 +59,8 @@ export interface Interface {
   readonly claim: (contractID: Schema.ID, now: number) => Effect.Effect<Binding | undefined>
   readonly get: (contractID: Schema.ID) => Effect.Effect<Binding | undefined>
   readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<Binding | undefined>
+  /** Non-counting ownership check. Call inside the same transaction as any authoritative control mutation. */
+  readonly current: (sessionID: SessionSchema.ID, now: number) => Effect.Effect<Execution | undefined>
   readonly due: (now: number) => Effect.Effect<ReadonlyArray<Binding>>
   readonly heartbeat: (sessionIDs: ReadonlySet<SessionSchema.ID>, now: number) => Effect.Effect<void>
   readonly reschedule: (input: {
@@ -78,6 +87,22 @@ export function attemptKey(contract: ProContract.Contract) {
         ? contract.blocked.time + ":" + contract.blocked.reason
         : ""
   return contract.revision + ":" + context
+}
+
+function ownsExecution(execution: Execution, owner: string, now: number) {
+  const binding = execution.binding
+  const contract = execution.contract
+  return (
+    binding.dispatched &&
+    binding.leaseOwner === owner &&
+    (binding.leaseExpiresAt ?? 0) > now &&
+    binding.revision === contract.revision &&
+    contract.status === "active" &&
+    !contract.pendingRevision &&
+    (binding.attemptKey === undefined
+      ? contract.challenge?.disclosure !== "executor" && contract.blocked === undefined
+      : binding.attemptKey === attemptKey(contract))
+  )
 }
 
 const layer = Layer.effect(
@@ -143,15 +168,7 @@ const layer = Layer.effect(
                 .get()
                 .pipe(Effect.orDie)
               if (!row) return { allowed: false }
-              if (
-                !row.binding.dispatched ||
-                row.binding.leaseOwner !== owner ||
-                (row.binding.leaseExpiresAt ?? 0) <= now ||
-                row.binding.revision !== row.contract.revision ||
-                row.contract.status !== "active" ||
-                row.contract.pendingRevision
-              )
-                return { allowed: false }
+              if (!ownsExecution(row, owner, now)) return { allowed: false }
               if (now >= row.contract.spec.budget.deadline)
                 return {
                   allowed: false,
@@ -163,7 +180,7 @@ const layer = Layer.effect(
                 }
               const used = kind === "turn" ? row.binding.turnsUsed : row.binding.actionsUsed
               const limit = kind === "turn" ? row.contract.spec.budget.turns : row.contract.spec.budget.actions
-              if (used >= limit)
+              if (limit !== undefined && used >= limit)
                 return {
                   allowed: false,
                   escalation: {
@@ -236,22 +253,55 @@ const layer = Layer.effect(
     return Service.of({
       owner,
       issue: Effect.fn("ProContractOpenCode.issue")(function* (input) {
-        const receipt = yield* contracts.issue({
-          id: input.id,
-          scope: input.scope,
-          spec: input.spec,
-          executor: "opencode",
-        })
-        if (receipt.decision.type === "rejected" || !receipt.contract) return receipt
-        const execution = yield* create({
-          contractID: receipt.contract.id,
-          revision: receipt.contract.revision,
-          location: input.location,
-          model: input.model,
-          executionPolicy: input.executionPolicy,
-          nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
-        })
-        return { ...receipt, execution }
+        // The duty, its execution binding, and the Session index are admitted as one durable unit.
+        return yield* db
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                const existing = yield* get(input.id)
+                if (
+                  existing &&
+                  (existing.location.directory !== input.location.directory ||
+                    existing.location.workspaceID !== input.location.workspaceID ||
+                    existing.model.id !== input.model.id ||
+                    existing.model.providerID !== input.model.providerID ||
+                    (existing.model.variant ?? "default") !== (input.model.variant ?? "default") ||
+                    existing.executionPolicy !== input.executionPolicy)
+                ) {
+                  const head = yield* contracts.quiet(input.scope)
+                  // This is an adapter admission rejection, not a Kernel command; report the unchanged ledger head.
+                  return {
+                    decision: { type: "rejected" as const, reason: "OpenCode execution binding does not match" },
+                    state: {
+                      contracts: Object.fromEntries(
+                        (yield* contracts.list()).map((contract) => [contract.id, contract]),
+                      ),
+                      attestations: {},
+                    },
+                    frontier: head.frontier,
+                    hash: head.ledgerHash,
+                  }
+                }
+                const receipt = yield* contracts.issue({
+                  id: input.id,
+                  scope: input.scope,
+                  spec: input.spec,
+                  executor: "opencode",
+                })
+                if (receipt.decision.type === "rejected" || !receipt.contract) return receipt
+                const execution = yield* create({
+                  contractID: receipt.contract.id,
+                  revision: receipt.contract.revision,
+                  location: input.location,
+                  model: input.model,
+                  executionPolicy: input.executionPolicy,
+                  nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
+                })
+                return { ...receipt, execution }
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(Effect.orDie)
       }),
       create,
       claim: Effect.fn("ProContractOpenCode.claim")(function* (contractID, now) {
@@ -326,6 +376,16 @@ const layer = Layer.effect(
       }),
       get,
       forSession,
+      current: Effect.fn("ProContractOpenCode.current")(function* (sessionID, now) {
+        const row = yield* db
+          .select({ binding: ProContractOpenCodeTable.data, contract: ProContractTable.data })
+          .from(ProContractOpenCodeTable)
+          .innerJoin(ProContractTable, eq(ProContractTable.id, ProContractOpenCodeTable.contract_id))
+          .where(eq(ProContractOpenCodeTable.session_id, sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        return row && ownsExecution(row, owner, now) && now < row.contract.spec.budget.deadline ? row : undefined
+      }),
       due: Effect.fn("ProContractOpenCode.due")(function* (now) {
         const rows = yield* db
           .select({ binding: ProContractOpenCodeTable.data, contract: ProContractTable.data })
@@ -426,7 +486,12 @@ const layer = Layer.effect(
                   (input.attempt === "new" && row.binding.attempts >= row.contract.spec.resolution.maxAttempts) ||
                   input.now >= row.contract.spec.budget.deadline
                 )
-                  return { contractID: row.contract.id, revision: row.contract.revision }
+                  return {
+                    contractID: row.contract.id,
+                    revision: row.contract.revision,
+                    reason:
+                      input.now >= row.contract.spec.budget.deadline ? "OpenCode deadline exhausted" : input.reason,
+                  }
                 yield* tx
                   .update(ProContractOpenCodeTable)
                   .set({
@@ -448,7 +513,7 @@ const layer = Layer.effect(
             { behavior: "immediate" },
           )
           .pipe(Effect.orDie)
-        if (escalation) yield* contracts.escalate({ ...escalation, reason: input.reason, time: input.now })
+        if (escalation) yield* contracts.escalate({ ...escalation, time: input.now })
       }),
       reserveTurn: (sessionID, now) => reserve(sessionID, now, "turn"),
       reserveAction: (sessionID, now) => reserve(sessionID, now, "action"),

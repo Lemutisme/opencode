@@ -2,7 +2,8 @@
   "version": 1,
   "metadata": {
     "name": "session-runner/openai-chat-streams-text",
-    "recordedAt": "2026-06-02T19:52:25.084Z"
+    "recordedAt": "2026-06-02T19:52:25.084Z",
+    "requestAdaptation": "Expected request updated to include Contract admission guidance. Original recorded provider response retained; this is not a live recording of the modified prompt."
   },
   "interactions": [
     {
@@ -13,7 +14,7 @@
         "headers": {
           "content-type": "application/json"
         },
-        "body": "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one short sentence.\"}],\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":20,\"temperature\":0}"
+        "body": "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"Contract admission: this Session is not bound to an issued Contract. Before using effectful tools, call contract_propose when the request requires a future trigger, asynchronous or multi-Session work, durable follow-up, or later external evaluation. Keep the optimization goal separate from the exact evidence claim that may be settled. An implementation Contract that promises a build command or user-named output artifact must include finite replay checks and every user-named artifact path. Do not guess implementation-specific source paths; the build check covers its inputs. Use principal-only evidence only when no honest mechanical criterion exists. Preserve user-provided quality criteria, evaluation protocols, stopping rules, and assumptions in spec.brief. Do not invent generic exploration, edge-case, or validation requirements; execution policy is supplied separately. Proceed normally only when both work and validation finish in this Session; when unsure, propose.\"},{\"role\":\"user\",\"content\":\"Say hello in one short sentence.\"}],\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":20,\"temperature\":0}"
       },
       "response": {
         "status": 200,

@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "58d24b69-5d15-4935-9fb8-a362484dbd6f",
+  "id": "3d9b2f72-8501-456f-aa67-d13cd9e1620a",
   "prevIds": [
-    "07dc4d15-07d4-4344-9d83-139e95c0e5cf"
+    "58d24b69-5d15-4935-9fb8-a362484dbd6f"
   ],
   "ddl": [
     {
@@ -12,6 +12,10 @@
     },
     {
       "name": "data_migration",
+      "entityType": "tables"
+    },
+    {
+      "name": "pro_contract_policy",
       "entityType": "tables"
     },
     {
@@ -205,6 +209,26 @@
       "name": "time_completed",
       "entityType": "columns",
       "table": "data_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "pro_contract_policy"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "pro_contract_policy"
     },
     {
       "type": "integer",
@@ -2017,6 +2041,15 @@
       "nameExplicit": false,
       "name": "data_migration_pk",
       "table": "data_migration",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "scope"
+      ],
+      "nameExplicit": false,
+      "name": "pro_contract_policy_pk",
+      "table": "pro_contract_policy",
       "entityType": "pks"
     },
     {

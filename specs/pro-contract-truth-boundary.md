@@ -1,10 +1,10 @@
 # ProContract Truth Boundary
 
-This audit records what the current ProContract institution checks itself, what
-it accepts from a trusted caller, and what remains the responsibility of an
-external verifier. It describes the runtime retained on
-`procontract-strength` after the default execution policy was removed. It does
-not claim that a hash proves the truth of the bytes it names.
+This document records what the current ProContract implementation checks, what
+it accepts from a trusted caller, and what an external verifier must establish.
+Use the [runbook](pro-contract-runbook.md) for the supported operation path and
+the [delivery checklist](pro-contract-delivery.md) to qualify one exact release.
+A hash identifies bytes; it does not prove their truth.
 
 ## Result
 
@@ -29,8 +29,8 @@ external mechanical verifier
 ```
 
 The first arrow is only fully implemented for the subordinate replay report.
-Final principal evidence crosses it by convention rather than by a prescribed
-report contract.
+Final principal evidence has mandatory caller-supplied coordinates, but its
+report format and semantic interpretation remain the external adapter's responsibility.
 
 ## Current path
 
@@ -43,11 +43,11 @@ principal-approved Spec
   -> institution captures exact Location Snapshot as subjectHash
   -> optional frozen replay runs on that Snapshot
      -> unavailable: escalate
-     -> failed finite report: durable visible challenge, return dormant
+     -> failed finite report: repair feedback, no handoff, same attempt
      -> passed finite report: record replay evidence on handoff
   -> verification
   -> principal or external adapter evaluates exact handoff
-     -> POST opaque evidenceHash to attest
+     -> POST evaluated revision/specHash/subjectHash and evidenceHash to attest
      -> or POST exact revision/subject plus evidenceHash to challenge
   -> kernel validates coordinates and authority
   -> discharge, explicit rejection, or challenge-driven reopening
@@ -63,15 +63,17 @@ bit, replay evidence hash, attestation, or challenge through that tool.
 
 ### Frozen terms
 
-`Spec` freezes the trigger, optimization goal, optional future policy, handoff
-brief, exact prerequisite revisions, capabilities, budget, evidence policy,
-and resolution policy. The kernel recomputes its canonical `specHash` at issue
+`Spec` freezes the trigger, optimization goal, handoff brief, exact prerequisite
+revisions, capabilities, budget, evidence policy, and resolution policy.
+Execution strategy text belongs to the separate `executionPolicy` binding, not
+`Spec`, and cannot change settlement terms or authority. The kernel recomputes its canonical `specHash` at issue
 and revision admission. A revision cannot change dependency edges, and only
 the issuer can accept it.
 
 The optional replay policy freezes:
 
-- argv, working directory, timeout, and expected exit for each check;
+- argv, working directory, stdin, timeout, expected exit, and optional exact
+  stdout/stderr hash predicates for each check;
 - expected hashes for protected regular files;
 - exact required artifact paths.
 
@@ -85,22 +87,25 @@ policy is configured. It captures a subject and stores the replay report, but
 the replay result does not invoke a kernel transition or replace the Session. Failed
 checks are repair feedback, not a consumed semantic attempt. Successful checks
 are observations, not completion or authority to attest. The ordinary tool
-action reservation and Contract deadline bound these checks; no additional
-budget is granted.
+action accounting and Contract deadline apply; an explicit action ceiling is
+enforced when present. No additional budget is granted.
 
 `contract_report_ready` reserves one shared action when replay is configured,
-then captures a content-addressed Snapshot before replay. Its replay is bounded
+then captures a content-addressed Snapshot before replay. Reservation still
+records usage when no cumulative action ceiling is configured. Its replay is bounded
 by the remaining Contract deadline. Reporting blocked or requesting a genuine
 revision remains a control operation; it is not a substitute for a free replay.
 Replay materializes that exact subject in a fresh temporary tree, rejects paths
 that escape the candidate root, runs checks serially with timeouts and bounded
 output capture, and inspects protected files and artifacts after execution.
 
-Replay report version 1 commits:
+Replay report version 2 commits:
 
 - Contract ID, replay policy hash, and subject hash;
-- pass or fail;
+- pass or fail and executor identity/isolation declaration;
 - argv, relative cwd, expected and actual exit;
+- a content-addressed observation receipt per check, including stdin/output
+  hashes and completeness, execution outcome, and predicate match status;
 - stdout and stderr hashes plus truncation flags;
 - bounded, escaped, candidate-controlled output excerpts for failed checks;
 - protected-file existence, observed hash, and expected hash;
@@ -123,17 +128,50 @@ before bounding the text. They are non-authoritative candidate output, not
 verifier instructions. This is not a confidentiality boundary: unknown secrets
 printed from files or arbitrary external sources cannot be reliably recognized.
 
-The identifier hashes compact `JSON.stringify(report)` bytes. `writeJson`
-stores an equivalent pretty JSON value, so the raw stored-file hash need not
-equal `evidenceHash`; consumers must decode and canonically re-encode the value
-before checking that identifier.
+The identifier hashes the exact stored compact `JSON.stringify(report)` bytes.
+Reports are created exclusively with read-only file mode; reading verifies the
+raw bytes against `evidenceHash`. Observation blobs and receipts also have
+content-addressed integrity checks. This detects missing or changed bytes at
+that interface, not a privileged rewrite of the whole trusted store.
+
+A matched stdout/stderr predicate proves the observed complete bytes match the
+frozen hash. It does not prove that a target statement executed or that behavior
+was covered; each observation explicitly records `targetExecution: unobserved`.
 
 The kernel accepts a replay-bearing handoff only when the result names the
 frozen replay policy and the captured subject. A replay-configured Contract
 cannot be discharged unless the recorded replay passed and still matches both.
 Replay evidence cannot itself be reused as the principal evidence hash.
 
+### Budgets and execution identity
+
+Every Contract has an absolute deadline. Optional `turns` and `actions` are
+cumulative ceilings across its attempts; omission means no such ceiling, not a
+large finite sentinel. Counters remain recorded. Recovery, retry, and Session
+replacement do not reset the original deadline or spent counts. Explicit
+historical caps retain their meaning. Individual-operation timeouts and
+infrastructure fault guards are distinct from cumulative budgets.
+
+A bound executor uses its recorded model and variant. A prompt cannot silently
+substitute another model while leaving the binding unchanged. A principal
+release records the terminal transition and interrupts work owned by its
+receiving process. Use the active server's HTTP route to interrupt that server;
+a separate local CLI process cannot interrupt it directly. This is not a
+distributed cancellation protocol or proof that arbitrary external
+side effects have been undone.
+
 ### Final adjudication
+
+The principal must submit the coordinates it actually evaluated:
+`revision`, `specHash`, `subjectHash`, and `evidenceHash`. The service does not
+fill these from the latest handoff. A late result for handoff A cannot therefore
+be relabeled as support for handoff B. Stale coordinates are rejected (HTTP
+`409`) without discharging the current Contract. The caller must not "repair"
+that rejection by copying newer coordinates onto the old report.
+
+These are object coordinates, not a handoff-generation identifier. Re-adjudicating
+the same revision and subject after a challenge is allowed. Challenge withdraws
+current Contract support, not an arbitrary historical acceptance record.
 
 Discharge is a total kernel transition. It requires:
 
@@ -184,11 +222,30 @@ still a convenience boundary, not an adversarial principal boundary: these
 modes cannot support a non-bypass claim when an untrusted executor can recover
 the server credential or reach the plane database directly.
 
+## Opt-in strategy promotion
+
+The strategy adapter chooses execution text for explicitly opted-in future
+Contracts. It uses ordinary Contracts for candidates, evaluations, and selection
+support; it adds no privileged kernel transition. Selected policy support is
+recorded as ordinary exact-revision requirements. Challenged or withdrawn
+support cannot remain authority for new issuance, and existing dependents use
+the normal responsibility-closure rules.
+
+The task-pareto comparator operates on complete records under a separately
+frozen protocol: fixed repeats per `(panel, task)`, no task-mean regression, at least one
+strict improvement, and retained safety and established-full-pass protections.
+All ties do not promote. Recorded scores and safety observations are trusted
+adapter inputs; checking their structure does not authenticate the evaluator
+or independently measure capability. A successful bind proves selection took
+effect, not that recursive improvement has been demonstrated.
+
 ## External evaluation adapter
 
 The existing `issueEvaluation` and `settleEvaluation` path gives an external
 evaluation a durable obligation and binds its identity to the delivery ID,
-delivery revision, subject, and a caller-provided `evaluatorHash`. It correctly
+delivery revision, subject, and a caller-provided `evaluatorHash`. Settlement
+requires an already independently attested, discharged Delivery with the exact
+handoff; it does not replace initial Delivery attestation. It correctly
 reopens a delivery on a failed report and can discharge a separate evaluation
 Contract on a passing report.
 
@@ -198,11 +255,10 @@ disclosure, summary, and time from its caller. It does not retrieve a report by
 hash, execute the named evaluator, authenticate report origin, or recompute a
 decision from frozen observations.
 
-## Minimum next verifier experiment
+## External verifier contract
 
-Do not add a general evidence DSL. First close one small lifecycle using the
-existing replay structures and a verifier report whose format is local to the
-experiment.
+Keep verifier-specific formats outside the kernel. Use the existing replay
+structures and a finite, content-addressed external report.
 
 The external verifier should receive or fetch:
 
@@ -228,7 +284,7 @@ stale/mismatched coordinates         -> no authoritative mutation
 verifier unavailable                 -> no fabricated pass or fail
 ```
 
-For the first native-Linux lifecycle, a wrong subject or stale revision is the
+For each release qualification, a wrong subject or stale revision is a
 required negative control. It must leave the authoritative Contract state
 unchanged and append an explicit rejected decision if it reaches the kernel.
 
@@ -238,7 +294,7 @@ evidence vocabulary be extended. Any future extension should preserve verifier
 execution outside the pure kernel and make the kernel consume only finite,
 decoded data.
 
-## Evidence for this audit
+## Implementation and validation pointers
 
 Implementation paths:
 
@@ -252,7 +308,9 @@ Implementation paths:
 - `packages/server/src/middleware/authorization.ts`
 - `packages/opencode/src/cli/cmd/contract.ts`
 
-Focused tests establish the bounded claims above:
+The focused test suite includes these checks. A list of test names is not a
+release pass record; record actual commands, results, and the exact source
+revision in the delivery report:
 
 - `ProContract kernel > rejects executor testimony and preserves authoritative state`
 - `ProContract kernel > turns challenged evidence into renewed duty without erasing history`

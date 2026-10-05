@@ -1,1187 +1,420 @@
-# ProContract Evaluation Runbook
+# ProContract operations
 
-This runbook covers the local OpenCode build, interactive and unattended
-ProContract operation, one-competition MLE-bench calibration, and ProgramBench
-candidate evaluation. It is intentionally operational. The normative design is
-in [`pro-contract.md`](pro-contract.md). Non-default controller experiments are
-indexed in [`pro-contract-experiments.md`](pro-contract-experiments.md).
+Use one checkout and its generated client for the entire lifecycle. This is the
+current native operation path, not a recipe for replaying historical benchmark
+cohorts. See [delivery qualification](pro-contract-delivery.md), the
+[truth boundary](pro-contract-truth-boundary.md), and the
+[experiment index](pro-contract-experiments.md).
 
-## 1. Operating boundary
-
-Keep these responsibilities separate:
+## 1. Boundary and prerequisites
 
 ```text
-OpenCode / ProContract
-  intent proposal, ratification, durable obligation, execution attempts,
-  subject-bound handoff, challenge, attestation, and quiescence
-
-Benchmark adapter
-  cleanroom layout, candidate packaging, structural preflight, evaluator
-  invocation, and conversion of a verifier result into attest/challenge
-
-External evaluator
-  private labels/tests and the final score
+ProContract       freezes duty, binds execution, records handoff and adjudication
+Task adapter      exports the exact candidate, runs evaluation, stores reports
+External verifier owns task-specific truth, private tests, and scores
+Principal         approves issuance, attestation, selection, release, and rollback
 ```
 
-Do not add MLE-bench datasets, ProgramBench candidate profiles, Docker layout,
-or test commands to the ProContract schema.
+The local deployment is cooperative. A shared OS user, process environment, or
+database is not an adversarial isolation boundary. Keep credentials, OpenCode
+state, private evaluators, and reports outside the writable candidate Location.
+For untrusted executors, provide separate OS/container identities, restricted
+mounts, network policy, and a principal service they cannot access. A hash alone
+neither authenticates a verifier nor proves a result.
 
-The current deployment is cooperative: the plane, executor, credentials, and
-database may share one OS user. Do not claim adversarial non-bypass. Never open
-a live SQLite WAL with a host-side SQLite client; inspect state through HTTP, or
-stop the server before copying the database.
-
-An unattended adapter must deny `external_directory` unless the Contract
-explicitly delegates it. Otherwise a mistyped workdir can wait forever on an
-interactive permission request before the shell timeout begins.
-
-## 2. Repository layout and prerequisites
-
-The commands below assume sibling repositories:
-
-```text
-Projects/
-  opencode/
-  ProgramBench/
-  MLE-bench/
-```
-
-Set paths once:
+Prerequisites for local operation: Bun, Git, `curl`, and `jq`. For source installs,
+use Node 24 LTS for dependency native-build hooks; the compiled binary does not
+require Node. Qualification used Bun 1.3.14 and Node 24.21.0. Benchmark tools
+and containers belong to the external adapter, not the Contract schema.
 
 ```bash
-export PROJECTS="$HOME/Documents/Projects"
-export OPENCODE_REPO="$PROJECTS/opencode"
-export PROGRAMBENCH_REPO="$PROJECTS/ProgramBench"
-export MLEBENCH_REPO="$PROJECTS/MLE-bench"
-export ARTIFACT_ROOT="$PROJECTS/run-artifacts"
-export MODEL='openai/gpt-5.5'
-export VARIANT='high'
+export OPENCODE_REPO=/path/to/opencode
+export WORKSPACE=/path/to/candidate
+export ARTIFACT_ROOT=/path/to/release-artifacts
+export MODEL=provider/model
+export VARIANT=high
 mkdir -p "$ARTIFACT_ROOT"
 ```
 
-Required tools:
+## 2. Build one revision
 
-```bash
-command -v git
-command -v docker
-command -v uv
-command -v bun || test -x "$HOME/.bun/bin/bun"
-docker version
-```
-
-Use Python 3.12 for MLE-bench. On macOS, Linux/amd64 containers run under
-emulation and results are calibration-only unless reproduced on the declared
-Linux environment.
-
-## 3. Build OpenCode
-
-The repository default branch is `dev`; consolidated ProContract development
-currently lives on `procontract-strength`. Record the exact commit for every run.
+The repository default branch is `dev`. Record the actual source and dirty
+state; a branch name is not a release identity.
 
 ```bash
 cd "$OPENCODE_REPO"
-git status --short
-git branch --show-current
-export PATH="$HOME/.bun/bin:$PATH"
-bun install
-```
+git rev-parse HEAD > "$ARTIFACT_ROOT/source-revision.txt"
+git status --short > "$ARTIFACT_ROOT/source-status.txt"
+bun install --frozen-lockfile
 
-Run typechecks and the focused ProContract tests from package directories:
-
-```bash
 cd "$OPENCODE_REPO/packages/core"
 bun typecheck
 bun test test/pro-contract.test.ts test/session-runner.test.ts test/location-layer.test.ts
 
+cd "$OPENCODE_REPO/packages/client"
+bun typecheck
+
 cd "$OPENCODE_REPO/packages/opencode"
 bun typecheck
 bun test test/server/httpapi-pro-contract.test.ts
+bun run script/build.ts --single --skip-install
 ```
 
-Build and smoke-test only the current host binary:
+Set `OPENCODE_BIN` to the host binary printed by the build. For Linux x64:
 
 ```bash
-cd "$OPENCODE_REPO/packages/opencode"
-bun run script/build.ts --single --skip-embed-web-ui --skip-install
-```
-
-On Apple Silicon the binary is:
-
-```bash
-export OPENCODE_BIN="$OPENCODE_REPO/packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
+export OPENCODE_BIN="$OPENCODE_REPO/packages/opencode/dist/opencode-linux-x64/bin/opencode"
 "$OPENCODE_BIN" --version
+sha256sum "$OPENCODE_BIN" > "$ARTIFACT_ROOT/binary.sha256"
 ```
 
-Build all cross-platform binaries when a Linux benchmark container needs its
-own binary:
+The build replaces `packages/opencode/dist`; do not rebuild a binary used by a
+running or frozen cohort. If the public Protocol or Server `HttpApi` changes,
+run `bun run generate` in `packages/client`, never edit generated files by hand.
+Regenerate the legacy JavaScript SDK with `./packages/sdk/js/script/build.ts`
+when its public API changes.
+
+## 3. Run the durable service
+
+Use a dedicated durable state directory outside the candidate Location. For
+release qualification, choose a fresh directory rather than a running cohort's
+state. Export the **same** paths in the server and every principal CLI terminal:
 
 ```bash
-cd "$OPENCODE_REPO/packages/opencode"
-bun run script/build.ts --skip-embed-web-ui --skip-install
-
-export OPENCODE_LINUX_X64="$OPENCODE_REPO/packages/opencode/dist/opencode-linux-x64/bin/opencode"
-export OPENCODE_LINUX_ARM64="$OPENCODE_REPO/packages/opencode/dist/opencode-linux-arm64/bin/opencode"
+export OPENCODE_STATE_ROOT=/path/to/opencode-release-state
+export XDG_DATA_HOME="$OPENCODE_STATE_ROOT/data"
+export XDG_STATE_HOME="$OPENCODE_STATE_ROOT/state"
+export XDG_CONFIG_HOME="$OPENCODE_STATE_ROOT/config"
+export XDG_CACHE_HOME="$OPENCODE_STATE_ROOT/cache"
+mkdir -p -m 700 "$OPENCODE_STATE_ROOT" \
+  "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
 ```
 
-The build script deletes `packages/opencode/dist` before rebuilding.
-
-## 4. ProContract interaction
-
-### 4.1 Preferred interactive formation
-
-Start OpenCode with an explicit model so an approved proposal can bind the same
-model to the future Contract Session:
+Configure provider access for this isolated environment before execution.
+Omitting these exports uses the user's existing default state and can mix
+release revisions or experiments. Supply the principal secret through your
+supervisor; do not commit it or place it in candidate-visible configuration.
 
 ```bash
-cd /path/to/workspace
+: "${OPENCODE_SERVER_PASSWORD:?Set a principal-only server password}"
+export OPENCODE_SERVER_USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}"
+export API=http://127.0.0.1:4096
+
+cd "$WORKSPACE"
+"$OPENCODE_BIN" serve --hostname 127.0.0.1 --port 4096 --print-logs
+```
+
+In another principal terminal with those credentials:
+
+```bash
+api() {
+  curl --fail-with-body --silent --show-error --max-time 30 \
+    --user "$OPENCODE_SERVER_USERNAME:$OPENCODE_SERVER_PASSWORD" "$@"
+}
+api "$API/global/health"
+```
+
+Use systemd, launchd, or a container supervisor for unattended service. Probe
+`/global/health`; a live PID alone does not establish progress. Restart with the
+same durable state after infrastructure failure. Use container init/reaping and
+bounded process operations. Do not start a second scheduler.
+
+`contract sweep` runs one recovery/dispatch cycle against local durable state;
+it is not a replacement for the long-running service. Recovery checks deadlines,
+leases, and pending dispatch without granting new authority or budget. Never
+open a live SQLite WAL through a separate host SQLite client: inspect via HTTP,
+or stop the service before copying state.
+
+## 4. Issue and inspect
+
+### Interactive admission
+
+Start a primary Session with an explicit model:
+
+```bash
+cd "$WORKSPACE"
 "$OPENCODE_BIN" . --model "$MODEL"
 ```
 
-Describe the task naturally. For future-triggered, asynchronous, multi-Session,
-durable-follow-up, or evidence-gated work, the model can call
-`contract_propose`. OpenCode displays the exact goal, authority, budget,
-dependencies, evidence policy, and `specHash`.
+For durable follow-up or evidence-gated work, `contract_propose` presents the
+exact terms and `specHash` for principal confirmation. Rejecting the proposal
+creates no Contract or execution binding. Ordinary work need not create a
+Contract. `--auto` does not grant principal governance authority; unattended
+adapters must issue their frozen Contract themselves.
 
-Ordinary work proceeds directly. When future attention or later adjudication is
-needed, a primary Session may voluntarily propose one Contract; duplicate
-proposals after delegation are rejected. An implementation proposal promising a build
-command or user-named output artifact is incomplete unless its evidence includes
-finite replay checks and every user-named artifact path. Do not guess source
-filenames before implementation; a build check covers its inputs. Proposal
-admission rejects artifact paths absent from the original request.
+The goal, brief, capabilities, dependencies, evidence, and budget are terms.
+Execution strategy is separate: `executionPolicy` is binding data, not
+`spec.policy`, a requirement flag, or a change to the user goal. A strategy
+cannot expand authority or weaken acceptance. The former `contract policy`
+configuration path is not supported; use the opt-in strategy path below.
 
-The human choices are:
+### Manual CLI issue
 
-```text
-Confirm and start     issue the exact displayed specification
-Revise                reject with correction feedback
-Continue normally     create no Contract
-```
-
-Rejecting a proposal creates neither a Contract nor an execution binding.
-
-A proposal may bind one previously discharged Contract as its execution policy
-by setting `policy: true` on that requirement. OpenCode injects the policy
-Contract's exact `spec.policy` and evidence identities into the dedicated
-Session. A Policy Contract keeps its current ratification work in `goal` and
-the future execution rule in `policy`; the two must not be conflated. The policy
-is part of the approved `specHash`, applies only to the new Contract, and cannot
-override its authority or settlement terms. Challenging the Policy Contract
-invalidates its dependent support through the normal remediation path.
-
-To retain one principal-selected policy for future natural-language proposals,
-select it in the location's `opencode.json` after its Contract is discharged:
-
-```bash
-opencode contract policy pct_policy_example --config ./opencode.json
-```
-
-The command fails unless the exact Contract is discharged with a current
-handoff and attestation, then prints the specification, subject, evidence, and
-attestation identities written into the selection. Its resulting configuration
-is equivalent to:
-
-```json
-{
-  "contract_policy": {
-    "contractID": "pct_policy_example",
-    "revision": 1,
-    "policy": true
-  }
-}
-```
-
-The setting is a default compiler input, not an authority grant. An explicit
-policy in a proposal overrides it, every inherited edge remains visible in the
-approval UI, and a challenged default causes new issuance to fail closed.
-Delete the setting to clear it or replace the exact ID and revision after a new
-policy is independently discharged. Existing Contracts keep their frozen
-policy edge.
-
-```bash
-opencode contract policy --clear --config ./opencode.json
-```
-
-### 4.2 Unattended formation
-
-Keep a server alive after the initial Session exits:
-
-```bash
-export PORT=4096
-export WORKSPACE=/path/to/workspace
-export RUN_LOG="$ARTIFACT_ROOT/opencode-server-$(date +%Y%m%d-%H%M%S).log"
-
-cd "$WORKSPACE"
-supervise_opencode() {
-  child=
-  trap 'test -z "$child" || kill "$child" 2>/dev/null; exit' INT TERM
-  while true; do
-    "$OPENCODE_BIN" serve --hostname 127.0.0.1 --port "$PORT" --print-logs &
-    child=$!
-    failures=0
-    while kill -0 "$child" 2>/dev/null; do
-      sleep 5
-      if curl --max-time 5 -fsS "http://127.0.0.1:$PORT/global/health" >/dev/null; then
-        failures=0
-      else
-        failures=$((failures + 1))
-      fi
-      test "$failures" -lt 3 || kill "$child" 2>/dev/null
-    done
-    wait "$child" || true
-    child=
-  done
-}
-supervise_opencode >"$RUN_LOG" 2>&1 &
-export OPENCODE_SERVER_PID=$!
-
-until curl --max-time 5 -fsS "http://127.0.0.1:$PORT/global/health" >/dev/null; do sleep 1; done
-
-"$OPENCODE_BIN" run \
-  --attach "http://127.0.0.1:$PORT" \
-  --dir "$WORKSPACE" \
-  --model "$MODEL" \
-  --variant "$VARIANT" \
-  --auto \
-  "<original task instruction>"
-```
-
-`--auto` supplies standing approval only for executor actions. It rejects
-Contract formation and every other principal governance decision. An unattended
-benchmark adapter must issue its frozen Contract before starting the executor.
-
-For autonomous benchmark claims, the trusted adapter owns issuance. Model
-proposal behavior is a separate interactive metric, not benchmark authority.
-
-### 4.3 Manual issue and inspection
-
-Manual issue uses the current directory as the execution Location:
+For local principal operation, `--deadline` selects deadline-only execution
+unless `--turns` or `--actions` is explicitly supplied:
 
 ```bash
 cd "$WORKSPACE"
+DEADLINE_ISO=$(bun -e 'console.log(new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString())')
 "$OPENCODE_BIN" contract issue \
-  --id pct_example \
   --scope example-run \
-  --goal "Maximize the requested artifact's quality within the approved budget" \
-  --claim "The exact artifact satisfies the frozen delivery checks" \
-  --brief "Preserve unresolved assumptions in the handoff" \
-  --model "$MODEL" \
-  --variant "$VARIANT" \
-  --write \
-  --turns 100
-
-"$OPENCODE_BIN" contract list --scope example-run
-"$OPENCODE_BIN" contract show pct_example
-"$OPENCODE_BIN" contract quiet example-run
-"$OPENCODE_BIN" contract export pct_example ./exact-subject
+  --goal "Implement the approved behavior and preserve compatibility" \
+  --model "$MODEL" --variant "$VARIANT" --write \
+  --deadline "$DEADLINE_ISO"
 ```
 
-The current manual CLI overrides provider turns only; its default action budget
-remains `32`. Use model-authored `contract_propose` or the HTTP issue payload
-when a long run needs an explicit larger action budget.
+Without `--deadline`, the general-purpose defaults remain 24 hours, four
+provider turns, and 32 actions. These are not the future ProgramBench profile.
+Use HTTP when the issue payload must include explicit replay/evidence terms.
+Do not issue the same task twice through CLI and HTTP.
 
-`contract quiet` exits with code `2` while obligations remain outstanding.
+### Explicit HTTP issue
 
-### 4.4 Live HTTP control
-
-Use HTTP while the server is running:
+For precise unattended terms, issue through authenticated HTTP. This alternative example
+uses a six-hour absolute deadline and **omits** cumulative turn/action caps:
 
 ```bash
-export API="http://127.0.0.1:$PORT"
+DEADLINE=$(bun -e 'console.log(Date.now() + 6 * 60 * 60 * 1000)')
+PROVIDER=${MODEL%%/*}
+MODEL_ID=${MODEL#*/}
 
-curl -fsS "$API/api/contract?scope=example-run" | jq .
-curl -fsS "$API/api/contract/pct_example" | jq .
-curl -fsS "$API/api/contract/pct_example/execution" | jq .
-curl -fsS "$API/api/contract/quiet?scope=example-run" | jq .
+jq -n \
+  --arg directory "$WORKSPACE" \
+  --arg provider "$PROVIDER" \
+  --arg model "$MODEL_ID" \
+  --arg variant "$VARIANT" \
+  --argjson deadline "$DEADLINE" \
+  '{
+    id:"pct_example",
+    scope:"example-run",
+    goal:"Implement the requested behavior and preserve the stated compatibility requirements",
+    brief:"Use the original task as the acceptance source; record unresolved assumptions",
+    location:{directory:$directory},
+    model:{providerID:$provider,id:$model,variant:$variant},
+    authority:["filesystem.read","filesystem.write","process.execute"],
+    budget:{deadline:$deadline},
+    evidence:{type:"principal",claim:"The exact handoff satisfies the approved task checks"}
+  }' > "$ARTIFACT_ROOT/issue.json"
+
+api -X POST -H 'content-type: application/json' \
+  "$API/api/contract" --data-binary "@$ARTIFACT_ROOT/issue.json" |
+  tee "$ARTIFACT_ROOT/issued.json"
+
+api "$API/api/contract/pct_example" | jq .
+api "$API/api/contract/pct_example/execution" | jq .
+api "$API/api/contract/quiet?scope=example-run" | jq .
 ```
 
-Lifecycle:
-
-```text
-dormant -> active -> verification -> discharged
-active/verification -> escalated
-visible challenge -> dormant -> active in a fresh Session
-issuer release -> released
-```
-
-The executor may call:
-
-```text
-contract_check
-contract_report_ready
-contract_report_blocked
-contract_propose_revision
-```
-
-For a replay-configured Contract, `contract_check` rehearses the frozen replay
-policy against a snapshot of the current candidate. It returns a subject-bound
-diagnostic, without creating a handoff, challenge, or new semantic attempt.
-The executor can repair and check again in the same Session. Checks consume
-the shared action budget and are bounded by the Contract deadline; they do not
-create a second retry budget. A passing check cannot authorize discharge or
-be inherited by a changed candidate. `contract_report_ready` still captures
-and verifies its own exact handoff before principal adjudication. A configured
-readiness replay also spends one shared action and is bounded by the remaining
-Contract deadline. A failed completed readiness replay returns its evidence hash,
-subject hash, and repair diagnostic without submitting a handoff or starting a
-new semantic attempt. The same Session may repair and try again while budget
-remains. Unavailable verification still escalates; exhausting the budget does
-not authorize a handoff or quiet state.
-
-V2 selects Contract lifecycle guidance from the durable Session binding. The
-default unbound agent receives admission guidance; an already-bound executor
-receives execution guidance instead. The latter does not ask the executor to
-propose another Contract merely because external evaluation will occur later.
-Guidance is a domain-owned System Context source, not another authority check.
-Actual revision proposals still require the principal's decision.
-
-A revision petition pauses executor turns, actions, leases, and retries until
-the principal decides it through the existing permission boundary. Approval
-accepts the proposed revision; rejection keeps the original Contract and
-resumes the same semantic attempt. Headless benchmark policy should explicitly
-deny `contract_revision` unless it has a separate, trusted revision policy;
-`--auto` otherwise approves permission requests by design.
-
-Only the principal path may attest, challenge, release, decide a revision, or
-resume an escalation.
-
-### 4.5 Attest or challenge an exact handoff
-
-Read the current revision and frozen subject:
-
-```bash
-curl -fsS "$API/api/contract/pct_example" > /tmp/pct_example.json
-REVISION=$(jq -r '.data.revision' /tmp/pct_example.json)
-SUBJECT=$(jq -r '.data.handoff.subjectHash' /tmp/pct_example.json)
-```
-
-Create a content-addressed verifier report:
-
-```bash
-if command -v sha256sum >/dev/null; then
-  export EVIDENCE_HASH="$(sha256sum verifier-report.json | awk '{print $1}')"
-else
-  export EVIDENCE_HASH="$(shasum -a 256 verifier-report.json | awk '{print $1}')"
-fi
-```
-
-Attest only if the preregistered policy passed:
-
-```bash
-curl -fsS -X POST \
-  -H 'content-type: application/json' \
-  "$API/api/contract/pct_example/attestation" \
-  -d "$(jq -n --arg evidenceHash "$EVIDENCE_HASH" '{evidenceHash:$evidenceHash}')" | jq .
-```
-
-Submit a visible challenge when actionable feedback may return to the executor:
-
-```bash
-curl -fsS -X POST \
-  -H 'content-type: application/json' \
-  "$API/api/contract/pct_example/challenge" \
-  -d "$(jq -n \
-    --argjson revision "$REVISION" \
-    --arg subjectHash "$SUBJECT" \
-    --arg evidenceHash "$EVIDENCE_HASH" \
-    --arg summary "Independent verification failed; preserve passing behavior and repair the reported invariant." \
-    '{revision:$revision,subjectHash:$subjectHash,evidenceHash:$evidenceHash,disclosure:"executor",summary:$summary}')" | jq .
-```
-
-For holdout or official-test failures, use `disclosure: "sealed"`, omit
-`summary`, and do not continue adaptive evaluation against the same holdout.
-
-### 4.6 Harness replay verifier
-
-Before adding a task-specific adapter, use the optional harness replay policy
-for finite repository checks. The policy is part of `spec.evidence`, so
-ratification freezes its argv, stdin, exact output predicates, expected exits, protected file hashes, required
-artifacts, and ten-minute-per-check maximum timeout:
+Before issuance, add honest finite build/test checks and exact user-named
+artifact paths to `evidence.replay` when they represent the promised delivery.
+Do not guess internal source filenames or equate file existence with behavior.
+For example, a package that promises a build may freeze:
 
 ```json
 {
   "type": "principal",
+  "claim": "The exported artifact meets the approved behavior and packaging checks",
   "replay": {
-    "checks": [
-      { "argv": ["bun", "typecheck"], "timeout": 120000, "exit": 0 },
-      { "argv": ["bun", "test"], "timeout": 600000, "exit": 0 }
-    ],
+    "checks": [{ "argv": ["bun", "run", "build"], "timeout": 120000, "exit": 0 }],
     "protected": [],
     "artifacts": ["dist/app"]
   }
 }
 ```
 
-At `contract_report_ready`, OpenCode captures the candidate subject,
-materializes that exact tree into a temporary worktree, runs the checks there,
-and stores a hashed finite report under the control-plane data directory. A
-completed check that returns the wrong exit, a protected-file mismatch, or a
-missing artifact becomes subject-bound repair feedback in the same Session,
-without admitting that failed result as a kernel `report-ready` command. Failure
-to materialize or start the verifier escalates the Contract without creating a
-new executor attempt. A pass is recorded in the handoff and is required before
-the principal can attest; replay does not replace principal judgment in this
-conservative policy.
+Each replay check has its own timeout (at most ten minutes) and is also bounded
+by the remaining original deadline. A completed failed check is repair feedback;
+unavailable verification is not fabricated pass/fail evidence.
 
-The kernel's explicit negative-replay and principal-challenge transitions are
-unchanged: an admitted challenge may still rotate the semantic attempt. Keeping
-an unsuccessful readiness check inside search does not weaken those transitions.
+Omitted caps mean no cumulative cap, not disabled accounting. Explicit `turns`
+and `actions` retain their historical enforcement across attempts. A retry,
+Session replacement, or restart must not reset the original deadline. Generic
+issuance defaults are not a benchmark protocol; always send the frozen budget
+for experiments. Future ProgramBench cohorts use six-hour-only budgets unless
+explicitly instructed otherwise, and must independently qualify their runner,
+gateway, usage, and reporting layers. Do not change a running cohort.
 
-A replay-passing handoff proceeds to verification with every reported material
-uncertainty preserved. Uncertainty never triggers executor self-review; unknown
-blind spots require an actual verifier or principal challenge. Principal
-attestation must cite evidence independent of the replay report.
+The bound model/variant cannot be silently replaced by a prompt. New model or
+strategy experiments require an explicitly issued binding, not edits to a live
+Contract.
 
-Replay uses a host-owned `ProContractExecutor` adapter. The default local adapter
-passes only PATH, home-directory, locale, temporary-directory and Windows process
-variables; it does not inherit model or authentication environment variables.
-It still shares the host network and filesystem authority. A separate writable
-snapshot protects the live candidate from ordinary replay mutations; it is not
-a security sandbox. Files named in `protected` must be regular files with the
-approved SHA-256; candidate-owned tests that are not protected remain a weak
-proxy.
-
-Each replay check retains a structured observation and content-addressed input,
-stdout and stderr under `pro-contract/observations` in the host data directory.
-`contract_check` returns per-check execution and predicate status;
-`contract_read_observation` reads exact byte ranges using the replay evidence
-hash, check index and stream. A missing executable is unavailable; a timed-out
-process retains partial output marked incomplete. Neither can pass replay.
-An outer exit of zero cannot override a mismatched or unobserved frozen output
-predicate. `targetExecution: unobserved` is explicit even when all byte predicates
-match: proving statement execution or coverage requires a separate trusted observer.
-
-For reference tool configuration, storage semantics and the experiment gates,
-see [the observation boundary](pro-contract-observation-loop.md).
-
-### 4.7 Automatic task verifier adapter
-
-Automatic verification belongs to the task adapter, not the Contract kernel.
-Run the adapter as a supervised process that repeatedly:
+## 5. Handoff, verification, and cancellation
 
 ```text
-GET contracts in verification
-  -> fetch the exact revision, specHash, subjectHash, and execution binding
-  -> run the preregistered verifier policy
-  -> persist and hash a finite verifier report
-  -> POST attestation or subject-bound challenge
+dormant -> active -> verification -> discharged
+visible challenge -> dormant remediation
+sealed challenge or unsupported dependency -> escalated
+principal release -> released
 ```
 
-An adapter may use a simple polling loop around the existing API:
+Executors can use `contract_check`, `contract_report_ready`,
+`contract_report_blocked`, and `contract_propose_revision`. They cannot attest,
+challenge, release, or approve their own revisions. Readiness captures an exact
+Snapshot; an earlier passing check does not authorize a changed candidate.
+Checks and retries remain within the same shared accounting/deadline.
+
+A revision petition pauses execution pending a principal decision. Deny
+`contract_revision` in unattended adapter policy unless a separately trusted
+revision policy exists. Deny `external_directory` unless explicitly delegated;
+an interactive permission wait is not a process timeout.
+
+### Evaluate the captured subject
+
+Fetch coordinates **before evaluation**, save them with the report, and export
+the exact handoff through the local principal CLI:
 
 ```bash
-while sleep 1; do
-  curl -fsS "$API/api/contract" |
-    jq -r '.data[] | select(.status == "verification") | .id'
-done | while read -r CONTRACT_ID; do
-  "$VERIFIER" "$API" "$CONTRACT_ID"
-done
+api "$API/api/contract/pct_example" > "$ARTIFACT_ROOT/handoff.json"
+REVISION=$(jq -er '.data.revision' "$ARTIFACT_ROOT/handoff.json")
+SPEC_HASH=$(jq -er '.data.specHash' "$ARTIFACT_ROOT/handoff.json")
+SUBJECT=$(jq -er '.data.handoff.subjectHash' "$ARTIFACT_ROOT/handoff.json")
+
+"$OPENCODE_BIN" contract export pct_example "$ARTIFACT_ROOT/subject"
 ```
 
-`VERIFIER` owns task-specific artifact access and evaluation. It must skip a
-Contract that is no longer in `verification`, bind every result to the current
-subject, and never expose sealed holdout feedback to an executor. The executor
-does not receive principal mutation routes.
+The verifier must check that the exported subject is the recorded subject,
+use the frozen criteria, and persist its finite report outside the executor.
+Run task-specific evaluation there; do not infer pass from the existence of a
+report or from a successful build alone.
 
-### 4.8 V2 no-Contract control
+### Attest only the evaluated coordinates
 
-Use the same SessionV2 runner for causal evaluation. The control Session has no
-Contract binding and therefore receives no Contract reporting authority; its
-ordinary provider system context otherwise matches the treatment. An
-evaluation-only agent/config may
-hide `contract_propose`; do not add a production feature flag solely for a
-benchmark. Comparing a legacy Session against a V2 Contract Session confounds
-Contract semantics with runner differences.
-
-### 4.9 Durable service and authority topology
-
-`opencode serve` is the OpenCode-specific Contract daemon: run it under
-launchd, systemd, Docker, or another supervisor with durable `XDG_DATA_HOME`.
-Do not add a second scheduler process. External trigger providers wake the
-plane through its API; a trigger may create attention but cannot grant effect
-authority.
-
-The supervisor must probe `/global/health`; a live PID is not evidence that the
-event loop can still renew leases. Restart the same command with the same
-durable state after repeated probe failures. In Docker, use `--init` so finished
-tool processes are reaped. A restart policy alone does not react to an unhealthy
-but still-running process.
-
-After restoring a durable state directory, the principal may run the daemon's
-same recovery logic once without starting a second scheduler:
+After a passing result:
 
 ```bash
-opencode contract sweep
+EVIDENCE_HASH=$(sha256sum "$ARTIFACT_ROOT/verifier-report.json" | awk '{print $1}')
+jq -n \
+  --argjson revision "$REVISION" \
+  --arg specHash "$SPEC_HASH" \
+  --arg subjectHash "$SUBJECT" \
+  --arg evidenceHash "$EVIDENCE_HASH" \
+  '{revision:$revision,specHash:$specHash,subjectHash:$subjectHash,evidenceHash:$evidenceHash}' \
+  > "$ARTIFACT_ROOT/attestation.json"
+
+api -X POST -H 'content-type: application/json' \
+  "$API/api/contract/pct_example/attestation" \
+  --data-binary "@$ARTIFACT_ROOT/attestation.json"
 ```
 
-This one-shot command rechecks triggers, deadlines, leases, and pending
-dispatch. It grants no authority and creates no alternate lifecycle semantics;
-the long-running server remains responsible for subsequent cycles.
+A stale revision, specification, or subject returns `409`; it must not discharge
+the current handoff. Do not retry an old result by substituting new coordinates.
+Re-evaluate the new handoff instead. The server checks coordinates and authority,
+not report authenticity or semantic validity.
 
-The runner also enforces narrow inactivity bounds: a provider stream with no
-event for ten minutes is interrupted and retried as transport, while filesystem
-inspection inside `read` returns a tool error after one minute. Permission waits
-are outside the read timeout. Streaming provider events reset the provider
-bound, and process tools retain their own explicit timeout so long builds and
-training are not constrained by the short read policy.
-Typed nonretryable failures such as rejected authentication escalate the
-Contract. Unclassified durable provider errors reuse the same semantic attempt
-and remain bounded by the existing total turn/action/deadline coordinates;
-they do not fabricate completion or consume a fresh semantic attempt.
-An independent fifteen-minute absolute provider-turn bound also applies even
-when reasoning or tool-input deltas continue. For a Contract it is shortened to
-the remaining absolute Contract deadline. This prevents token-trickle streams
-from consuming the full duty horizon while preserving the ten-minute idle
-failure detector.
-Contract-bound `read`, `edit`, `write`, `apply_patch`, `glob`, and `grep` calls
-also settle with an explicit error after one minute. Ordinary Session
-permission waits and process tools keep their existing behavior.
-
-Treat the Contract Location as the capability boundary:
-
-```text
-read-only task inputs   -> mounted inside Location
-writable candidate     -> mounted inside Location
-OpenCode state/cache   -> outside Location
-credentials            -> outside Location
-authoritative promotion-> separate verifier/principal service
-```
-
-Filesystem capabilities expose tools inside the Location. External paths still
-require the existing permission fence; adapters should not compensate with a
-global external-directory allow rule.
-
-For a host control plane with a Docker executor, configure
-`script/pro-contract-docker-shell` instead of a raw `docker exec` wrapper:
+For a failed result with permitted repair feedback, hash that failed report:
 
 ```bash
-export OPENCODE_DOCKER_CONTAINER=procontract-executor
-export OPENCODE_DOCKER_HOST_ROOT="$WORKSPACE"
-export OPENCODE_DOCKER_CONTAINER_ROOT=/workspace
-export OPENCODE_DOCKER_HARD_TIMEOUT_SECONDS=600
+EVIDENCE_HASH=$(sha256sum "$ARTIFACT_ROOT/verifier-report.json" | awk '{print $1}')
+api -X POST -H 'content-type: application/json' \
+  "$API/api/contract/pct_example/challenge" \
+  --data-binary "$(jq -n \
+    --argjson revision "$REVISION" \
+    --arg subjectHash "$SUBJECT" \
+    --arg evidenceHash "$EVIDENCE_HASH" \
+    '{revision:$revision,subjectHash:$subjectHash,evidenceHash:$evidenceHash,
+      disclosure:"executor",summary:"Independent verification failed; repair the recorded invariant"}')"
 ```
 
-The adapter gives every command a unique execution identity. Normal exit,
-timeout, and host interruption all terminate only matching container
-descendants; an in-container hard deadline remains if the host wrapper is
-killed before its cleanup trap runs.
+For sealed/holdout failures, use `disclosure:"sealed"` and omit `summary`.
+Do not adapt against that same holdout. Verifier failure or unavailability is
+not success and is not permission to fabricate a negative report.
 
-### 4.10 Deterministic artifact selection
-
-`script/select-contract-artifact.ts` is a development adapter, not a principal
-route. It accepts two or more finite evaluator reports with normalized scores:
-
-```json
-{
-  "contractID": "pct_candidate_a",
-  "revision": 1,
-  "subjectHash": "exact-handoff-subject",
-  "score": 0.91,
-  "timeouts": 0,
-  "admissible": true,
-  "incumbent": true
-}
-```
-
-Run it from `packages/opencode` while the Contract server exposes the same
-ledger. It uses `OPENCODE_SERVER_PASSWORD` when the server is protected:
+To cancel responsibility explicitly:
 
 ```bash
-PRO_CONTRACT_API="http://127.0.0.1:$PORT" \
-  bun run script/select-contract-artifact.ts \
-  "$SELECTION_DIR/selection.json" \
-  "$RUN_DIR/candidate-a.json" \
-  "$RUN_DIR/candidate-b.json"
+api -X POST -H 'content-type: application/json' \
+  "$API/api/contract/pct_example/release" \
+  --data-binary '{"reason":"Principal cancelled this task"}'
 ```
 
-The selector requires every report to match an exact discharged revision,
-subject, attestation, and passing replay. It considers only candidates admitted
-by the frozen external protocol, maximizes score, and breaks ties by fewer
-timeouts and then Contract ID. Input order has no effect. An exact retry is
-idempotent; changed evidence cannot overwrite an existing selection.
+The HTTP release above also interrupts Session execution in that serving
+process. A separate local `contract release` process can record release but
+cannot immediately interrupt another server PID; use that server's HTTP route
+for active cancellation. This is not a clustered cancellation guarantee or reversal of completed external effects. Deadline
+expiry and infrastructure interruption do not count as successful delivery.
+`quiet` means no outstanding Contracts in the scope; released work is not
+successful work.
 
-Commit `selection.json`, then use an ordinary read-only Selection Contract that
-requires every candidate revision. Independent evidence may discharge that
-Contract, after which `opencode contract export` materializes the selected
-candidate. The selector cannot issue, attest, export, promote a policy, or open
-validation or holdout work. Benchmark score construction and admissibility
-remain evaluator-owned and outside ProContract.
+### Durable external evaluation
 
-Successor selection requires exactly one incumbent artifact. A
-challenger that fails to beat the incumbent cannot become authoritative merely
-because it is newer; exact retry then retains the same winner.
-
-An artifact selected here may become the frozen candidate evaluated by the
-capability gate in Section 7. Development selection never substitutes for that
-cohort evaluation or for principal promotion.
-
-### 4.11 Evaluated delivery
-
-When package/preflight cannot establish the user goal, persist evaluation before
-the Delivery Contract finishes:
+If evaluating the delivery is itself an obligation, use an ordinary dependent
+Evaluation Contract rather than hiding work after the Delivery Contract ends.
+Issue may happen before Delivery finishes; settlement requires Delivery already
+independently attested and discharged with the exact handoff. This is a later
+dependent evaluation, not a replacement for initial Delivery attestation:
 
 ```bash
-opencode contract evaluation issue pct_delivery \
+"$OPENCODE_BIN" contract evaluation issue pct_delivery \
   --evaluator-hash sha256:frozen-evaluator \
-  --deadline 2026-08-12T00:00:00Z
+  --deadline "$EVALUATION_DEADLINE_ISO"
+"$OPENCODE_BIN" contract evaluation settle "$EVALUATION_CONTRACT_ID" \
+  --report "$ARTIFACT_ROOT/evaluation.json"
 ```
 
-The resulting Contract shares the delivery scope, requires its exact revision,
-has no filesystem or process authority, and uses an `external-evaluator:*`
-executor. The OpenCode scheduler cannot run it.
+The report contains `version:1`, `deliveryContractID`, `deliveryRevision`,
+`subjectHash`, `evaluatorHash`, `passed`, `disclosure`, and `summary`.
+The adapter owns these observations. The evaluation executor has no filesystem
+or process authority and cannot be scheduled as an OpenCode executor. A failed
+report challenges the exact delivery; Evaluation remains outstanding.
 
-After evaluating the exported delivery handoff, submit a finite report:
+## 6. Opt-in strategy improvement
 
-```json
-{
-  "version": 1,
-  "deliveryContractID": "pct_delivery",
-  "deliveryRevision": 1,
-  "subjectHash": "exact-delivery-subject",
-  "evaluatorHash": "sha256:frozen-evaluator",
-  "passed": false,
-  "disclosure": "executor",
-  "summary": "Behavioral compatibility floor was not met"
-}
-```
-
-```bash
-opencode contract evaluation settle pct_eval_... --report evaluation.json
-```
-
-A passing report discharges Evaluation. A failed report challenges the exact
-Delivery handoff: visible evidence returns Delivery to dormant remediation,
-while sealed evidence escalates it without disclosing feedback. Evaluation
-remains outstanding in both cases, so `contract quiet <scope>` stays false. The
-command validates the deterministic evaluation ID, exact dependency, delivery
-attestation, subject hash, and evaluator identity before accepting the report
-hash as evidence.
-
-## 5. MLE-bench: one CPU-friendly instance
-
-The recommended local smoke instance is:
+The supported loop keeps candidate generation, evaluation, and promotion
+outside the pure kernel. The strategy service records scoped authorization,
+exact evidence, selection, and rollback. It does not run a benchmark or grant
+itself principal authority.
 
 ```text
-detecting-insults-in-social-commentary
-Low/Lite split, approximately 2 MB, CPU-friendly, AUC metric
+principal authorizes a frozen protocol
+  -> generator Contract proposes execution text
+  -> external evaluator records complete development and confirmation runs
+  -> task-pareto comparison gates a supported successor
+  -> principal binds the selection
+  -> a new explicitly opted-in solver/generator Contract uses the exact text
+  -> challenge, rollback, or revocation withdraws support without erasing history
 ```
 
-### 5.1 Install MLE-bench
-
-```bash
-cd "$MLEBENCH_REPO"
-uv venv --python 3.12
-uv sync --python 3.12
-```
-
-MLE-bench v1 pins `kaggle<1.7`, which ignores the newer
-`~/.kaggle/access_token`. Upgrade the client after every `uv sync`:
-
-```bash
-uv pip install --python .venv/bin/python 'kaggle>=2.2,<2.3'
-chmod 600 "$HOME/.kaggle/access_token"
-.venv/bin/kaggle config view
-```
-
-Accept the competition rules in the same Kaggle account before preparing data:
-
-```text
-https://www.kaggle.com/c/detecting-insults-in-social-commentary/rules
-```
-
-Kaggle 2.x removed `kaggle.rest.ApiException`, which MLE-bench v1 imports.
-Use this shell wrapper without modifying the frozen MLE-bench checkout:
-
-```bash
-mlebench_v1() {
-  .venv/bin/python - "$@" <<'PY'
-import sys
-import types
-
-rest = types.ModuleType("kaggle.rest")
-rest.ApiException = OSError
-sys.modules["kaggle.rest"] = rest
-
-from mlebench.cli import main
-
-sys.argv = ["mlebench", *sys.argv[1:]]
-main()
-PY
-}
-```
-
-Prepare one competition into an explicit immutable data root:
-
-```bash
-export MLE_DATA="$ARTIFACT_ROOT/mlebench-data"
-mkdir -p "$MLE_DATA"
-mlebench_v1 prepare \
-  -c detecting-insults-in-social-commentary \
-  --data-dir "$MLE_DATA"
-```
-
-Expected layout:
-
-```text
-$MLE_DATA/detecting-insults-in-social-commentary/
-  prepared/public/    agent-visible
-  prepared/private/   evaluator-only
-```
-
-A `403 Forbidden` during download normally means the competition rules have
-not been accepted. Authentication can still be valid.
-
-### 5.2 Start an isolated MLE-bench environment
-
-Build the official base image on a Linux/amd64 evaluation host:
-
-```bash
-cd "$MLEBENCH_REPO"
-docker build --platform linux/amd64 -t mlebench-env -f environment/Dockerfile .
-```
-
-Create a run directory and mount public/private data at the official paths:
-
-```bash
-export COMP=detecting-insults-in-social-commentary
-export RUN_ID="mle-$COMP-$(date +%Y%m%d-%H%M%S)"
-export RUN_DIR="$ARTIFACT_ROOT/$RUN_ID"
-mkdir -p "$RUN_DIR/submission" "$RUN_DIR/logs" "$RUN_DIR/state"
-
-docker run -d --name "$RUN_ID" \
-  --platform linux/amd64 \
-  -p 127.0.0.1:4096:4096 \
-  -e COMPETITION_ID="$COMP" \
-  -e OPENAI_API_KEY \
-  -v "$MLE_DATA/$COMP/prepared/public:/home/data:ro" \
-  -v "$MLE_DATA/$COMP/prepared/private:/private/data/$COMP/prepared/private:ro" \
-  -v "$RUN_DIR/submission:/home/submission" \
-  -v "$RUN_DIR/logs:/home/logs" \
-  -v "$RUN_DIR/state:/opencode-state" \
-  -v "$OPENCODE_LINUX_X64:/usr/local/bin/opencode:ro" \
-  mlebench-env
-```
-
-Wait for the official structural validator, then start OpenCode as the nonroot
-agent in the same container:
-
-```bash
-until docker exec "$RUN_ID" curl -fsS http://localhost:5000/health >/dev/null; do sleep 1; done
-
-# ProContract snapshots the candidate Location including /home/submission.
-# Keep OpenCode control-plane state outside that tree.
-docker exec "$RUN_ID" sh -c \
-  'mkdir -p /opencode-cache /opencode-runtime-state && chmod -R 777 /opencode-state /opencode-cache /opencode-runtime-state'
-docker exec -u nonroot -e HOME=/home/nonroot "$RUN_ID" git config --global --add safe.directory /home
-docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" git init
-docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" git config user.email benchmark@localhost
-docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" git config user.name "MLE-bench"
-docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" \
-  git add instructions.txt instructions_obfuscated.txt validate_submission.sh data
-docker exec -u nonroot -e HOME=/home/nonroot -w /home "$RUN_ID" \
-  git commit -m "Initialize public benchmark input"
-docker exec -u nonroot -w /home "$RUN_ID" sh -c \
-  'printf "/nonroot/\n/logs/\n/cache/\n" >> .git/info/exclude'
-
-docker exec -d -u nonroot -w /home \
-  -e HOME=/home/nonroot \
-  -e XDG_DATA_HOME=/opencode-state \
-  -e XDG_CACHE_HOME=/opencode-cache \
-  -e XDG_STATE_HOME=/opencode-runtime-state \
-  -e PATH=/opt/conda/envs/agent/bin:/usr/local/bin:/usr/bin:/bin \
-  "$RUN_ID" \
-  /usr/local/bin/opencode serve --hostname 0.0.0.0 --port 4096
-
-until curl -fsS http://127.0.0.1:4096/api/contract >/dev/null; do sleep 1; done
-```
-
-Send the original benchmark instruction once. Do not add competition-specific
-solution hints or manual remediation prompts:
-
-```bash
-TASK=$(cat "$MLEBENCH_REPO/environment/instructions.txt")
-"$OPENCODE_BIN" run \
-  --attach http://127.0.0.1:4096 \
-  --dir /home \
-  --model "$MODEL" \
-  --variant "$VARIANT" \
-  --auto \
-  "$TASK"
-```
-
-The expected output is `/home/submission/submission.csv`. The current repository
-does **not** include an automatic MLE-bench verifier consumer, so maintainers
-must monitor `verification` through HTTP for now. Do not manually rewrite the
-research plan or Contract during an autonomous evaluation.
-
-### 5.3 Freeze and grade once
-
-Copy the candidate only after the Contract enters `verification`:
-
-```bash
-curl -fsS http://127.0.0.1:4096/api/contract | tee "$RUN_DIR/contracts.json" | jq .
-cp "$RUN_DIR/submission/submission.csv" "$RUN_DIR/submission.frozen.csv"
-shasum -a 256 "$RUN_DIR/submission.frozen.csv" | tee "$RUN_DIR/submission.sha256"
-```
-
-Run the private grader once:
-
-```bash
-cd "$MLEBENCH_REPO"
-.venv/bin/mlebench grade-sample \
-  "$RUN_DIR/submission.frozen.csv" \
-  "$COMP" \
-  --data-dir "$MLE_DATA" \
-  2>&1 | tee "$RUN_DIR/grade.log"
-```
-
-Hash `grade.log`, then attest or submit an exact subject-bound challenge using
-Section 4.5. Acceptance conditions must be fixed before grading. Do not turn
-the private grader into an iterative development oracle.
-
-On macOS without CUDA and with Docker emulation, report the run as local
-calibration, not a leaderboard-comparable MLE-bench result.
-
-## 6. ProgramBench
-
-The complete evaluator specification remains in the ProgramBench repository:
-
-- [ProgramBench Evaluation Harness Runbook](../../ProgramBench/docs/harness_runbook_en.md)
-
-### 6.1 Setup
-
-```bash
-cd "$PROGRAMBENCH_REPO"
-uv sync
-uv run programbench --help
-uv run pytest -q
-docker version
-docker ps
-```
-
-Formal ProgramBench images are Linux/amd64. macOS/QEMU runs are calibration.
-
-### 6.2 Start from a cleanroom
-
-Freeze artifact-production acceptance before starting the executor. The
-ProgramBench Contract ends at a submission-ready artifact; official evaluation
-is a later benchmark measurement, not its settlement condition. Keep the
-behavioral optimization goal separate from the delivery claim:
-
-```json
-{
-  "version": 1,
-  "instance": "sitkevij__hex.61ae69b",
-  "claim": "submission-ready candidate with no known calibration mismatch",
-  "subject": "exact Contract handoff tree",
-  "accept": [
-    "required source and relocatable compile.sh are present",
-    "deterministic packaging succeeds",
-    "cleanroom preflight passes",
-    "preregistered calibration probes pass when supplied"
-  ],
-  "officialEvaluation": "external"
-}
-```
-
-Store this as `acceptance.json`, hash its exact bytes, and include the policy
-and hash in the pre-issued Contract brief. The run adapter must bind the exact
-subject to the deterministic archive and report package, preflight, and probe
-results. Attestation uses that report hash; a mismatch becomes a visible
-challenge. The later official result is recorded separately and is never fed
-back into the same run.
-
-Use the behavioral objective as `goal` and the JSON `claim` text as
-`evidence.claim`. The executor optimizes the former; package, preflight, and
-probe evidence may settle only the latter.
-
-If no preregistered probe suite exists, omit that criterion and issue a
-delivery-only Contract. Build, packaging, and preflight evidence cannot support
-a behavioral-adequacy or performance claim.
-
-If the external score is part of the user-visible goal, pre-issue a dependent
-Evaluation Contract before Delivery settles so the shared scope cannot become
-quiet between handoff and official adjudication. Its deadline is an evaluator-
-manifest coordinate and should reflect the frozen test count, largest branch,
-per-test bound, and worker count—not the executor's provider deadline or one
-global campaign timeout. Evaluator timeout escalates Evaluation; it never
-challenges Delivery without a finite negative report and never turns missing
-measurement into accepted quality.
-
-Claim frozen source and a reproducible build rather than a prebuilt executable
-unless the evidence policy checks that binary in the exact Snapshot. Snapshot
-capture may omit large untracked files; ProgramBench preflight rebuilds the
-executable from the packaged source.
-
-Example instance:
-
-```bash
-export IID='sitkevij__hex.61ae69b'
-export IMAGE='programbench/sitkevij_1776_hex.61ae69b:task_cleanroom_v6'
-export RUN_ID="programbench-$IID-$(date +%Y%m%d-%H%M%S)"
-export RUN_DIR="$ARTIFACT_ROOT/$RUN_ID"
-export WORKSPACE="$RUN_DIR/workspace"
-mkdir -p "$WORKSPACE" "$RUN_DIR/state" "$RUN_DIR/logs"
-
-docker run --rm --platform linux/amd64 \
-  -v "$WORKSPACE:/candidate" \
-  "$IMAGE" \
-  bash -lc 'cp -a /workspace/. /candidate/ && unlink /candidate/executable'
-```
-
-Start a persistent OpenCode server in the cleanroom image:
-
-```bash
-docker run -d --name "$RUN_ID" \
-  --platform linux/amd64 \
-  --init \
-  --user agent \
-  -p 127.0.0.1:4096:4096 \
-  -e HOME=/home/agent \
-  -e OPENAI_API_KEY \
-  -e XDG_DATA_HOME=/opencode-state \
-  -e XDG_CACHE_HOME=/tmp/opencode-cache \
-  -e XDG_STATE_HOME=/tmp/opencode-runtime-state \
-  -v "$WORKSPACE:/candidate" \
-  -v "$RUN_DIR/state:/opencode-state" \
-  -v "$OPENCODE_LINUX_X64:/usr/local/bin/opencode:ro" \
-  -w /candidate \
-  --entrypoint /bin/sh \
-  "$IMAGE" \
-  -lc 'ln -sfn /workspace/executable /candidate/reference && exec /usr/local/bin/opencode serve --hostname 0.0.0.0 --port 4096'
-```
-
-This convenient local layout gives the OpenCode provider client and executor
-shell the same container network. It is therefore calibration-only. A formal
-ProgramBench cleanroom must mediate model traffic outside the executor network
-or otherwise prove that shell commands cannot use inference egress.
-
-Submit the original task once:
-
-Every ProgramBench artifact is evaluated after the Session, so its trusted
-adapter pre-issues the frozen Contract. Do not encode this benchmark policy in
-Contract Core or rely on executor-authored formation.
-
-```bash
-"$OPENCODE_BIN" run \
-  --attach http://127.0.0.1:4096 \
-  --dir /candidate \
-  --model "$MODEL" \
-  --variant "$VARIANT" \
-  --auto \
-  "Implement the documented program in this cleanroom. Produce source, a relocatable compile.sh, and ./executable. Use the reference only for black-box experiments."
-```
-
-For formal agent comparison, use the benchmark's original task instruction,
-not learned hints from earlier instances.
-
-### 6.3 Candidate-owned preflight
-
-Reference probes are calibration evidence, not official acceptance evidence:
-
-```bash
-export CONTRACT_ID=pct_example
-"$OPENCODE_BIN" contract export "$CONTRACT_ID" "$RUN_DIR/subject"
-
-cp -a "$RUN_DIR/subject" "$RUN_DIR/probe-subject"
-(cd "$RUN_DIR/probe-subject" && ./compile.sh)
-
-cd "$PROGRAMBENCH_REPO"
-uv run programbench candidate probe \
-  "$RUN_DIR/probes/cases.json" \
-  "$RUN_DIR/probes/ledger.json" \
-  "$WORKSPACE/reference" \
-  "$RUN_DIR/probe-subject/executable"
-
-uv run programbench candidate package "$RUN_DIR/subject" "$RUN_DIR/submission" "$IID"
-uv run programbench candidate preflight "$RUN_DIR/submission" "$IID" --docker-cpus 4
-```
-
-`candidate probe` does not invent `cases.json`; the ProgramBench adapter must
-materialize those black-box cases before this command. Skip the probe step when
-no preregistered case set exists—never synthesize cases from official tests.
-
-The candidate adapter owns `cases.json`, cleanroom packaging, and preflight. It
-does not change ProContract semantics.
-
-### 6.4 Official evaluation
-
-Run official tests only after freezing the final evaluable handoff:
-
-```bash
-cd "$PROGRAMBENCH_REPO"
-uv run programbench eval "$RUN_DIR/submission" \
-  --filter '^sitkevij__hex\.61ae69b$' \
-  -w 1 \
-  -b 1 \
-  --docker-cpus 4
-
-uv run programbench info "$RUN_DIR/submission" | tee "$RUN_DIR/programbench-info.txt"
-```
-
-Only `✅` means solved. A rounded `100` is not equivalent to solved. An official
-failure used for final evaluation should normally become a sealed challenge;
-do not repeatedly expose official failures to the executor.
-
-For a harness-only fixture smoke test, use Section 4 “Local Fixture Check” of
-the ProgramBench runbook. Fixture results are never acceptance-grade.
-
-## 7. Capability RSI promotion
-
-Run the promotion gate from `packages/opencode`. It compares externally
-produced records; it does not execute a benchmark or reveal hidden tests.
-
-```bash
-bun script/pro-contract-rsi.ts \
-  /path/to/manifest.json \
-  /path/to/runs.json \
-  /path/to/report.json
-```
-
-The manifest is frozen before evaluation:
-
-```json
-{
-  "version": 1,
-  "baselineHash": "sha256:baseline",
-  "candidateHash": "sha256:candidate",
-  "budgetHash": "sha256:budget",
-  "splits": {
-    "private": ["task-a"],
-    "confirmation": ["task-b"],
-    "ood": ["task-c"]
-  },
-  "evaluators": {
-    "private": "sha256:evaluator-a",
-    "confirmation": "sha256:evaluator-b",
-    "ood": "sha256:evaluator-c"
-  },
-  "selection": {
-    "replicates": 2,
-    "minMeanDelta": 0,
-    "maxTaskRegression": 0.02,
-    "maxCostRatio": 1,
-    "maxAttemptRegression": 0
-  }
-}
-```
-
-`runs.json` is an array with one record for each exact
-`split/task/replicate/harnessHash` pair:
-
-```json
-{
-  "split": "confirmation",
-  "task": "task-b",
-  "replicate": 0,
-  "harnessHash": "sha256:candidate",
-  "evaluatorHash": "sha256:evaluator-b",
-  "budgetHash": "sha256:budget",
-  "budgetCompliant": true,
-  "utility": 0.81,
-  "cost": 1,
-  "attempts": 1,
-  "manualInterventions": 0,
-  "violations": []
-}
-```
-
-Adapters normalize utility to `[0, 1]` and produce records from an evaluator
-the candidate cannot modify. `replicates: n` means the exact indices `0` through
-`n - 1`; extra and missing runs both reject. The command exits zero only for
-`accept` and writes a deterministic report containing per-task and per-split
-summaries plus hashes of the manifest, run records, and report.
-
-`maxTaskRegression` bounds the worst paired task replicate, not only the task
-mean. This prevents one lucky replicate from hiding a severe stochastic tail.
-
-Do not feed confirmation or OOD details back into the same candidate search.
-Do not use ProgramBench official hidden evaluation as iterative training data.
-Use owned private tasks for search, freeze the candidate, and reserve official
-benchmarks for external confirmation.
-
-An accepted JSON report is still a petition, not authority. Capture it in a
-read-only Evaluation Contract, independently attest its exact hashes, and let a
-Selection Contract require both the candidate and evaluation before placing
-the accepted text in `spec.policy`. Only then may the principal run
-`opencode contract policy` to make that exact policy the default for future
-Contracts.
-
-Generate a capability policy only from an exact, signed private Evaluation
-Contract. Aggregate trajectory telemetry without behavioral utility may propose
-an efficiency experiment, but cannot support a capability claim. Materialize
-the approved text as `spec.policy` and bind it through `requires.policy`; never
-paste learned policy into the Task Contract brief. The brief owns immutable
-quality criteria and stopping, while inherited policy owns execution strategy.
-
-Reject a failed private candidate before confirmation/OOD. Do not make the
-inner executor stop earlier merely to save evaluation cost: outer search stops
-bad lineages, while inner execution continues until the issuer stopping rule or
-budget is reached.
-
-## 8. Reproducibility record
-
-Every run directory should contain:
-
-```text
-PROTOCOL.md                 environment and deviations
-original-task.txt           exactly one initial instruction
-opencode-version.txt        version and binary SHA-256
-benchmark-version.txt       git commit and data/evaluator identities
-contracts.json              final public Contract state
-execution.json              attempts, turns, actions, lease
-candidate archive           frozen evaluator subject
-candidate.sha256
-verifier report/log
-verifier-report.sha256
-official evaluation output
-quiet.json                  final quiescence result
-```
-
-Also record:
-
-- model provider, model ID, and variant;
-- Docker platform, CPU/memory/GPU limits, and whether emulation was used;
-- every environment deviation from the benchmark default;
-- whether verifier feedback was visible or sealed;
-- provider success/failure counts, tokens, turns, actions, and wall time;
-- candidate subject hash, Contract revision/spec hash, evidence hash, ledger
-  frontier, and ledger hash;
-- contamination, reused instances, prompt changes, and absence of a matched
-  control.
-
-Mechanism validation and performance attribution are different claims. A run
-can prove that ProContract preserved duty and rejected false completion without
-proving that it raised benchmark score.
-
-## 9. Cleanup
-
-Stop persistent services after artifacts are frozen:
-
-```bash
-test -z "${OPENCODE_SERVER_PID:-}" || kill "$OPENCODE_SERVER_PID"
-test -z "${RUN_ID:-}" || docker stop "$RUN_ID"
-```
-
-Do not delete run artifacts that support a reported result. Use a new `RUN_ID`
-for remediation or reruns.
-
-### Observation packing
-
-After rebuilding and restarting the host, ProContract Sessions use observation
-packing and exact paged recall by default. Ordinary Sessions remain opt-in.
-
-| Host setting | ProContract Sessions | Ordinary Sessions |
-|---|---|---|
-| Unset | Enabled | Disabled |
-| `OPENCODE_OBSERVATION_PACK=0` | Disabled | Disabled |
-| `OPENCODE_OBSERVATION_PACK=1` | Enabled | Enabled |
-
-Other explicit values disable packing. Registration and request projection share
-the host setting captured when the service graph starts. Contract terms,
-authority and shared budgets are unchanged.
-
-The [promotion decision](pro-contract-observation-promotion.md) follows the user's
-priority on behavioral performance. The [original ProgramBench study](pro-contract-observation-live.md)
-still records its failed cost gate and the interrupted bartib pair; promotion
-does not revise those experimental results.
+Use `contract strategy` for this path, not the historical standalone
+`script/pro-contract-rsi.ts` gate or removed `contract policy` configuration.
+The [delivery guide](pro-contract-delivery.md#strategy-operation) specifies the
+current commands and required input identities.
+
+`performanceRule:"task-pareto"` compares each `(panel, task)` mean over its fixed
+repeats; development gains cannot mask a confirmation regression.
+No task mean may regress, at least one must strictly improve, and all ties do
+not promote. Complete development/confirmation records, safety checks, and
+established-full-pass protection remain mandatory. Do not impose a one
+percentage-point margin or new cumulative cost/count caps unless explicitly
+requested. Freeze a new protocol for a changed rule; never relabel post-hoc
+readmission as preregistered evidence.
+
+Strategy text is `executionPolicy`, separate from immutable user intent.
+Ordinary Contract requirements carry the selected support. No default global
+policy is silently installed, and existing execution bindings are not rewritten
+when a new selection appears. A recursively generated successor being used is
+mechanism evidence, not proof of sustained capability gains.
+
+## 7. Benchmark and release records
+
+Benchmark layouts, private tests, evaluator images, and score normalization
+remain adapter-owned. Consult the external ProgramBench harness runbook and
+[deadline-only requirements](programbench-deadline-only.md) before launching a
+new cohort. Historical experiment documents describe their frozen versions;
+they do not qualify this release or authorize changing those runs. macOS/QEMU
+calibration cannot substitute for a declared native-Linux result.
+
+Archive at least:
+
+- source revision/dirty patch, binary hash, generated-client identity;
+- original task, frozen protocol, budget, model, variant, and environment;
+- issue payload, execution binding, revisions, exact subjects, and exports;
+- complete verifier reports and hashes, visibility/sealing decisions;
+- raw usage, failed/accepted requests, missing usage, turns/actions, wall time;
+- strategy authorization, candidate/generator lineage, comparison and selection;
+- challenge/release/rollback receipts, final Contract state, and quiet result.
+
+Store state and artifacts outside the candidate. Preserve all historical
+artifacts and record deviations instead of editing frozen source or protocols.
+Mechanism qualification, measured task performance, and adversarial isolation
+are separate claims. Complete the release checklist before describing any of
+them as delivered.

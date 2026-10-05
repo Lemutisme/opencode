@@ -130,6 +130,7 @@ import type {
   PermissionRuleset,
   PermissionV2Reply,
   PermissionV2Source,
+  ProContractAttestationEvidence,
   ProContractBudget,
   ProContractCapability,
   ProContractEvidence,
@@ -7149,7 +7150,7 @@ export class ProContract extends HeyApiClient {
   public attest<ThrowOnError extends boolean = false>(
     parameters: {
       contractID: string
-      evidenceHash?: string
+      proContractAttestationEvidence: ProContractAttestationEvidence
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -7159,7 +7160,7 @@ export class ProContract extends HeyApiClient {
         {
           args: [
             { in: "path", key: "contractID" },
-            { in: "body", key: "evidenceHash" },
+            { key: "proContractAttestationEvidence", map: "body" },
           ],
         },
       ],

@@ -24,6 +24,12 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`pro_contract_policy\` (
+          \`scope\` text PRIMARY KEY,
+          \`data\` text NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`account_state\` (
           \`id\` integer PRIMARY KEY,
           \`active_account_id\` text,

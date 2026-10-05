@@ -2,6 +2,7 @@ export * as ProContract from "./pro-contract"
 export * from "./pro-contract/kernel"
 export {
   Attestation,
+  AttestationEvidence,
   AttestationID,
   Blocked,
   Capability,
@@ -107,10 +108,9 @@ export interface Interface {
     readonly contractID: Schema.ID
     readonly accept: boolean
   }) => Effect.Effect<Receipt>
-  readonly principalAttest: (input: {
-    readonly contractID: Schema.ID
-    readonly evidenceHash: string
-  }) => Effect.Effect<Receipt>
+  readonly principalAttest: (
+    input: Schema.AttestationEvidence & { readonly contractID: Schema.ID },
+  ) => Effect.Effect<Receipt>
   readonly due: (now: number) => Effect.Effect<ReadonlyArray<ProContractKernel.Contract>>
   readonly get: (id: Schema.ID) => Effect.Effect<ProContractKernel.Contract | undefined>
   readonly getAttestation: (id: Schema.AttestationID) => Effect.Effect<Schema.Attestation | undefined>
@@ -267,18 +267,18 @@ const layer = Layer.effect(
         .pipe(Effect.orDie),
     )
 
-    const discharge = Effect.fnUntraced(function* (contract: ProContractKernel.Contract, evidenceHash: string) {
+    const discharge = Effect.fnUntraced(function* (contractID: Schema.ID, evidence: Schema.AttestationEvidence) {
       return yield* execute({
         type: "discharge",
-        actor: contract.issuer,
-        contractID: contract.id,
+        actor: "local-owner",
+        contractID,
         attestation: {
           id: Schema.AttestationID.create(),
-          revision: contract.revision,
-          specHash: contract.specHash,
-          subjectHash: contract.handoff?.subjectHash ?? "",
-          evidenceHash,
-          verifierID: contract.issuer,
+          revision: evidence.revision,
+          specHash: evidence.specHash,
+          subjectHash: evidence.subjectHash,
+          evidenceHash: evidence.evidenceHash,
+          verifierID: "local-owner",
           class: "principal",
         },
       })
@@ -349,69 +349,93 @@ const layer = Layer.effect(
         })
       }),
       settleEvaluation: Effect.fn("ProContract.settleEvaluation")(function* (input) {
-        const evaluation = yield* get(input.contractID)
-        if (!evaluation) return yield* Effect.die(`Contract not found: ${input.contractID}`)
-        const report = input.report
-        const expectedID = evaluationID(report.deliveryContractID, report.deliveryRevision, report.evaluatorHash)
-        if (evaluation.id !== expectedID) return yield* Effect.die("Evaluation identity does not match report")
-        if (evaluation.executor !== `external-evaluator:${report.evaluatorHash}`)
-          return yield* Effect.die("Evaluator identity does not match Contract")
-        if (
-          evaluation.spec.requires.length !== 1 ||
-          evaluation.spec.requires[0]?.contractID !== report.deliveryContractID ||
-          evaluation.spec.requires[0]?.revision !== report.deliveryRevision
-        )
-          return yield* Effect.die("Evaluation dependency does not match report")
-        const delivery = yield* get(report.deliveryContractID)
-        if (!delivery?.handoff || delivery.status !== "discharged" || !delivery.attestationID)
-          return yield* Effect.die("Delivery Contract is not independently evidenced")
-        if (delivery.revision !== report.deliveryRevision || delivery.handoff.subjectHash !== report.subjectHash)
-          return yield* Effect.die("Evaluation subject does not match delivery handoff")
+        const request = { ...input, report: { ...input.report } }
+        // Keep the checked delivery and its evaluation settlement on one immutable ledger frontier.
+        return yield* db
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                const evaluation = yield* get(request.contractID)
+                if (!evaluation) return yield* Effect.die(`Contract not found: ${request.contractID}`)
+                const report = request.report
+                const expectedID = evaluationID(
+                  report.deliveryContractID,
+                  report.deliveryRevision,
+                  report.evaluatorHash,
+                )
+                if (evaluation.id !== expectedID) return yield* Effect.die("Evaluation identity does not match report")
+                if (evaluation.executor !== `external-evaluator:${report.evaluatorHash}`)
+                  return yield* Effect.die("Evaluator identity does not match Contract")
+                if (
+                  evaluation.spec.requires.length !== 1 ||
+                  evaluation.spec.requires[0]?.contractID !== report.deliveryContractID ||
+                  evaluation.spec.requires[0]?.revision !== report.deliveryRevision
+                )
+                  return yield* Effect.die("Evaluation dependency does not match report")
+                const delivery = yield* get(report.deliveryContractID)
+                if (!delivery?.handoff || delivery.status !== "discharged" || !delivery.attestationID)
+                  return yield* Effect.die("Delivery Contract is not independently evidenced")
+                if (
+                  delivery.revision !== report.deliveryRevision ||
+                  delivery.handoff.subjectHash !== report.subjectHash
+                )
+                  return yield* Effect.die("Evaluation subject does not match delivery handoff")
 
-        if (!report.passed)
-          return yield* execute({
-            type: "challenge",
-            actor: delivery.issuer,
-            contractID: delivery.id,
-            challenge: {
-              revision: delivery.revision,
-              subjectHash: report.subjectHash,
-              evidenceHash: input.evidenceHash,
-              disclosure: report.disclosure,
-              summary: report.disclosure === "executor" ? report.summary : undefined,
-              time: input.time,
-            },
-          })
+                if (!report.passed)
+                  return yield* execute({
+                    type: "challenge",
+                    actor: delivery.issuer,
+                    contractID: delivery.id,
+                    challenge: {
+                      revision: delivery.revision,
+                      subjectHash: report.subjectHash,
+                      evidenceHash: request.evidenceHash,
+                      disclosure: report.disclosure,
+                      summary: report.disclosure === "executor" ? report.summary : undefined,
+                      time: request.time,
+                    },
+                  })
 
-        const activated =
-          evaluation.status === "dormant"
-            ? yield* execute({
-                type: "activate",
-                actor: "institution",
-                contractID: evaluation.id,
-                revision: evaluation.revision,
-                time: input.time,
-              })
-            : undefined
-        if (activated?.decision.type === "rejected") return activated
-        const current = activated?.state.contracts[evaluation.id] ?? evaluation
-        const ready =
-          current.status === "active"
-            ? yield* execute({
-                type: "report-ready",
-                actor: "institution",
-                contractID: current.id,
-                revision: current.revision,
-                summary:
-                  report.disclosure === "sealed" ? "External evaluator accepted sealed evidence" : report.summary,
-                uncertainties: [],
-                subjectHash: report.subjectHash,
-                time: input.time,
-              })
-            : undefined
-        if (ready?.decision.type === "rejected") return ready
-        const handedOff = ready?.state.contracts[current.id] ?? current
-        return yield* discharge(handedOff, input.evidenceHash)
+                const activated =
+                  evaluation.status === "dormant"
+                    ? yield* execute({
+                        type: "activate",
+                        actor: "institution",
+                        contractID: evaluation.id,
+                        revision: evaluation.revision,
+                        time: request.time,
+                      })
+                    : undefined
+                if (activated?.decision.type === "rejected") return activated
+                const current = activated?.state.contracts[evaluation.id] ?? evaluation
+                const ready =
+                  current.status === "active"
+                    ? yield* execute({
+                        type: "report-ready",
+                        actor: "institution",
+                        contractID: current.id,
+                        revision: current.revision,
+                        summary:
+                          report.disclosure === "sealed"
+                            ? "External evaluator accepted sealed evidence"
+                            : report.summary,
+                        uncertainties: [],
+                        subjectHash: report.subjectHash,
+                        time: request.time,
+                      })
+                    : undefined
+                if (ready?.decision.type === "rejected") return ready
+                const handedOff = ready?.state.contracts[current.id] ?? current
+                return yield* discharge(handedOff.id, {
+                  revision: handedOff.revision,
+                  specHash: handedOff.specHash,
+                  subjectHash: report.subjectHash,
+                  evidenceHash: request.evidenceHash,
+                })
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(Effect.orDie)
       }),
       release: (input) => execute({ type: "release", actor: "local-owner", ...input }),
       challenge: (input) =>
@@ -448,11 +472,8 @@ const layer = Layer.effect(
         })
       }),
       decideRevision: (input) => execute({ type: "decide-revision", actor: "local-owner", ...input }),
-      principalAttest: Effect.fn("ProContract.principalAttest")(function* (input) {
-        const contract = yield* get(input.contractID)
-        if (!contract) return yield* Effect.die(`Contract not found: ${input.contractID}`)
-        return yield* discharge(contract, input.evidenceHash)
-      }),
+      // The transaction must compare the evaluated coordinates, not replace them with the latest handoff.
+      principalAttest: (input) => discharge(input.contractID, input),
       due: Effect.fn("ProContract.due")(function* (now) {
         const rows = yield* db.select({ data: ProContractTable.data }).from(ProContractTable).all().pipe(Effect.orDie)
         const state = {

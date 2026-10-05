@@ -2,7 +2,9 @@ export * as ContractControlTools from "./contract-control"
 
 import { ToolFailure } from "@opencode-ai/llm"
 import { Clock, Effect, Layer, Schema } from "effect"
+import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
+import { Location } from "../location"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
 import { ProContractOpenCode } from "../pro-contract/open-code"
@@ -29,6 +31,34 @@ const layer = Layer.effectDiscard(
     const sessions = yield* SessionStore.Service
     const snapshots = yield* Snapshot.Service
     const strategies = yield* ProContractStrategy.Service
+    const db = (yield* Database.Service).db
+    const location = yield* Location.Service
+
+    const requireExecution = Effect.fn("ContractControlTools.requireExecution")(function* (
+      sessionID: SessionSchema.ID,
+      expected?: ProContractOpenCode.Execution,
+    ) {
+      const execution = yield* bindings.current(sessionID, yield* Clock.currentTimeMillis)
+      if (
+        !execution ||
+        execution.binding.location.directory !== location.directory ||
+        execution.binding.location.workspaceID !== location.workspaceID ||
+        (expected &&
+          (execution.binding.promptID !== expected.binding.promptID ||
+            execution.binding.attemptKey !== expected.binding.attemptKey ||
+            execution.contract.specHash !== expected.contract.specHash))
+      )
+        return yield* new ToolFailure({ message: "Contract execution is no longer current for this Session" })
+      return execution
+    })
+
+    // External awaits never hold a transaction. Recheck ownership atomically with the eventual mutation.
+    const mutate = <A>(execution: ProContractOpenCode.Execution, mutation: Effect.Effect<A, ToolFailure>) =>
+      db
+        .transaction(() => requireExecution(execution.binding.sessionID, execution).pipe(Effect.andThen(mutation)), {
+          behavior: "immediate",
+        })
+        .pipe(Effect.catchTag("SqlError", Effect.die))
 
     yield* tools
       .register({
@@ -87,7 +117,7 @@ const layer = Layer.effectDiscard(
                     executionPolicy ? `Execution policy: ${executionPolicy}` : undefined,
                     `Trigger: ${JSON.stringify(spec.trigger)}`,
                     `Authority: ${spec.authority.join(", ")}`,
-                    `Budget: ${spec.budget.turns} turns, ${spec.budget.actions} actions, deadline ${spec.budget.deadline}`,
+                    `Budget: ${spec.budget.turns ?? "unbounded"} turns, ${spec.budget.actions ?? "unbounded"} actions, deadline ${spec.budget.deadline}`,
                     `Requires: ${spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
                     `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                     `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
@@ -236,29 +266,32 @@ const layer = Layer.effectDiscard(
           output: Schema.Struct({ recorded: Schema.Boolean }),
           execute: (input, context) =>
             Effect.gen(function* () {
-              const binding = yield* bindings.forSession(context.sessionID)
-              if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
-              const contract = yield* contracts.get(binding.contractID)
-              if (!contract) return yield* new ToolFailure({ message: "Contract not found" })
+              const execution = yield* requireExecution(context.sessionID)
+              const contract = execution.contract
               const now = yield* Clock.currentTimeMillis
               const policy = contract.spec.evidence.replay
               if (policy && !(yield* bindings.reserveAction(context.sessionID, now)))
                 return yield* new ToolFailure({ message: "Contract action budget exhausted" })
               const subjectHash = yield* snapshots.capture({ include: policy?.artifacts })
+              yield* requireExecution(context.sessionID, execution)
               if (!subjectHash) {
                 const message = "Contract handoff snapshot is unavailable"
-                const receipt = yield* contracts.escalate({
-                  contractID: contract.id,
-                  revision: contract.revision,
-                  reason: message,
-                  time: now,
-                })
+                const receipt = yield* mutate(
+                  execution,
+                  contracts.escalate({
+                    contractID: contract.id,
+                    revision: contract.revision,
+                    reason: message,
+                    time: now,
+                  }),
+                )
                 if (receipt.decision.type === "rejected")
                   return yield* new ToolFailure({ message: receipt.decision.reason })
                 return yield* new ToolFailure({ message })
               }
               if (process.env.OPENCODE_STRATEGY_PORTFOLIO === "1") {
                 const state = yield* strategies.read(context.sessionID)
+                yield* requireExecution(context.sessionID, execution)
                 if (!state || state.specHash !== contract.specHash || !state.ready || state.subjectHash !== subjectHash)
                   return yield* new ToolFailure({
                     message: `Public strategy verification is missing, failed, or stale. No handoff was recorded. Use strategy_status/strategy_verify, resolve the actual counterexample, and submit within the original deadline. ${state ? ProContractStrategy.guidance(state) : "Declare the task-grounded plan with strategy_plan first."}`,
@@ -282,12 +315,15 @@ const layer = Layer.effectDiscard(
                       Effect.catch((error) =>
                         Effect.gen(function* () {
                           const message = `Independent verification unavailable for ${subjectHash}: ${error.message}`
-                          const receipt = yield* contracts.escalate({
-                            contractID: contract.id,
-                            revision: contract.revision,
-                            reason: message,
-                            time: yield* Clock.currentTimeMillis,
-                          })
+                          const receipt = yield* mutate(
+                            execution,
+                            contracts.escalate({
+                              contractID: contract.id,
+                              revision: contract.revision,
+                              reason: message,
+                              time: yield* Clock.currentTimeMillis,
+                            }),
+                          )
                           if (receipt.decision.type === "rejected")
                             return yield* new ToolFailure({ message: receipt.decision.reason })
                           return yield* new ToolFailure({ message })
@@ -295,19 +331,23 @@ const layer = Layer.effectDiscard(
                       ),
                     )
                 : undefined
+              yield* requireExecution(context.sessionID, execution)
               if (replay && !replay.passed)
                 return yield* new ToolFailure({
                   message: `${replay.summary}\nReplay evidence: ${replay.evidenceHash}; subject: ${replay.subjectHash}. No handoff was recorded. Repair the candidate within the existing Contract and remaining budget, then check or report ready again.`,
                 })
-              const receipt = yield* contracts.reportReady({
-                contractID: binding.contractID,
-                revision: binding.revision,
-                summary: input.summary,
-                uncertainties: input.uncertainties,
-                subjectHash,
-                replay,
-                time: yield* Clock.currentTimeMillis,
-              })
+              const receipt = yield* mutate(
+                execution,
+                contracts.reportReady({
+                  contractID: execution.binding.contractID,
+                  revision: execution.binding.revision,
+                  summary: input.summary,
+                  uncertainties: input.uncertainties,
+                  subjectHash,
+                  replay,
+                  time: yield* Clock.currentTimeMillis,
+                }),
+              )
               if (receipt.decision.type === "rejected")
                 return yield* new ToolFailure({ message: receipt.decision.reason })
               return { recorded: true }
@@ -324,24 +364,28 @@ const layer = Layer.effectDiscard(
           output: Schema.Struct({ recorded: Schema.Boolean }),
           execute: (input, context) =>
             Effect.gen(function* () {
-              const binding = yield* bindings.forSession(context.sessionID)
-              if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
-              const receipt = yield* contracts.reportBlocked({
-                contractID: binding.contractID,
-                revision: binding.revision,
-                reason: input.reason,
-                time: yield* Clock.currentTimeMillis,
-              })
-              if (receipt.decision.type === "rejected")
-                return yield* new ToolFailure({ message: receipt.decision.reason })
-              yield* bindings.reschedule({
-                contractID: binding.contractID,
-                revision: binding.revision,
-                promptID: binding.promptID,
-                reason: input.reason,
-                now: yield* Clock.currentTimeMillis,
-                attempt: "new",
-              })
+              const execution = yield* requireExecution(context.sessionID)
+              yield* mutate(
+                execution,
+                Effect.gen(function* () {
+                  const receipt = yield* contracts.reportBlocked({
+                    contractID: execution.binding.contractID,
+                    revision: execution.binding.revision,
+                    reason: input.reason,
+                    time: yield* Clock.currentTimeMillis,
+                  })
+                  if (receipt.decision.type === "rejected")
+                    return yield* new ToolFailure({ message: receipt.decision.reason })
+                  yield* bindings.reschedule({
+                    contractID: execution.binding.contractID,
+                    revision: execution.binding.revision,
+                    promptID: execution.binding.promptID,
+                    reason: input.reason,
+                    now: yield* Clock.currentTimeMillis,
+                    attempt: "new",
+                  })
+                }),
+              )
               return { recorded: true }
             }).pipe(
               Effect.mapError((error) =>
@@ -360,18 +404,9 @@ const layer = Layer.effectDiscard(
           output: Schema.Struct({ recorded: Schema.Boolean }),
           execute: (input, context) =>
             Effect.gen(function* () {
-              const binding = yield* bindings.forSession(context.sessionID)
-              if (!binding) return yield* new ToolFailure({ message: "No Contract is bound to this Session" })
-              const contract = yield* contracts.get(binding.contractID)
-              if (!contract) return yield* new ToolFailure({ message: "Contract not found" })
+              const execution = yield* requireExecution(context.sessionID)
+              const contract = execution.contract
               const spec = { ...contract.spec, goal: input.goal, brief: input.brief ?? contract.spec.brief }
-              const receipt = yield* contracts.petitionRevision({
-                contractID: contract.id,
-                spec,
-                reason: input.reason,
-              })
-              if (receipt.decision.type === "rejected")
-                return yield* new ToolFailure({ message: receipt.decision.reason })
               const approved = yield* permissions
                 .assert({
                   action: "contract_revision",
@@ -390,13 +425,26 @@ const layer = Layer.effectDiscard(
                   Effect.catchTag("PermissionV2.BlockedError", () => Effect.succeed(false)),
                   Effect.catchTag("PermissionV2.CorrectedError", () => Effect.succeed(false)),
                 )
-              const decision = yield* contracts.decideRevision({ contractID: contract.id, accept: approved })
-              if (decision.decision.type === "rejected")
-                return yield* new ToolFailure({ message: decision.decision.reason })
+              yield* requireExecution(context.sessionID, execution)
               if (!approved)
                 return yield* new ToolFailure({
                   message: "Revision rejected by the principal; the original Contract remains authoritative",
                 })
+              yield* mutate(
+                execution,
+                Effect.gen(function* () {
+                  const receipt = yield* contracts.petitionRevision({
+                    contractID: contract.id,
+                    spec,
+                    reason: input.reason,
+                  })
+                  if (receipt.decision.type === "rejected")
+                    return yield* new ToolFailure({ message: receipt.decision.reason })
+                  const decision = yield* contracts.decideRevision({ contractID: contract.id, accept: true })
+                  if (decision.decision.type === "rejected")
+                    return yield* new ToolFailure({ message: decision.decision.reason })
+                }),
+              )
               return { recorded: true }
             }).pipe(
               Effect.mapError((error) =>
@@ -422,5 +470,7 @@ export const node = makeLocationNode({
     SessionStore.node,
     Snapshot.node,
     ProContractStrategy.node,
+    Database.node,
+    Location.node,
   ],
 })

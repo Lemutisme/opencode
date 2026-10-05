@@ -272,6 +272,7 @@ const app = LayerNode.group([
   ProjectCopy.node,
   PtyTicket.node,
   ProContract.node,
+  SessionExecution.node,
   ProContractOpenCode.node,
   SessionV2.node,
   ProContractScheduler.liveNode,

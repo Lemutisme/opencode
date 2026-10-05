@@ -237,6 +237,21 @@ const layer = Layer.effect(
           contractAttemptChanged)
       )
         return { needsContinuation: false, step: currentStep }
+      // Generic Session controls cannot change the model coordinates approved for this execution.
+      if (
+        contractBinding &&
+        (session.model?.id !== contractBinding.model.id ||
+          session.model.providerID !== contractBinding.model.providerID ||
+          (session.model.variant ?? "default") !== (contractBinding.model.variant ?? "default"))
+      ) {
+        yield* contracts.escalate({
+          contractID: contractBinding.contractID,
+          revision: contractBinding.revision,
+          reason: "OpenCode execution model does not match its binding",
+          time: now,
+        })
+        return { needsContinuation: false, step: currentStep }
+      }
       const system =
         initialized ??
         (yield* SessionContextEpoch.prepare(
@@ -249,7 +264,11 @@ const layer = Layer.effect(
       if (process.env.OPENCODE_RUNTIME_GC === "1" && typeof Bun !== "undefined") Bun.gc(true)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
-      const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
+      // An issued Contract without a turn ceiling must not inherit a generic agent step ceiling.
+      const isLastStep =
+        !(contract && contract.spec.budget.turns === undefined) &&
+        agent.info?.steps !== undefined &&
+        currentStep >= agent.info.steps
       const authority = contract?.status === "active" ? contract.spec.authority : []
       const contractPermissions = contractBinding
         ? [
@@ -318,8 +337,10 @@ const layer = Layer.effect(
       const settlementWindow =
         contract?.status === "active" &&
         contractBinding !== undefined &&
-        (contract.spec.budget.turns - contractBinding.turnsUsed <= SETTLEMENT_WINDOW ||
-          contract.spec.budget.actions - contractBinding.actionsUsed <= SETTLEMENT_WINDOW)
+        ((contract.spec.budget.turns !== undefined &&
+          contract.spec.budget.turns - contractBinding.turnsUsed <= SETTLEMENT_WINDOW) ||
+          (contract.spec.budget.actions !== undefined &&
+            contract.spec.budget.actions - contractBinding.actionsUsed <= SETTLEMENT_WINDOW))
       const originalRequest = LLM.request({
         model,
         http: {
@@ -357,13 +378,14 @@ const layer = Layer.effect(
       const request = LLM.updateRequest(originalRequest, {
         messages: ContextBudget.selectMedia(originalRequest.messages),
       })
+      const deadline = contract?.spec.budget.deadline
       if (
         yield* compaction.compactIfNeeded({
           sessionID: session.id,
           entries,
           model,
           request,
-          deadline: contract?.spec.budget.deadline,
+          deadline,
         })
       )
         return yield* Effect.die(continueAfterCompaction(currentStep))
@@ -384,6 +406,7 @@ const layer = Layer.effect(
       const publish = (event: LLMEvent, outputPaths: ReadonlyArray<string> = []) =>
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
+      if (deadline !== undefined && deadline <= (yield* Clock.currentTimeMillis)) return yield* Effect.interrupt
       const providerStream = llm.stream(request).pipe(
         Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
         Stream.runForEach((event) =>
@@ -461,7 +484,7 @@ const layer = Layer.effect(
                 entries,
                 model,
                 request,
-                deadline: contract?.spec.budget.deadline,
+                deadline,
               }),
             ))
           )
@@ -472,7 +495,18 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failAssistant(llmFailure.reason.message))
           }
           if (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) yield* FiberSet.clear(toolFibers)
-          const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
+          // Provider completion does not imply tool completion. Keep the original deadline while tools settle.
+          const settlement = awaitToolFibers(toolFibers)
+          const settled = yield* restore(
+            deadline === undefined
+              ? settlement
+              : settlement.pipe(
+                  Effect.timeoutOrElse({
+                    duration: Math.max(0, deadline - (yield* Clock.currentTimeMillis)),
+                    orElse: () => Effect.interrupt,
+                  }),
+                ),
+          ).pipe(Effect.exit)
           if (settled._tag === "Failure" && isUserDeclined(settled.cause)) {
             yield* FiberSet.clear(toolFibers)
             yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))

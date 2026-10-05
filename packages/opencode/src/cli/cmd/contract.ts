@@ -1,6 +1,9 @@
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
+import { ProContractPolicy } from "@opencode-ai/core/pro-contract/policy"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { Database } from "@opencode-ai/core/database/database"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Clock, Effect, Schema } from "effect"
@@ -8,6 +11,7 @@ import path from "path"
 import type { Argv } from "yargs"
 import { effectCmd, fail } from "../effect-cmd"
 import { cmd } from "./cmd"
+import { ContractStrategyCommand } from "./contract-strategy"
 
 const IssueCommand = effectCmd({
   command: "issue",
@@ -19,6 +23,8 @@ const IssueCommand = effectCmd({
       .option("scope", { type: "string", demandOption: true, describe: "quiescence scope" })
       .option("goal", { type: "string", demandOption: true, describe: "optimization objective" })
       .option("execution-policy", { type: "string", describe: "executor strategy kept outside Contract terms" })
+      .option("strategy", { type: "string", describe: "authorized policy scope to consume" })
+      .option("strategy-role", { choices: ["solver", "generator"] as const, default: "solver" as const })
       .option("claim", { type: "string", describe: "exact proposition the evidence may settle" })
       .option("brief", { type: "string", describe: "context for the future executor" })
       .option("require", { type: "array", string: true, describe: "required Contract as ID@revision" })
@@ -26,6 +32,11 @@ const IssueCommand = effectCmd({
       .option("variant", { type: "string", describe: "model variant" })
       .option("write", { type: "boolean", describe: "allow workspace changes and process execution" })
       .option("turns", { type: "number", describe: "maximum provider turns" })
+      .option("actions", { type: "number", describe: "optional maximum tool actions" })
+      .option("deadline", {
+        type: "string",
+        describe: "absolute ISO deadline; no count caps unless explicitly supplied",
+      })
       .option("at", { type: "string", describe: "activation time as an ISO timestamp" }),
   handler: Effect.fn("Cli.contract.issue")(function* (args) {
     const activateAt = args.at ? Date.parse(args.at) : undefined
@@ -33,42 +44,87 @@ const IssueCommand = effectCmd({
       return yield* fail(`Invalid activation time: ${args.at}`)
     if (args.turns !== undefined && (!Number.isInteger(args.turns) || args.turns <= 0))
       return yield* fail(`Invalid turn budget: ${args.turns}`)
+    if (args.actions !== undefined && (!Number.isInteger(args.actions) || args.actions <= 0))
+      return yield* fail(`Invalid action budget: ${args.actions}`)
+    const deadline = args.deadline === undefined ? undefined : Date.parse(args.deadline)
+    if (deadline !== undefined && (!Number.isFinite(deadline) || deadline < 0))
+      return yield* fail(`Invalid deadline: ${args.deadline}`)
+    if (args.strategy !== undefined && args.executionPolicy !== undefined)
+      return yield* fail("Use either an authorized strategy or an explicit execution policy, not both")
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
     const now = yield* Clock.currentTimeMillis
     const id = args.id ? ProContract.ID.make(args.id) : ProContract.ID.create()
     const model = ModelV2.parse(args.model)
     const base = (yield* contracts.get(id))?.spec ?? ProContract.defaultSpec(args.goal, now)
+    const policies = yield* ProContractPolicy.Service
+    const database = yield* Database.Service
     const requires = yield* Effect.forEach(args.require ?? [], (value) => {
       if (typeof value !== "string") return fail("Invalid required Contract")
       const match = /^(pct_.+)@([1-9]\d*)$/.exec(value)
       if (!match) return fail(`Invalid required Contract: ${value}`)
       return Effect.succeed({ contractID: ProContract.ID.make(match[1]), revision: Number(match[2]) })
     })
-    const spec = {
-      ...base,
-      goal: args.goal,
-      brief: args.brief ?? base.brief,
-      requires: args.require === undefined ? base.requires : requires,
-      authority: args.write ? (["filesystem.read", "filesystem.write", "process.execute"] as const) : base.authority,
-      budget: args.turns === undefined ? base.budget : { ...base.budget, turns: args.turns },
-      evidence: args.claim === undefined ? base.evidence : { ...base.evidence, claim: args.claim },
-      trigger: activateAt === undefined ? base.trigger : { type: "time" as const, at: activateAt },
-    }
     const executionModel = ModelV2.Ref.make({
       providerID: model.providerID,
       id: model.modelID,
       variant: args.variant ? ModelV2.VariantID.make(args.variant) : undefined,
     })
-    const receipt = yield* bindings.issue({
-      id,
-      scope: args.scope,
-      spec,
-      location: { directory: AbsolutePath.make(process.cwd()) },
-      model: executionModel,
-      executionPolicy: args.executionPolicy,
-      now,
-    })
+    // Freeze selection and durable admission together; an upgrade cannot race
+    // policy resolution and leave the new execution ambiguously bound.
+    const admission = yield* database.db
+      .transaction(
+        () =>
+          Effect.gen(function* () {
+            const policy = args.strategy
+              ? yield* policies.bind({ scope: args.strategy, role: args.strategyRole })
+              : undefined
+            const executionPolicy = policy?.executionPolicy ?? args.executionPolicy
+            const dependencies = args.require === undefined ? base.requires : requires
+            if (
+              policy &&
+              dependencies.some(
+                (item) =>
+                  item.contractID === policy.requirement.contractID && item.revision !== policy.requirement.revision,
+              )
+            )
+              return yield* fail("Strategy dependency revision conflicts with the selected policy")
+            const spec = {
+              ...base,
+              goal: args.goal,
+              brief: args.brief ?? base.brief,
+              requires:
+                policy && !dependencies.some((item) => item.contractID === policy.requirement.contractID)
+                  ? [...dependencies, policy.requirement]
+                  : dependencies,
+              authority: args.write
+                ? (["filesystem.read", "filesystem.write", "process.execute"] as const)
+                : base.authority,
+              budget: {
+                ...(deadline === undefined ? base.budget : { deadline }),
+                ...(args.turns === undefined ? {} : { turns: args.turns }),
+                ...(args.actions === undefined ? {} : { actions: args.actions }),
+              },
+              evidence: args.claim === undefined ? base.evidence : { ...base.evidence, claim: args.claim },
+              trigger: activateAt === undefined ? base.trigger : { type: "time" as const, at: activateAt },
+            }
+            return {
+              executionPolicy,
+              receipt: yield* bindings.issue({
+                id,
+                scope: args.scope,
+                spec,
+                location: { directory: AbsolutePath.make(process.cwd()) },
+                model: executionModel,
+                executionPolicy,
+                now,
+              }),
+            }
+          }),
+        { behavior: "immediate" },
+      )
+      .pipe(Effect.orDie)
+    const receipt = admission.receipt
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
     const contract = receipt.contract
     if (!contract) return yield* Effect.die("Accepted contract was not loaded")
@@ -79,7 +135,7 @@ const IssueCommand = effectCmd({
       execution.model.providerID !== executionModel.providerID ||
       execution.model.id !== executionModel.id ||
       execution.model.variant !== executionModel.variant ||
-      execution.executionPolicy !== args.executionPolicy
+      execution.executionPolicy !== admission.executionPolicy
     )
       return yield* fail("Contract execution binding does not match")
     console.log(JSON.stringify({ contract: ProContract.info(contract), execution }, null, 2))
@@ -275,10 +331,13 @@ const ReleaseCommand = effectCmd({
       .positional("contractID", { type: "string", demandOption: true, describe: "contract ID" })
       .option("reason", { type: "string", demandOption: true, describe: "release reason" }),
   handler: Effect.fn("Cli.contract.release")(function* (args) {
-    const receipt = yield* ProContract.Service.use((service) =>
-      service.release({ contractID: ProContract.ID.make(args.contractID), reason: args.reason }),
-    )
+    const contractID = ProContract.ID.make(args.contractID)
+    const receipt = yield* ProContract.Service.use((service) => service.release({ contractID, reason: args.reason }))
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
+    const bindings = yield* ProContractOpenCode.Service
+    const execution = yield* SessionExecution.Service
+    const binding = yield* bindings.get(contractID)
+    if (binding) yield* execution.interrupt(binding.sessionID)
     console.log(JSON.stringify({ frontier: receipt.frontier, hash: receipt.hash }, null, 2))
     return undefined
   }),
@@ -291,12 +350,21 @@ const AttestCommand = effectCmd({
   builder: (yargs) =>
     yargs
       .positional("contractID", { type: "string", demandOption: true, describe: "contract ID" })
+      .option("revision", { type: "number", demandOption: true, describe: "evaluated Contract revision" })
+      .option("spec-hash", { type: "string", demandOption: true, describe: "evaluated terms identity" })
+      .option("subject-hash", { type: "string", demandOption: true, describe: "evaluated frozen subject" })
       .option("evidence-hash", { type: "string", demandOption: true, describe: "evidence hash" }),
   handler: Effect.fn("Cli.contract.attest")(function* (args) {
+    const evidence = Schema.decodeUnknownSync(ProContract.AttestationEvidence)({
+      revision: args.revision,
+      specHash: args.specHash,
+      subjectHash: args.subjectHash,
+      evidenceHash: args.evidenceHash,
+    })
     const receipt = yield* ProContract.Service.use((service) =>
       service.principalAttest({
         contractID: ProContract.ID.make(args.contractID),
-        evidenceHash: args.evidenceHash,
+        ...evidence,
       }),
     )
     if (receipt.decision.type === "rejected") return yield* fail(receipt.decision.reason)
@@ -345,6 +413,7 @@ export const ContractCommand = effectCmd({
   builder: (yargs: Argv) =>
     yargs
       .command(IssueCommand)
+      .command(ContractStrategyCommand)
       .command(EvaluationCommand)
       .command(SweepCommand)
       .command(ListCommand)

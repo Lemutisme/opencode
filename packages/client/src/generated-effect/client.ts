@@ -747,12 +747,20 @@ const Endpoint18_4 = (raw: RawClient["server.proContract"]) => (input: Endpoint1
 type Endpoint18_5Request = Parameters<RawClient["server.proContract"]["proContract.attest"]>[0]
 type Endpoint18_5Input = {
   readonly contractID: Endpoint18_5Request["params"]["contractID"]
+  readonly revision: Endpoint18_5Request["payload"]["revision"]
+  readonly specHash: Endpoint18_5Request["payload"]["specHash"]
+  readonly subjectHash: Endpoint18_5Request["payload"]["subjectHash"]
   readonly evidenceHash: Endpoint18_5Request["payload"]["evidenceHash"]
 }
 const Endpoint18_5 = (raw: RawClient["server.proContract"]) => (input: Endpoint18_5Input) =>
   raw["proContract.attest"]({
     params: { contractID: input["contractID"] },
-    payload: { evidenceHash: input["evidenceHash"] },
+    payload: {
+      revision: input["revision"],
+      specHash: input["specHash"],
+      subjectHash: input["subjectHash"],
+      evidenceHash: input["evidenceHash"],
+    },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint18_6Request = Parameters<RawClient["server.proContract"]["proContract.challenge"]>[0]

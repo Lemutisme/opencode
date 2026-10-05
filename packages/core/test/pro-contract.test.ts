@@ -379,6 +379,57 @@ describe("ProContract kernel", () => {
     })
   })
 
+  test.each([
+    { replay: { checks: [], protected: [], artifacts: [] }, reason: "replay policy is empty" },
+    {
+      replay: { checks: [{ argv: [], timeout: 1_000, exit: 0 }], protected: [], artifacts: [] },
+      reason: "replay check command is empty",
+    },
+  ])("rejects invalid replay terms at every admission boundary: $reason", ({ replay, reason }) => {
+    const nextSpec = { ...spec, evidence: { ...spec.evidence, replay } }
+    const specHash = ProContract.hashSpec(nextSpec)
+    expect(
+      ProContract.transition(ProContract.empty, { ...issue, draft: { ...draft, spec: nextSpec, specHash } }).decision,
+    ).toEqual({ type: "rejected", reason })
+
+    const issued = ProContract.transition(ProContract.empty, issue)
+    const petitioned = ProContract.transition(issued.state, {
+      type: "petition-revision",
+      actor: draft.executor,
+      contractID,
+      spec: nextSpec,
+      specHash,
+      reason: "update replay",
+    })
+    expect(petitioned.decision).toEqual({ type: "rejected", reason })
+    expect(petitioned.state).toBe(issued.state)
+
+    const contract = issued.state.contracts[contractID]
+    if (!contract) throw new Error("Issued Contract missing")
+    const persisted = {
+      ...issued.state,
+      contracts: {
+        [contractID]: { ...contract, pendingRevision: { spec: nextSpec, specHash, reason: "legacy petition" } },
+      },
+    }
+    const accepted = ProContract.transition(persisted, {
+      type: "decide-revision",
+      actor: draft.issuer,
+      contractID,
+      accept: true,
+    })
+    expect(accepted.decision).toEqual({ type: "rejected", reason })
+    expect(accepted.state).toBe(persisted)
+    expect(
+      ProContract.transition(persisted, {
+        type: "decide-revision",
+        actor: draft.issuer,
+        contractID,
+        accept: false,
+      }).decision,
+    ).toEqual({ type: "accepted" })
+  })
+
   test("keeps dependency edges immutable across revisions", () => {
     const issued = ProContract.transition(ProContract.empty, issue)
     const nextSpec = { ...spec, requires: [{ contractID, revision: 1 }] }
@@ -982,6 +1033,9 @@ describe("ProContract ledger", () => {
       })
       const principal = yield* contracts.principalAttest({
         contractID,
+        revision: 1,
+        specHash: ProContract.hashSpec(spec),
+        subjectHash,
         evidenceHash: "principal-evidence",
       })
       expect(principal.state.contracts[contractID]?.status).toBe("discharged")
@@ -991,6 +1045,73 @@ describe("ProContract ledger", () => {
         subjectHash,
         verifierID: "local-owner",
       })
+    }),
+  )
+
+  it.effect("rejects stale evidence after a challenged handoff without rebinding it to the replacement", () =>
+    Effect.gen(function* () {
+      const contracts = yield* ProContract.Service
+      yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+      yield* contracts.activate(contractID, 1, 0)
+      const ready = yield* contracts.reportReady({
+        contractID,
+        revision: 1,
+        summary: "candidate A",
+        uncertainties: [],
+        subjectHash: "subject-A",
+        time: 0,
+      })
+      const evaluated = ready.state.contracts[contractID]
+      if (!evaluated?.handoff) throw new Error("Evaluated handoff missing")
+      const evidence = {
+        revision: evaluated.revision,
+        specHash: evaluated.specHash,
+        subjectHash: evaluated.handoff.subjectHash,
+        evidenceHash: "report-for-A",
+      }
+      yield* contracts.challenge({
+        contractID,
+        revision: evidence.revision,
+        subjectHash: evidence.subjectHash,
+        evidenceHash: "counterexample-A",
+        disclosure: "executor",
+        summary: "A fails independent verification",
+        time: 1,
+      })
+      yield* contracts.activate(contractID, 1, 2)
+      yield* contracts.reportReady({
+        contractID,
+        revision: 1,
+        summary: "candidate B",
+        uncertainties: [],
+        subjectHash: "subject-B",
+        time: 2,
+      })
+      const before = yield* contracts.get(contractID)
+      const frontier = yield* contracts.quiet(draft.scope)
+      const rejected = yield* contracts.principalAttest({ contractID, ...evidence })
+      expect(rejected.decision).toEqual({ type: "rejected", reason: "attestation subject does not match" })
+      expect(yield* contracts.get(contractID)).toEqual(before)
+      expect(yield* contracts.quiet(draft.scope)).toMatchObject({
+        quiet: false,
+        frontier: frontier.frontier + 1,
+        stateHash: frontier.stateHash,
+      })
+      if (rejected.event.command.type !== "discharge") throw new Error("Attestation command missing")
+      expect(yield* contracts.getAttestation(rejected.event.command.attestation.id)).toBeUndefined()
+      expect((yield* contracts.history({ contractID })).at(-1)).toMatchObject({
+        command: { attestation: evidence },
+        decision: rejected.decision,
+      })
+      expect(
+        (yield* contracts.principalAttest({
+          contractID,
+          revision: 1,
+          specHash: ProContract.hashSpec(spec),
+          subjectHash: "subject-B",
+          evidenceHash: "report-for-B",
+        })).decision,
+      ).toEqual({ type: "accepted" })
     }),
   )
 
@@ -1020,7 +1141,13 @@ describe("ProContract ledger", () => {
         subjectHash,
         time: 1,
       })
-      yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
+      yield* contracts.principalAttest({
+        contractID,
+        revision: 1,
+        specHash: ProContract.hashSpec(spec),
+        subjectHash,
+        evidenceHash: "delivery-evidence",
+      })
       expect((yield* contracts.due(2)).map((contract) => contract.id)).toContain(evaluationID)
 
       const settled = yield* contracts.settleEvaluation({
@@ -1066,7 +1193,13 @@ describe("ProContract ledger", () => {
         subjectHash,
         time: 1,
       })
-      yield* contracts.principalAttest({ contractID, evidenceHash: "delivery-evidence" })
+      yield* contracts.principalAttest({
+        contractID,
+        revision: 1,
+        specHash: ProContract.hashSpec(spec),
+        subjectHash,
+        evidenceHash: "delivery-evidence",
+      })
 
       yield* contracts.settleEvaluation({
         contractID: evaluationID,
@@ -1140,7 +1273,13 @@ describe("ProContract ledger", () => {
         subjectHash: "upstream-subject",
         time: 0,
       })
-      yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
+      yield* contracts.principalAttest({
+        contractID: upstreamID,
+        revision: 1,
+        specHash: ProContract.hashSpec(spec),
+        subjectHash: "upstream-subject",
+        evidenceHash: "upstream-evidence",
+      })
       const childSpec = { ...spec, requires: [{ contractID: upstreamID, revision: 1 }] }
       yield* contracts.issue({ id: childID, scope: "support", spec: childSpec, executor: "child" })
       yield* contracts.activate(childID, 1, 1)
@@ -1154,6 +1293,9 @@ describe("ProContract ledger", () => {
       })
       const childDischarge = yield* contracts.principalAttest({
         contractID: childID,
+        revision: 1,
+        specHash: ProContract.hashSpec(childSpec),
+        subjectHash: "child-subject",
         evidenceHash: "child-evidence",
       })
       const childAttestationID = childDischarge.state.contracts[childID]?.attestationID
@@ -1257,7 +1399,13 @@ describe("ProContract ledger", () => {
         subjectHash,
         time: 0,
       })
-      yield* contracts.principalAttest({ contractID: upstreamID, evidenceHash: "upstream-evidence" })
+      yield* contracts.principalAttest({
+        contractID: upstreamID,
+        revision: 1,
+        specHash: ProContract.hashSpec(spec),
+        subjectHash,
+        evidenceHash: "upstream-evidence",
+      })
       expect((yield* contracts.due(0)).map((contract) => contract.id)).toEqual([childID])
     }),
   )

@@ -1086,7 +1086,12 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/contract/${encodeURIComponent(input.contractID)}/attestation`,
-            body: { evidenceHash: input["evidenceHash"] },
+            body: {
+              revision: input["revision"],
+              specHash: input["specHash"],
+              subjectHash: input["subjectHash"],
+              evidenceHash: input["evidenceHash"],
+            },
             successStatus: 200,
             declaredStatuses: [409, 404, 401, 400],
             empty: false,

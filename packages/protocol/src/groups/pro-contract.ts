@@ -101,7 +101,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
   .add(
     HttpApiEndpoint.post("proContract.attest", "/api/contract/:contractID/attestation", {
       params: { contractID: ProContract.ID },
-      payload: Schema.Struct({ evidenceHash: Schema.NonEmptyString }),
+      payload: ProContract.AttestationEvidence,
       success: Receipt,
       error: [ConflictError, ProContractNotFoundError],
     })

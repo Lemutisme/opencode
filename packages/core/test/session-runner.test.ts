@@ -755,7 +755,13 @@ describe("SessionRunnerLLM", () => {
         subjectHash: "dependency-subject",
         time: Date.now(),
       })
-      yield* contracts.principalAttest({ contractID: dependencyID, evidenceHash: "dependency-evidence" })
+      yield* contracts.principalAttest({
+        contractID: dependencyID,
+        revision: 1,
+        specHash: ProContract.hashSpec(dependencySpec),
+        subjectHash: "dependency-subject",
+        evidenceHash: "dependency-evidence",
+      })
       const prerequisiteID = ProContract.ID.make("pct_runner_prerequisite")
       const prerequisiteSpec = ProContract.defaultSpec("Establish the verified prerequisite", Date.now())
       yield* contracts.issue({
@@ -773,7 +779,13 @@ describe("SessionRunnerLLM", () => {
         subjectHash: "prerequisite-subject",
         time: Date.now(),
       })
-      yield* contracts.principalAttest({ contractID: prerequisiteID, evidenceHash: "prerequisite-evidence" })
+      yield* contracts.principalAttest({
+        contractID: prerequisiteID,
+        revision: 1,
+        specHash: ProContract.hashSpec(prerequisiteSpec),
+        subjectHash: "prerequisite-subject",
+        evidenceHash: "prerequisite-evidence",
+      })
       const spec = {
         ...ProContract.defaultSpec("Inspect the repository without changing it", Date.now()),
         authority: ["filesystem.read", "organization.approve", "reference.run"],

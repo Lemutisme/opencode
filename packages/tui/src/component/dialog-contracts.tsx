@@ -32,12 +32,15 @@ export function DialogContracts(props: { scope?: string } = {}) {
       description: `${contract.pendingRevision ? "revision pending" : contract.status} · ${contract.scope}`,
       details: [
         `Contract: ${contract.id}`,
+        `Revision: ${contract.revision}`,
+        `Specification: ${contract.specHash}`,
         `Settlement claim: ${contract.spec.evidence.claim ?? contract.spec.goal}`,
         `Brief: ${contract.spec.brief ? "provided" : "none"}`,
         `Requires: ${contract.spec.requires.map((item) => `${item.contractID}@${item.revision}`).join(", ") || "none"}`,
         ...(contract.handoff
           ? [
               `Handoff: ${contract.handoff.summary}`,
+              `Subject: ${contract.handoff.subjectHash}`,
               `Uncertainties: ${contract.handoff.uncertainties.length}`,
               ...(contract.handoff.replay
                 ? [
@@ -55,7 +58,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
             ]
           : []),
         `Authority: ${contract.spec.authority.join(", ")}`,
-        `Budget: ${contract.spec.budget.turns} turns · ${contract.spec.budget.actions} actions`,
+        `Budget: ${budgetLabel(contract.spec.budget)}`,
       ],
       onSelect: () => {
         if (contract.status === "discharged" || contract.status === "released") return
@@ -88,7 +91,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
                     `Goal: ${contract.pendingRevision.spec.goal}`,
                     `Brief: ${contract.pendingRevision.spec.brief ? "updated" : "empty"}`,
                     `Authority: ${contract.pendingRevision.spec.authority.join(", ")}`,
-                    `Budget: ${contract.pendingRevision.spec.budget.turns} turns · ${contract.pendingRevision.spec.budget.actions} actions`,
+                    `Budget: ${budgetLabel(contract.pendingRevision.spec.budget)}`,
                   ],
                   value: "accept",
                   onSelect: () => void decideRevision(contract, true),
@@ -123,13 +126,19 @@ export function DialogContracts(props: { scope?: string } = {}) {
   }
 
   async function attest(contract: ProContractInfo) {
+    if (!contract.handoff) return
     const evidenceHash = await DialogPrompt.show(dialog, "Evidence hash", {
-      placeholder: "Artifact, report, or decision hash",
+      placeholder: `Evidence for revision ${contract.revision}, subject ${contract.handoff.subjectHash}`,
     })
     if (!evidenceHash?.trim()) return dialog.replace(() => <DialogContracts {...props} />)
     const result = await sdk.client.v2.proContract.attest({
       contractID: contract.id,
-      evidenceHash: evidenceHash.trim(),
+      proContractAttestationEvidence: {
+        revision: contract.revision,
+        specHash: contract.specHash,
+        subjectHash: contract.handoff.subjectHash,
+        evidenceHash: evidenceHash.trim(),
+      },
     })
     if (result.error) {
       toast.show({ variant: "error", message: errorMessage(result.error) })
@@ -186,4 +195,14 @@ export function DialogContracts(props: { scope?: string } = {}) {
   }
 
   return <DialogSelect title="Contracts" options={options()} />
+}
+
+function budgetLabel(budget: ProContractInfo["spec"]["budget"]) {
+  return [
+    budget.turns === undefined ? undefined : `${budget.turns} turns`,
+    budget.actions === undefined ? undefined : `${budget.actions} actions`,
+    `deadline ${new Date(budget.deadline).toISOString()}`,
+  ]
+    .filter((item) => item !== undefined)
+    .join(" · ")
 }

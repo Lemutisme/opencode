@@ -35,6 +35,15 @@ const cliEntry = path.join(opencodeRoot, "src/index.ts")
 
 export const testModelID = "test/test-model"
 
+// Run the same process regressions against a built release, without changing the default source entrypoint.
+function cliArgs(args: string[]) {
+  const binary = process.env.OPENCODE_TEST_BINARY
+  if (!binary) return ["bun", "run", cliEntry, ...args]
+  if (!path.isAbsolute(binary) || !Bun.which(binary))
+    throw new Error("OPENCODE_TEST_BINARY must name an absolute executable path")
+  return [binary, ...args]
+}
+
 // Wrap a Bun subprocess pipe (or any ReadableStream<Uint8Array>) as a Stream.
 // Centralizes the `evaluate` + `onError` boilerplate and tags errors with the
 // stream name so a stderr/stdout failure is greppable in logs.
@@ -89,7 +98,7 @@ export type RunHandle = {
   readonly result: Effect.Effect<RunResult>
 }
 
-export type SpawnOpts = { readonly timeoutMs?: number; readonly env?: Record<string, string> }
+export type SpawnOpts = { readonly timeoutMs?: number; readonly env?: Record<string, string>; readonly cwd?: string }
 
 // Typed equivalent of constructing argv for `opencode run`. New flags should
 // land here so tests stay grep-able and refactor-safe.
@@ -211,8 +220,9 @@ export function withCliFixture<A, E>(
       // on `Bun.stdin.text()` (see src/cli/cmd/run.ts — non-TTY stdin is
       // consumed as the prompt). The old Process.run wrapper defaulted to
       // ignore; ChildProcess.make defaults to pipe, so we set it explicitly.
-      const command = ChildProcess.make("bun", ["run", cliEntry, ...args], {
-        cwd: home,
+      const argv = cliArgs(args)
+      const command = ChildProcess.make(argv[0], argv.slice(1), {
+        cwd: opts?.cwd ?? home,
         env: { ...env, ...opts?.env },
         extendEnv: true,
         stdin: "ignore",
@@ -283,7 +293,7 @@ export function withCliFixture<A, E>(
       const options = runOpts(opts)
       const proc = yield* Effect.acquireRelease(
         Effect.sync(() =>
-          Bun.spawn(["bun", "run", cliEntry, ...runArgs(message, opts)], {
+          Bun.spawn(cliArgs(runArgs(message, opts)), {
             cwd: home,
             env: { ...process.env, ...env, ...options?.env },
             stdin: "ignore",
@@ -324,7 +334,7 @@ export function withCliFixture<A, E>(
       // as a finalizer error during test teardown.
       const proc = yield* Effect.acquireRelease(
         Effect.sync(() =>
-          Bun.spawn(["bun", "run", cliEntry, ...argv], {
+          Bun.spawn(cliArgs(argv), {
             cwd: home,
             env: { ...process.env, ...env, ...opts?.env },
             stdout: "pipe",
@@ -395,7 +405,7 @@ export function withCliFixture<A, E>(
       // Either way we await proc.exited so the test scope doesn't leak.
       const proc = yield* Effect.acquireRelease(
         Effect.sync(() =>
-          Bun.spawn(["bun", "run", cliEntry, ...argv], {
+          Bun.spawn(cliArgs(argv), {
             cwd: opts?.cwd ?? home,
             env: { ...process.env, ...env, ...opts?.env },
             stdin: "pipe",

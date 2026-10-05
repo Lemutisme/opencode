@@ -29,6 +29,7 @@ const Request = Schema.Struct({
   strategy: Artifact,
   protocol_sha256: Schema.optional(Hash),
   evidence: Schema.optional(Artifact),
+  attestation: Schema.optional(ProContract.AttestationEvidence),
   purpose: Schema.optional(Schema.NonEmptyString),
   claim: Schema.optional(Schema.NonEmptyString),
   scope: Schema.optional(Schema.NonEmptyString),
@@ -128,6 +129,14 @@ const run = Effect.gen(function* () {
   }
   if (input.action !== "settle" || !existing || !evidence)
     throw new Error("existing contract and independent evidence required")
+  if (
+    !input.attestation ||
+    input.attestation.revision !== existing.revision ||
+    input.attestation.specHash !== existing.specHash ||
+    input.attestation.subjectHash !== input.strategy.sha256 ||
+    input.attestation.evidenceHash !== input.evidence?.sha256
+  )
+    throw new Error("settlement requires the exact evaluated Contract coordinates and materialized evidence hash")
   const binding = JSON.parse(existing.spec.brief)
   if (
     binding.strategy_sha256 !== input.strategy.sha256 ||
@@ -146,7 +155,7 @@ const run = Effect.gen(function* () {
   if (!evidence.passed) {
     const receipt = yield* contracts.escalate({
       contractID: id,
-      revision: existing.revision,
+      revision: input.attestation.revision,
       reason: "Independent strategy evidence did not satisfy the frozen claim",
       time: Date.now(),
     })
@@ -154,15 +163,15 @@ const run = Effect.gen(function* () {
     return { receipt, contract: yield* contracts.get(id) }
   }
   if (existing.status === "dormant") {
-    const receipt = yield* contracts.activate(id, existing.revision, Date.now())
+    const receipt = yield* contracts.activate(id, input.attestation.revision, Date.now())
     if (receipt.decision.type !== "accepted") throw new Error(JSON.stringify(receipt.decision))
   }
   const current = yield* contracts.get(id)
   if (current?.status === "active") {
     const ready = yield* contracts.reportReady({
       contractID: id,
-      revision: current.revision,
-      subjectHash: input.strategy.sha256,
+      revision: input.attestation.revision,
+      subjectHash: input.attestation.subjectHash,
       summary: existing.spec.goal,
       uncertainties: ["Evidence is scoped to the frozen external protocol, not universal improvement."],
       time: Date.now(),
@@ -172,7 +181,7 @@ const run = Effect.gen(function* () {
   const ready = yield* contracts.get(id)
   if (ready?.handoff?.subjectHash !== input.strategy.sha256)
     throw new Error("handoff differs from the strategy artifact")
-  const receipt = yield* contracts.principalAttest({ contractID: id, evidenceHash: input.evidence!.sha256 })
+  const receipt = yield* contracts.principalAttest({ contractID: id, ...input.attestation })
   if (receipt.decision.type !== "accepted") throw new Error(JSON.stringify(receipt.decision))
   return { receipt, contract: yield* contracts.get(id), history: yield* contracts.history({ contractID: id }) }
 })

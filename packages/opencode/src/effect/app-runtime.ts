@@ -59,6 +59,7 @@ import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
+import { ProContractPolicy } from "@opencode-ai/core/pro-contract/policy"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -83,9 +84,11 @@ export const AppLayer = AppNodeBuilderV1.build(
     Todo.node,
     Session.node,
     SessionProjector.node,
+    SessionExecution.node,
     ProContract.node,
     ProContractOpenCode.node,
     ProContractScheduler.node,
+    ProContractPolicy.node,
     SessionStatus.node,
     BackgroundJob.node,
     RuntimeFlags.node,

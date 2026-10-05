@@ -1,5 +1,6 @@
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { ConflictError } from "@opencode-ai/protocol/errors"
 import { ProContractNotFoundError } from "@opencode-ai/protocol/groups/pro-contract"
 import { Clock, Effect } from "effect"
@@ -10,6 +11,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
   Effect.gen(function* () {
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
+    const execution = yield* SessionExecution.Service
 
     const requireContract = Effect.fnUntraced(function* (contractID: ProContract.ID) {
       const contract = yield* contracts.get(contractID)
@@ -153,9 +155,12 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
         "proContract.release",
         Effect.fn(function* (ctx) {
           yield* requireContract(ctx.params.contractID)
-          return yield* contracts
+          const accepted = yield* contracts
             .release({ contractID: ctx.params.contractID, reason: ctx.payload.reason })
             .pipe(Effect.flatMap(receipt))
+          const binding = yield* bindings.get(ctx.params.contractID)
+          if (binding) yield* execution.interrupt(binding.sessionID)
+          return accepted
         }),
       )
       .handle(
