@@ -115,11 +115,11 @@ responsibility, version/experiment archives, and authorized role bindings.
 Research questions and experimental judgment belong to replaceable methods,
 not new Kernel states or a permanent research controller.
 
-| Addition | Purpose and boundary |
-| --- | --- |
-| Explicit `checkpoint` in [Version](../packages/core/src/pro-contract/version.ts) and [Run](../packages/core/src/pro-contract/run.ts) | A completed method invocation can retain an artifact prefix such as `.research`. Continuation restores the verified original workspace plus that prefix, checking task, method, target, original deadline, baseline, and retained bytes. Failed/unknown scratch does not become state. |
-| [Public trajectory projection](../packages/core/src/pro-contract/trajectory.ts) | Hash-checks the admitted source JSON, validates execution coordinates, and selects public user/assistant text and tool records with stable identities, hashes, missingness, and operation guards. Excludes private reasoning, provider metadata, internal messages, and non-text payloads. |
-| [Executable research method](../packages/core/script/trajectory-research/workflow.ts) | Uses ordinary `ProContractRun` and native reasoning observations to choose inspection, bounded local computation, criticism, or conclusion. Retains questions, decisions, predictions, programs, outcomes, and optional notes/proposals in its explicit checkpoint. |
+| Addition                                                                                                                             | Purpose and boundary                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Explicit `checkpoint` in [Version](../packages/core/src/pro-contract/version.ts) and [Run](../packages/core/src/pro-contract/run.ts) | A completed method invocation can retain an artifact prefix such as `.research`. Continuation restores the verified original workspace plus that prefix, checking task, method, target, original deadline, baseline, and retained bytes. Failed/unknown scratch does not become state.     |
+| [Public trajectory projection](../packages/core/src/pro-contract/trajectory.ts)                                                      | Hash-checks the admitted source JSON, validates execution coordinates, and selects public user/assistant text and tool records with stable identities, hashes, missingness, and operation guards. Excludes private reasoning, provider metadata, internal messages, and non-text payloads. |
+| [Executable research method](../packages/core/script/trajectory-research/workflow.ts)                                                | Uses ordinary `ProContractRun` and native reasoning observations to choose inspection, bounded local computation, criticism, or conclusion. Retains questions, decisions, predictions, programs, outcomes, and optional notes/proposals in its explicit checkpoint.                        |
 
 The method has no private provider loop. Native reasoning uses the existing V2
 Session machinery; observations remain unverified. A local compute program runs
@@ -190,13 +190,13 @@ model, action protocol, and host binary. Independent audit verified matching
 captured inputs, receipts, and all retained inspection records against the
 host's original packets. Source: [R3].
 
-| Observed measure | g0 | g1 |
-| --- | ---: | ---: |
-| Native observations | 10 | 8 |
-| Elapsed seconds | 751.978 | 638.159 |
-| Recorded model cost | $0.1401318 | $0.1099594 |
-| Final exact record-ID citations | 0 | 9 |
-| Proposed research successor | None | None |
+| Observed measure                |         g0 |         g1 |
+| ------------------------------- | ---------: | ---------: |
+| Native observations             |         10 |          8 |
+| Elapsed seconds                 |    751.978 |    638.159 |
+| Recorded model cost             | $0.1401318 | $0.1099594 |
+| Final exact record-ID citations |          0 |          9 |
+| Proposed research successor     |       None |       None |
 
 g1's first request was too broad: the metadata for 187 selected records exceeded
 the preview allowance. The records were retained successfully; **presentation**
