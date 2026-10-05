@@ -16,6 +16,7 @@ import { ProContractOpenCode } from "./open-code"
 import { ProContractPolicy } from "./policy"
 import { ProContractVersion } from "./version"
 import { ProContractReason } from "./reason"
+import { ProContractMethod } from "./method"
 
 export const View = Schema.Struct({
   versionHashes: Schema.Array(Schema.String),
@@ -23,21 +24,26 @@ export const View = Schema.Struct({
   contractIDs: Schema.optional(Schema.Array(ProContract.ID)),
 })
 
-const Request = Schema.Struct({
-  kind: Schema.Literal("version-run-v1"),
+const Coordinates = {
   scope: Schema.NonEmptyString,
-  role: Schema.Literals(["incumbent", "research_executor"]),
   versionHash: Schema.String,
-  bundleHash: Schema.String,
   executionPolicy: Schema.String,
   authorization: ProContract.ExecutionAuthorization,
-  targetVersion: Schema.String,
   targetExecutable: Schema.optional(Schema.String),
   task: Schema.Json,
   view: View,
   workspace: AbsolutePath,
   model: Schema.optional(Model.Ref),
+}
+const PolicyRequest = Schema.Struct({
+  kind: Schema.Literal("version-run-v1"),
+  ...Coordinates,
+  role: Schema.Literals(["incumbent", "research_executor"]),
+  bundleHash: Schema.String,
+  targetVersion: Schema.String,
 })
+const MethodRequest = Schema.Struct({ kind: Schema.Literal("version-run-v2"), ...Coordinates })
+const Request = Schema.Union([PolicyRequest, MethodRequest])
 
 const Response = Schema.Struct({
   id: Schema.String,
@@ -51,19 +57,31 @@ const Journal = Schema.Struct({
 })
 
 export interface Interface {
-  readonly issue: (input: {
+  readonly authorize: (input: {
     id?: ProContract.ID
     scope: string
-    role: ProContractPolicy.Role
-    task: Schema.Json
-    workspace: AbsolutePath
-    deadline: number
-    targetVersion?: string
-    view?: typeof View.Type
-    model?: Model.Ref
-    requires?: ReadonlyArray<ProContract.Requirement>
+    versionHash: string
+    executionPolicy?: string
+    evidenceHash: string
+    source?: ProContractMethod.Source
     now: number
-  }) => Effect.Effect<ProContract.Contract>
+  }) => Effect.Effect<ProContract.ExecutionAuthorization>
+  readonly issue: (
+    input: {
+      id?: ProContract.ID
+      scope: string
+      task: Schema.Json
+      workspace: AbsolutePath
+      deadline: number
+      view?: typeof View.Type
+      model?: Model.Ref
+      requires?: ReadonlyArray<ProContract.Requirement>
+      now: number
+    } & (
+      | { role: ProContractPolicy.Role; targetVersion?: string; method?: never; targetExecutable?: never }
+      | { method: ProContract.ExecutionAuthorization; targetExecutable?: string; role?: never; targetVersion?: never }
+    ),
+  ) => Effect.Effect<ProContract.Contract>
   readonly execute: (input: { contractID: ProContract.ID; resume?: boolean }) => Effect.Effect<{
     contract: ProContract.Contract
     run: ProContractVersion.Record
@@ -113,7 +131,31 @@ const layer = Layer.effect(
       const request = Schema.decodeUnknownSync(Schema.fromJsonString(Request))(contract.spec.brief)
       if (contract.executor !== `version:${request.versionHash}` || contract.scope !== request.scope)
         return yield* Effect.die("Version Contract execution identity changed")
+      if (
+        request.kind === "version-run-v2" &&
+        ProContractMethod.hash({
+          kind: "version-method-v1",
+          versionHash: request.versionHash,
+          executionPolicy: request.executionPolicy,
+        }) !== request.authorization.subjectHash
+      )
+        return yield* Effect.die("Version Contract differs from its exact method authorization")
       return { contract, request }
+    })
+    const method = Effect.fnUntraced(function* (authorization: ProContract.ExecutionAuthorization, scope: string) {
+      const support = yield* contracts.get(authorization.contractID)
+      if (!ProContractOpenCode.authorizationMatches(support, authorization))
+        return yield* Effect.die("Method execution authorization was withdrawn or does not match")
+      const grant = Schema.decodeUnknownOption(Schema.fromJsonString(ProContractMethod.Grant))(support!.spec.brief)
+      if (
+        support!.executor !== "method-authority" ||
+        support!.scope !== scope ||
+        grant._tag === "None" ||
+        grant.value.scope !== scope ||
+        ProContractMethod.hash(grant.value.method) !== authorization.subjectHash
+      )
+        return yield* Effect.die("Explicit execution permission for this exact method and scope is required")
+      return grant.value.method
     })
     const inspect = Effect.fnUntraced(function* (contractID: ProContract.ID) {
       const current = yield* requireContract(contractID)
@@ -160,13 +202,155 @@ const layer = Layer.effect(
         Date.now() >= current.contract.spec.budget.deadline
       )
         return yield* Effect.die("Version execution is no longer authorized at the original deadline")
+      if (current.request.kind === "version-run-v2") yield* method(current.request.authorization, current.request.scope)
       return current
     })
 
     return Service.of({
       get: inspect,
+      authorize: Effect.fn("ProContractRun.authorize")(function* (input) {
+        const request = structuredClone(input)
+        if (!request.scope.trim() || !request.evidenceHash.trim())
+          return yield* Effect.die("Method scope and principal permission evidence are required")
+        const definition = ProContractMethod.Definition.make({
+          kind: "version-method-v1",
+          versionHash: request.versionHash,
+          executionPolicy: request.executionPolicy ?? "",
+        })
+        const subjectHash = ProContractMethod.hash(definition)
+        yield* Effect.promise(() => versions.inspect(definition.versionHash))
+        const source = request.source
+          ? Schema.decodeUnknownSync(ProContractMethod.Source)({
+              ...request.source,
+              artifact: request.source.artifact ?? "candidate",
+            })
+          : undefined
+        const brief = JSON.stringify(
+          ProContractMethod.Grant.make({
+            kind: "version-method-grant-v1",
+            scope: request.scope,
+            method: definition,
+            source,
+          }),
+        )
+        const id =
+          request.id ?? ProContract.ID.make(`pct_method_${Hash.sha256(JSON.stringify([brief, request.evidenceHash]))}`)
+        return yield* database.db
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                const prior = yield* contracts.get(id)
+                if (prior) {
+                  if (
+                    prior.spec.brief !== brief ||
+                    prior.scope !== request.scope ||
+                    prior.executor !== "method-authority"
+                  )
+                    return yield* Effect.die("Method authorization retry differs from its immutable permission")
+                  const attestation = prior.attestationID
+                    ? yield* contracts.getAttestation(prior.attestationID)
+                    : undefined
+                  if (!attestation || attestation.evidenceHash !== request.evidenceHash)
+                    return yield* Effect.die("Method authorization is no longer current or its evidence changed")
+                  const authorization = {
+                    contractID: prior.id,
+                    revision: prior.revision,
+                    specHash: prior.specHash,
+                    subjectHash,
+                    attestationID: attestation.id,
+                  }
+                  yield* method(authorization, request.scope)
+                  return authorization
+                }
+                if (source) {
+                  const origin = yield* contracts.get(source.contractID)
+                  const run = yield* Effect.promise(() => versions.read(source.runID))
+                  const envelope = Schema.decodeUnknownSync(
+                    Schema.Struct({
+                      versionHash: Schema.String,
+                      task: Schema.Struct({
+                        contractID: ProContract.ID,
+                        revision: Schema.Int,
+                        specHash: Schema.String,
+                      }),
+                    }),
+                  )(yield* Effect.promise(() => versions.request(source.runID)))
+                  if (
+                    !origin ||
+                    !["verification", "discharged"].includes(origin.status) ||
+                    origin.revision !== source.revision ||
+                    origin.specHash !== source.specHash ||
+                    origin.handoff?.subjectHash !== source.subjectHash ||
+                    run.status !== "completed" ||
+                    ProContractVersion.subjectHash(run) !== source.subjectHash ||
+                    origin.executor !== `version:${run.versionHash}` ||
+                    envelope.versionHash !== run.versionHash ||
+                    envelope.task.contractID !== origin.id ||
+                    envelope.task.revision !== origin.revision ||
+                    envelope.task.specHash !== origin.specHash
+                  )
+                    return yield* Effect.die("Method source is not the exact completed task handoff")
+                  yield* Effect.promise(() => versions.candidate(source.runID, definition.versionHash, source.artifact))
+                }
+                const issued = yield* contracts.issue({
+                  id,
+                  scope: request.scope,
+                  executor: "method-authority",
+                  spec: {
+                    ...ProContract.defaultSpec(
+                      "Authorize this exact execution method; no performance improvement is claimed",
+                      request.now,
+                    ),
+                    brief,
+                    authority: [],
+                    budget: { deadline: request.now + 24 * 60 * 60 * 1_000 },
+                  },
+                })
+                accepted(issued)
+                const contract = issued.contract!
+                accepted(yield* contracts.activate(contract.id, contract.revision, request.now))
+                accepted(
+                  yield* contracts.reportReady({
+                    contractID: contract.id,
+                    revision: contract.revision,
+                    subjectHash,
+                    summary: "Principal permission to execute the exact frozen method",
+                    uncertainties: [
+                      "Execution permission does not attest task results, comparative quality, or deployment eligibility.",
+                    ],
+                    time: request.now,
+                  }),
+                )
+                accepted(
+                  yield* contracts.principalAttest({
+                    contractID: contract.id,
+                    revision: contract.revision,
+                    specHash: contract.specHash,
+                    subjectHash,
+                    evidenceHash: request.evidenceHash,
+                  }),
+                )
+                return {
+                  contractID: contract.id,
+                  revision: contract.revision,
+                  specHash: contract.specHash,
+                  subjectHash,
+                  attestationID: (yield* contracts.get(contract.id))!.attestationID!,
+                }
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(Effect.orDie)
+      }),
       issue: Effect.fn("ProContractRun.issue")(function* (input) {
         const request = structuredClone(input)
+        if ((request.method === undefined) === (request.role === undefined))
+          return yield* Effect.die("Choose exactly one method grant or policy role")
+        if (
+          (request.method !== undefined && request.targetVersion !== undefined) ||
+          (request.role !== undefined && request.targetExecutable !== undefined)
+        )
+          return yield* Effect.die("Target identity must match the selected method or policy execution mode")
         if (!Number.isSafeInteger(request.deadline)) return yield* Effect.die("An absolute deadline is required")
         const workspace = yield* Effect.promise(() => realpath(request.workspace))
         const protectedPaths = yield* Effect.promise(() =>
@@ -190,12 +374,23 @@ const layer = Layer.effect(
                 // A retry adopts the original version, even after either role changes.
                 if (request.id && (yield* contracts.get(request.id))) {
                   const prior = yield* requireContract(request.id)
+                  const selectionMatches =
+                    prior.request.kind === "version-run-v1"
+                      ? request.method === undefined &&
+                        prior.request.role === request.role &&
+                        (request.targetVersion === undefined || prior.request.targetVersion === request.targetVersion)
+                      : request.method !== undefined &&
+                        prior.request.targetExecutable === request.targetExecutable &&
+                        prior.request.authorization.contractID === request.method.contractID &&
+                        prior.request.authorization.revision === request.method.revision &&
+                        prior.request.authorization.specHash === request.method.specHash &&
+                        prior.request.authorization.subjectHash === request.method.subjectHash &&
+                        prior.request.authorization.attestationID === request.method.attestationID
                   if (
+                    !selectionMatches ||
                     prior.request.scope !== request.scope ||
-                    prior.request.role !== request.role ||
                     prior.request.workspace !== request.workspace ||
                     prior.contract.spec.budget.deadline !== request.deadline ||
-                    (request.targetVersion !== undefined && prior.request.targetVersion !== request.targetVersion) ||
                     JSON.stringify(prior.request.task) !== JSON.stringify(request.task) ||
                     JSON.stringify(prior.request.view) !==
                       JSON.stringify(request.view ?? { versionHashes: [], experimentIDs: [] }) ||
@@ -206,19 +401,7 @@ const layer = Layer.effect(
                   return prior.contract
                 }
                 if (request.deadline <= request.now) return yield* Effect.die("A future absolute deadline is required")
-                const selected = yield* policies.bind({ scope: request.scope, role: request.role })
-                if (!selected.versionHash) return yield* Effect.die("Selected strategy has no executable version")
-                yield* Effect.promise(() => versions.inspect(selected.versionHash!))
-                const targetVersion = request.targetVersion ?? selected.identity.bundleHash
-                const target = yield* policies.view({
-                  scope: request.scope,
-                  versionHashes: [targetVersion],
-                  experimentIDs: [],
-                })
-                const bundle = target.versions.find((version) => version.bundleHash === targetVersion)?.bundle
-                if (!bundle) return yield* Effect.die("Research target is not in the authorized version archive")
                 const view = request.view ?? { versionHashes: [], experimentIDs: [] }
-                yield* policies.view({ scope: request.scope, ...view })
                 yield* Effect.forEach(view.contractIDs ?? [], (id) =>
                   contracts
                     .get(id)
@@ -228,32 +411,59 @@ const layer = Layer.effect(
                       ),
                     ),
                 )
-                const frozen = Request.make({
-                  kind: "version-run-v1",
-                  scope: request.scope,
-                  role: request.role,
-                  versionHash: selected.versionHash,
-                  bundleHash: selected.identity.bundleHash,
-                  executionPolicy: selected.executionPolicy,
-                  authorization: selected.authorization,
-                  targetVersion,
-                  targetExecutable: bundle.version === 2 ? bundle.versionHash : undefined,
-                  task: request.task,
-                  view,
-                  workspace: request.workspace,
-                  model: request.model,
+                const frozen = yield* Effect.gen(function* () {
+                  const common = {
+                    scope: request.scope,
+                    task: request.task,
+                    view,
+                    workspace: request.workspace,
+                    model: request.model,
+                  }
+                  if (request.method !== undefined) {
+                    if (view.versionHashes.length || view.experimentIDs.length)
+                      return yield* Effect.die("Direct method tasks do not grant access to a policy archive")
+                    const selected = yield* method(request.method, request.scope)
+                    yield* Effect.promise(() => versions.inspect(selected.versionHash))
+                    if (request.targetExecutable !== undefined)
+                      yield* Effect.promise(() => versions.inspect(request.targetExecutable!))
+                    return MethodRequest.make({
+                      ...common,
+                      kind: "version-run-v2",
+                      versionHash: selected.versionHash,
+                      executionPolicy: selected.executionPolicy,
+                      authorization: request.method,
+                      targetExecutable: request.targetExecutable,
+                    })
+                  }
+                  const selected = yield* policies.bind({ scope: request.scope, role: request.role })
+                  if (!selected.versionHash) return yield* Effect.die("Selected strategy has no executable version")
+                  yield* Effect.promise(() => versions.inspect(selected.versionHash!))
+                  const targetVersion = request.targetVersion ?? selected.identity.bundleHash
+                  const target = yield* policies.view({
+                    scope: request.scope,
+                    versionHashes: [targetVersion],
+                    experimentIDs: [],
+                  })
+                  const bundle = target.versions.find((version) => version.bundleHash === targetVersion)?.bundle
+                  if (!bundle) return yield* Effect.die("Research target is not in the authorized version archive")
+                  yield* policies.view({ scope: request.scope, ...view })
+                  return PolicyRequest.make({
+                    ...common,
+                    kind: "version-run-v1",
+                    role: request.role,
+                    versionHash: selected.versionHash,
+                    bundleHash: selected.identity.bundleHash,
+                    executionPolicy: selected.executionPolicy,
+                    authorization: selected.authorization,
+                    targetVersion,
+                    targetExecutable: bundle.version === 2 ? bundle.versionHash : undefined,
+                  })
                 })
-                const existing = request.id ? yield* contracts.get(request.id) : undefined
-                if (
-                  existing &&
-                  (existing.spec.brief !== JSON.stringify(frozen) || existing.spec.budget.deadline !== request.deadline)
-                )
-                  return yield* Effect.die("Version run retry differs from its immutable execution binding")
                 const receipt = yield* contracts.issue({
                   id: request.id,
                   scope: request.scope,
-                  executor: `version:${selected.versionHash}`,
-                  spec: existing?.spec ?? {
+                  executor: `version:${frozen.versionHash}`,
+                  spec: {
                     ...ProContract.defaultSpec(
                       `Execute the authorized task: ${JSON.stringify(request.task)}`,
                       request.now,
@@ -300,6 +510,8 @@ const layer = Layer.effect(
                 const support = yield* contracts.get(current.request.authorization.contractID)
                 if (!ProContractOpenCode.authorizationMatches(support, current.request.authorization))
                   return yield* Effect.die("Version execution authorization was withdrawn")
+                if (current.request.kind === "version-run-v2")
+                  yield* method(current.request.authorization, current.request.scope)
                 if (Date.now() >= current.contract.spec.budget.deadline)
                   return yield* Effect.die("Original version execution deadline exhausted")
                 if (current.contract.status === "escalated") {
@@ -334,7 +546,10 @@ const layer = Layer.effect(
               const current = yield* executable(input.contractID)
               const recorded = yield* journal(input.contractID)
               const previous = yield* inspect(input.contractID)
-              const archive = yield* policies.view({ scope: current.request.scope, ...current.request.view })
+              const archive =
+                current.request.kind === "version-run-v1"
+                  ? yield* policies.view({ scope: current.request.scope, ...current.request.view })
+                  : { versions: [], experiments: [] }
               const permitted = yield* Effect.forEach(current.request.view.contractIDs ?? [], (id) =>
                 contracts.get(id).pipe(Effect.map((contract) => (contract ? ProContract.info(contract) : null))),
               )

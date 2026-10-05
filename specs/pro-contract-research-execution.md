@@ -13,6 +13,10 @@ or history**. One execution primitive runs ordinary tasks and research tasks.
 A research result can justify further research without justifying deployment.
 The candidate never acquires authority to accept its own result.
 
+For ordinary execution without a research policy or role registry, see
+[essential execution](pro-contract-essential-execution.md). That path uses an
+explicit method grant; the policy-selected workflow below remains available.
+
 ## 1. Small kernel, three kinds of durable information
 
 There are no new Kernel commands or research-specific completion state machines.

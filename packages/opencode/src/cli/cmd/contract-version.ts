@@ -1,6 +1,7 @@
 import { Global } from "@opencode-ai/core/global"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProContract } from "@opencode-ai/core/pro-contract"
+import { ProContractMethod } from "@opencode-ai/core/pro-contract/method"
 import { ProContractRun } from "@opencode-ai/core/pro-contract/run"
 import { ProContractVersion } from "@opencode-ai/core/pro-contract/version"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -85,6 +86,37 @@ const QualifyCommand = effectCmd({
   }),
 })
 
+const AuthorizeCommand = effectCmd({
+  command: "authorize <versionHash>",
+  describe: "authorize an exact frozen method without creating a research or promotion policy",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .positional("versionHash", { type: "string", demandOption: true, describe: "frozen executable version hash" })
+      .option("scope", { type: "string", demandOption: true, describe: "authorized execution scope" })
+      .option("evidence-hash", { type: "string", demandOption: true, describe: "authorization evidence hash" })
+      .option("id", { type: "string", describe: "authorization Contract ID for exact retries" })
+      .option("policy", { type: "string", describe: "execution instructions text file" })
+      .option("source", { type: "string", describe: "source Contract and retained run coordinates JSON file" }),
+  handler: Effect.fn("Cli.contract.version.authorize")(function* (args) {
+    const executionPolicy =
+      args.policy === undefined ? undefined : yield* operation(() => Bun.file(path.resolve(args.policy!)).text())
+    const source = args.source === undefined ? undefined : yield* readJson(args.source, ProContractMethod.Source)
+    const runs = yield* ProContractRun.Service
+    const now = yield* Clock.currentTimeMillis
+    const authorization = yield* runs.authorize({
+      id: args.id === undefined ? undefined : ProContract.ID.make(args.id),
+      scope: args.scope,
+      versionHash: args.versionHash,
+      executionPolicy,
+      evidenceHash: args.evidenceHash,
+      source,
+      now,
+    })
+    console.log(JSON.stringify(authorization, null, 2))
+  }),
+})
+
 const RunCommand = effectCmd({
   command: "run",
   describe: "admit one durable task and run its exact authorized version; outputs are untrusted proposals",
@@ -92,11 +124,14 @@ const RunCommand = effectCmd({
   builder: (yargs) =>
     yargs
       .option("id", { type: "string", describe: "Contract ID for exact admission retries" })
-      .option("scope", { type: "string", demandOption: true, describe: "authorized strategy scope" })
+      .option("scope", { type: "string", demandOption: true, describe: "authorized execution scope" })
       .option("role", {
         choices: ["incumbent", "research_executor"] as const,
-        demandOption: true,
-        describe: "execution role",
+        describe: "execution role; mutually exclusive with --method",
+      })
+      .option("method", {
+        type: "string",
+        describe: "execution authorization JSON file; mutually exclusive with --role",
       })
       .option("task", { type: "string", demandOption: true, describe: "task JSON file" })
       .option("workspace", { type: "string", demandOption: true, describe: "workspace copied into isolated execution" })
@@ -105,7 +140,8 @@ const RunCommand = effectCmd({
         demandOption: true,
         describe: "absolute ISO deadline, with no cumulative count cap",
       })
-      .option("target-version", { type: "string", describe: "archived bundle hash being researched" })
+      .option("target-version", { type: "string", describe: "archived bundle hash being researched; requires --role" })
+      .option("target-executable", { type: "string", describe: "frozen executable being examined; requires --method" })
       .option("require", {
         type: "array",
         string: true,
@@ -121,6 +157,12 @@ const RunCommand = effectCmd({
       })
       .option("variant", { type: "string", describe: "model variant; requires --model" }),
   handler: Effect.fn("Cli.contract.version.run")(function* (args) {
+    if ((args.role === undefined) === (args.method === undefined))
+      return yield* fail("Use exactly one of --role or --method")
+    if (args.targetVersion !== undefined && args.role === undefined)
+      return yield* fail("--target-version requires --role")
+    if (args.targetExecutable !== undefined && args.method === undefined)
+      return yield* fail("--target-executable requires --method")
     const deadline = Date.parse(args.deadline)
     if (!Number.isSafeInteger(deadline) || deadline < 0) return yield* fail(`Invalid deadline: ${args.deadline}`)
     if (args.variant !== undefined && args.model === undefined) return yield* fail("--variant requires --model")
@@ -135,17 +177,23 @@ const RunCommand = effectCmd({
           })
     const task = yield* readJson(args.task, Schema.Json)
     const view = args.view === undefined ? undefined : yield* readJson(args.view, ProContractRun.View)
+    const execution =
+      args.role !== undefined
+        ? { role: args.role, targetVersion: args.targetVersion }
+        : {
+            method: yield* readJson(args.method!, ProContract.ExecutionAuthorization),
+            targetExecutable: args.targetExecutable,
+          }
     const parsed = args.model === undefined ? undefined : ModelV2.parse(args.model)
     const runs = yield* ProContractRun.Service
     const now = yield* Clock.currentTimeMillis
     const contract = yield* runs.issue({
       id: args.id === undefined ? undefined : ProContract.ID.make(args.id),
       scope: args.scope,
-      role: args.role,
+      ...execution,
       task,
       workspace: AbsolutePath.make(path.resolve(args.workspace)),
       deadline,
-      targetVersion: args.targetVersion,
       view,
       requires,
       model:
@@ -225,6 +273,7 @@ export const ContractVersionCommand = effectCmd({
       .command(FreezeCommand)
       .command(InspectCommand)
       .command(QualifyCommand)
+      .command(AuthorizeCommand)
       .command(RunCommand)
       .command(ResumeCommand)
       .command(ShowCommand)

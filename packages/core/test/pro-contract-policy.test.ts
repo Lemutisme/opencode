@@ -1,6 +1,6 @@
 import { $ } from "bun"
 import { describe, expect, test } from "bun:test"
-import { Effect, Exit, Layer } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import { eq } from "drizzle-orm"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
@@ -65,12 +65,16 @@ function evidence(
     })),
   }
 }
-const generation = Effect.fnUntraced(function* (project: string, bundle: ProContractPolicy.Bundle = candidate) {
+const generation = Effect.fnUntraced(function* (
+  project: string,
+  bundle: ProContractPolicy.Bundle = candidate,
+  selection?: ProContractPolicy.Bound,
+) {
   const policies = yield* ProContractPolicy.Service
   const contracts = yield* ProContract.Service
   const bindings = yield* ProContractOpenCode.Service
   const snapshots = yield* Snapshot.Service
-  const bound = yield* policies.bind({ scope: "test", role: "generator" })
+  const bound = selection ?? (yield* policies.bind({ scope: "test", role: "generator" }))
   yield* Effect.promise(() => Bun.write(path.join(project, "strategy.json"), JSON.stringify(bundle)))
   const subjectHash = yield* snapshots.capture()
   if (!subjectHash) return yield* Effect.die("Snapshot capture failed")
@@ -173,6 +177,55 @@ describe("ordinary Contract policy succession", () => {
               .pipe(Effect.exit),
           ),
         ).toBe(true)
+      }),
+    ),
+  )
+
+  it.live("ordinary incumbent text execution may produce candidates without gaining another role", () =>
+    fixture((project) =>
+      Effect.gen(function* () {
+        const policies = yield* ProContractPolicy.Service
+        const contracts = yield* ProContract.Service
+        const before = (yield* policies.get("test"))!
+        const incumbent = yield* policies.bind({ scope: "test", role: "incumbent" })
+        const researcher = yield* policies.bind({ scope: "test", role: "research_executor" })
+        const produced = yield* generation(project, candidate, incumbent)
+        const archived = yield* policies.archiveCandidate({
+          scope: "test",
+          expectedRevision: 1,
+          bundle: candidate,
+          generation: produced,
+          now: 20,
+        })
+        expect(archived.versions).toHaveLength(2)
+        expect(archived.versions[1].generations[0].executorHash).toBe(ProContractPolicy.hashBundle(seed))
+        expect(archived.roles).toEqual(before.roles)
+        expect(archived.history).toEqual(before.history)
+        expect(archived.evaluations).toEqual([])
+        expect((yield* contracts.get(produced.contractID))?.status).toBe("verification")
+        yield* Effect.forEach(
+          [
+            { ...incumbent, executionPolicy: seed.generator },
+            { ...researcher, executionPolicy: seed.solver },
+          ],
+          (binding) =>
+            Effect.gen(function* () {
+              const forged = yield* generation(project, candidate, binding)
+              const rejected = yield* policies
+                .archiveCandidate({
+                  scope: "test",
+                  expectedRevision: archived.revision,
+                  bundle: candidate,
+                  generation: forged,
+                  now: 21,
+                })
+                .pipe(Effect.exit)
+              expect(Exit.isFailure(rejected) ? Cause.pretty(rejected.cause) : "").toContain(
+                "Execution has no exact authorized method provenance",
+              )
+              expect(yield* policies.get("test")).toEqual(archived)
+            }),
+        )
       }),
     ),
   )
@@ -894,6 +947,189 @@ describe("ordinary Contract policy succession", () => {
     ),
   )
 
+  it.live("ordinary incumbent code produces archival candidates and reports without role adoption", () =>
+    fixture((project) =>
+      Effect.gen(function* () {
+        const policies = yield* ProContractPolicy.Service
+        const contracts = yield* ProContract.Service
+        const source = path.join(path.dirname(project), "ordinary-source")
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(source, "workflow.ts"),
+            `
+        await Bun.write("candidate/workflow.ts", 'console.log(JSON.stringify({version:1,observations:[],requests:[],artifacts:[]}));');
+        await Bun.write("strategy.json", ${JSON.stringify(JSON.stringify(candidate))});
+        console.log(JSON.stringify({version:1, observations:["ordinary work produced a reusable method"], requests:[], artifacts:["candidate", "strategy.json"]}));
+      `,
+          ),
+        )
+        const store = ProContractVersion.make({ directory: ProContractVersion.storePath(path.dirname(project)) })
+        const frozen = yield* Effect.promise(() => store.freeze({ directory: source, entrypoint: "workflow.ts" }))
+        const bundle: ProContractPolicy.Bundle = { ...seed, version: 2, versionHash: frozen.versionHash }
+        const bundleHash = ProContractPolicy.hashBundle(bundle)
+        const initial = yield* policies.authorize({ scope: "ordinary-work", protocol, bundle, now: Date.now() })
+        const incumbent = yield* policies.bind({ scope: "ordinary-work", role: "incumbent" })
+        const researcher = yield* policies.bind({ scope: "ordinary-work", role: "research_executor" })
+        yield* Effect.forEach(
+          [
+            { role: "incumbent", authorization: researcher.authorization, executionPolicy: seed.solver, valid: false },
+            {
+              role: "research_executor",
+              authorization: incumbent.authorization,
+              executionPolicy: seed.generator,
+              valid: false,
+            },
+            {
+              role: "incumbent",
+              authorization: incumbent.authorization,
+              executionPolicy: seed.generator,
+              valid: false,
+            },
+            {
+              role: "research_executor",
+              authorization: researcher.authorization,
+              executionPolicy: seed.solver,
+              valid: false,
+            },
+            { role: "incumbent", authorization: incumbent.authorization, executionPolicy: seed.solver, valid: true },
+          ],
+          (input) =>
+            Effect.gen(function* () {
+              const deadline = Date.now() + 30_000
+              const issued = yield* contracts.issue({
+                id: ProContract.ID.create(),
+                scope: "ordinary-task",
+                executor: `version:${frozen.versionHash}`,
+                spec: {
+                  ...ProContract.defaultSpec("Complete ordinary work and retain reusable methods", Date.now()),
+                  budget: { deadline },
+                  authority: [],
+                  requires: [],
+                  brief: JSON.stringify({
+                    kind: "version-run-v1",
+                    versionHash: frozen.versionHash,
+                    bundleHash,
+                    role: input.role,
+                    executionPolicy: input.executionPolicy,
+                    authorization: input.authorization,
+                    targetVersion: bundleHash,
+                    targetExecutable: frozen.versionHash,
+                  }),
+                },
+              })
+              const contract = issued.contract!
+              yield* contracts.activate(contract.id, contract.revision, Date.now())
+              const run = yield* Effect.promise(() =>
+                store.run({
+                  versionHash: frozen.versionHash,
+                  targetVersion: frozen.versionHash,
+                  task: {
+                    contractID: contract.id,
+                    revision: contract.revision,
+                    specHash: contract.specHash,
+                    input: {},
+                  },
+                  view: {},
+                  workspace: project,
+                  deadline,
+                }),
+              )
+              expect(run.status).toBe("completed")
+              yield* contracts.reportReady({
+                contractID: contract.id,
+                revision: contract.revision,
+                subjectHash: ProContractVersion.subjectHash(run),
+                summary: "Ordinary work and a reusable method",
+                uncertainties: ["The candidate has not been independently evaluated"],
+                time: Date.now(),
+              })
+              const successor = yield* Effect.promise(async () =>
+                store.freeze({
+                  directory: path.join(await store.artifactDirectory(run.id), "candidate"),
+                  entrypoint: "workflow.ts",
+                }),
+              )
+              const generated: ProContractPolicy.Bundle = {
+                ...candidate,
+                version: 2,
+                versionHash: successor.versionHash,
+              }
+              const generation = {
+                contractID: contract.id,
+                revision: contract.revision,
+                subjectHash: ProContractVersion.subjectHash(run),
+                runID: run.id,
+              }
+              const archive = policies.archiveCandidate({
+                scope: "ordinary-work",
+                expectedRevision: 1,
+                bundle: generated,
+                generation,
+                now: Date.now(),
+              })
+              const experiment: ProContractPolicy.Experiment = {
+                id: Hash.sha256(`ordinary report ${run.id}`),
+                source: { contractID: contract.id, revision: contract.revision, runID: run.id },
+                executorHash: bundleHash,
+                targetVersion: bundleHash,
+                question: "Does ordinary work yield a reusable method?",
+                hypothesis: "Its artifact can be retained without deployment",
+                intervention: "Package the method used for the task",
+                observations: [run.stdout],
+                conclusion: "Candidate retained; no evidence of performance improvement",
+                outcome: "inconclusive",
+                evidenceHash: ProContractVersion.subjectHash(run),
+                budget: { startedAt: run.startedAt, finishedAt: run.completedAt, deadline },
+              }
+              if (!input.valid) {
+                const rejected = yield* archive.pipe(Effect.exit)
+                expect(Exit.isFailure(rejected) ? Cause.pretty(rejected.cause) : "").toContain(
+                  "Executable research provenance differs from the frozen Contract and run",
+                )
+                expect(
+                  Exit.isFailure(
+                    yield* policies
+                      .recordExperiment({ scope: "ordinary-work", expectedRevision: 1, experiment })
+                      .pipe(Effect.exit),
+                  ),
+                ).toBe(true)
+                expect(yield* policies.get("ordinary-work")).toEqual(initial)
+                expect((yield* contracts.get(contract.id))?.status).toBe("verification")
+                return
+              }
+              const archived = yield* archive
+              expect(archived.versions).toHaveLength(2)
+              expect(archived.versions[1].generations).toEqual([
+                { handoff: generation, executorHash: bundleHash, targetVersion: bundleHash },
+              ])
+              expect(archived.roles).toEqual(initial.roles)
+              expect(archived.history).toEqual(initial.history)
+              expect(archived.evaluations).toEqual([])
+              expect((yield* contracts.get(contract.id))?.status).toBe("verification")
+              const completed = yield* policies.completeResearch({
+                scope: "ordinary-work",
+                expectedRevision: 1,
+                generation,
+                experiment,
+                now: Date.now(),
+              })
+              expect(completed.contract.status).toBe("discharged")
+              expect(completed.state.experiments).toEqual([experiment])
+              expect(completed.state.roles).toEqual(initial.roles)
+              expect(completed.state.history).toEqual(initial.history)
+              expect(completed.state.evaluations).toEqual([])
+              expect((yield* policies.bind({ scope: "ordinary-work", role: "incumbent" })).authorization).toEqual(
+                incumbent.authorization,
+              )
+              expect(
+                (yield* policies.bind({ scope: "ordinary-work", role: "research_executor" })).authorization,
+              ).toEqual(researcher.authorization)
+            }),
+        )
+      }),
+    ),
+  )
+
   it.live("a failed run remains archivable after recovery produces a different successful handoff", () =>
     fixture((project) =>
       Effect.gen(function* () {
@@ -931,6 +1167,7 @@ describe("ordinary Contract policy succession", () => {
               versionHash: frozen.versionHash,
               bundleHash,
               role: "research_executor",
+              executionPolicy: bound.executionPolicy,
               authorization: bound.authorization,
               targetVersion: bundleHash,
               targetExecutable: frozen.versionHash,
@@ -1055,6 +1292,107 @@ describe("ordinary Contract policy succession", () => {
         expect((yield* contracts.get(contract.id))?.attestationID).toBeUndefined()
       }),
     ),
+  )
+
+  it.live(
+    "evidence requirements recover only historical shared generator provenance, never modern role authority",
+    () =>
+      fixture((project) =>
+        Effect.gen(function* () {
+          const policies = yield* ProContractPolicy.Service
+          const contracts = yield* ProContract.Service
+          const bindings = yield* ProContractOpenCode.Service
+          const snapshots = yield* Snapshot.Service
+          const database = yield* Database.Service
+          const current = (yield* policies.get("test"))!
+          yield* Effect.promise(() => Bun.write(path.join(project, "strategy.json"), JSON.stringify(candidate)))
+          const subjectHash = (yield* snapshots.capture())!
+          const produce = Effect.fnUntraced(function* (
+            selection: ProContractPolicy.Selection,
+            executionPolicy: string,
+          ) {
+            const id = ProContract.ID.create()
+            yield* bindings.issue({
+              id,
+              scope: "legacy-generation",
+              spec: {
+                ...ProContract.defaultSpec("Generate a reusable method with historical dependency semantics", 10),
+                requires: [{ contractID: selection.contractID, revision: selection.revision }],
+              },
+              location: { directory: AbsolutePath.make(project) },
+              model: ModelV2.Ref.make({
+                providerID: ProviderV2.ID.make("fixture"),
+                id: ModelV2.ID.make("no-provider-call"),
+              }),
+              executionPolicy,
+              now: 10,
+            })
+            yield* contracts.activate(id, 1, 10)
+            const binding = yield* bindings.claim(id, 10)
+            expect(yield* bindings.reserveTurn(binding!.sessionID, 11)).toBe(true)
+            yield* contracts.reportReady({
+              contractID: id,
+              revision: 1,
+              subjectHash,
+              summary: "Frozen reusable method",
+              uncertainties: [],
+              time: 12,
+            })
+            return { contractID: id, revision: 1, subjectHash }
+          })
+          const modern = yield* produce(current.history[current.roles.research_executor], seed.generator)
+          const denied = yield* policies
+            .archiveCandidate({ scope: "test", expectedRevision: 1, bundle: candidate, generation: modern, now: 20 })
+            .pipe(Effect.exit)
+          expect(Exit.isFailure(denied) ? Cause.pretty(denied.cause) : "").toContain(
+            "Execution has no exact authorized method provenance",
+          )
+          expect(yield* policies.get("test")).toEqual(current)
+          const historical: ProContractPolicy.LegacyState = {
+            scope: current.scope,
+            revision: current.revision,
+            protocol: current.protocol,
+            protocolHash: current.protocolHash,
+            selected: 0,
+            history: current.history.slice(0, 1).map(({ role, ...item }) => item),
+            retainedFull: [],
+            evaluations: [],
+          }
+          yield* database.db
+            .update(ProContractPolicyTable)
+            .set({ data: historical })
+            .where(eq(ProContractPolicyTable.scope, "test"))
+            .run()
+          const legacySolver = yield* produce(historical.history[0], seed.solver)
+          const rejected = yield* policies
+            .archiveCandidate({
+              scope: "test",
+              expectedRevision: 1,
+              bundle: candidate,
+              generation: legacySolver,
+              now: 21,
+            })
+            .pipe(Effect.exit)
+          expect(Exit.isFailure(rejected) ? Cause.pretty(rejected.cause) : "").toContain(
+            "Execution has no exact authorized method provenance",
+          )
+          const legacyGenerator = yield* produce(historical.history[0], seed.generator)
+          const archived = yield* policies.archiveCandidate({
+            scope: "test",
+            expectedRevision: 1,
+            bundle: candidate,
+            generation: legacyGenerator,
+            now: 22,
+          })
+          expect(archived.versions).toHaveLength(2)
+          expect(archived.roles).toEqual({ incumbent: 0, research_executor: 0 })
+          expect(archived.history).toEqual(historical.history)
+          expect((yield* contracts.get(legacyGenerator.contractID))?.spec.requires).toEqual([
+            { contractID: historical.history[0].contractID, revision: historical.history[0].revision },
+          ])
+          expect(archived.evaluations).toEqual([])
+        }),
+      ),
   )
 
   it.live("legacy selection is projected read-only without relabeling historical grants", () =>

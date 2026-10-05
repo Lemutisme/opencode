@@ -426,17 +426,18 @@ const layer = Layer.effect(
       }
     })
 
-    const researcher = Effect.fnUntraced(function* (state: State, contractID: ProContract.ID, runID?: string) {
+    const executionSource = Effect.fnUntraced(function* (state: State, contractID: ProContract.ID, runID?: string) {
       const contract = yield* contracts.get(contractID)
       if (contract?.executor.startsWith("version:")) {
-        if (!runID) return yield* Effect.die(new Error("Executable research requires the actual run identity"))
+        if (!runID) return yield* Effect.die(new Error("Executable provenance requires the actual run identity"))
         const brief = Schema.decodeUnknownSync(
           Schema.fromJsonString(
             Schema.Struct({
               kind: Schema.Literal("version-run-v1"),
               versionHash: ProContractPromotion.Digest,
               bundleHash: ProContractPromotion.Digest,
-              role: Schema.Literal("research_executor"),
+              role: Schema.Literals(["incumbent", "research_executor"]),
+              executionPolicy: Schema.NonEmptyString,
               authorization: ProContract.ExecutionAuthorization,
               targetVersion: ProContractPromotion.Digest,
               targetExecutable: Schema.optional(ProContractPromotion.Digest),
@@ -445,10 +446,11 @@ const layer = Layer.effect(
         )(contract.spec.brief)
         const selected = state.history.find(
           (selection) =>
-            (!selection.role || selection.role === "research_executor") &&
+            (!selection.role || selection.role === brief.role) &&
             selection.bundleHash === brief.bundleHash &&
             selection.bundle.version === 2 &&
             selection.bundle.versionHash === brief.versionHash &&
+            selection.bundle[brief.role === "incumbent" ? "solver" : "generator"] === brief.executionPolicy &&
             selection.contractID === brief.authorization.contractID &&
             selection.revision === brief.authorization.revision &&
             selection.subjectHash === brief.authorization.subjectHash &&
@@ -492,8 +494,8 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
       const selected = state.history.find((selection) => {
         if (selection.bundle.version !== 1) return false
-        if (selection.role && selection.role !== "research_executor") return false
-        if (binding?.data.executionPolicy !== selection.bundle.generator) return false
+        const policy = selection.role === "incumbent" ? selection.bundle.solver : selection.bundle.generator
+        if (binding?.data.executionPolicy !== policy) return false
         const authorization = binding.data.authorization
         if (authorization)
           return (
@@ -512,8 +514,7 @@ const layer = Layer.effect(
           )
         )
       })
-      if (!selected)
-        return yield* Effect.die(new Error("Research execution has no exact authorized researcher provenance"))
+      if (!selected) return yield* Effect.die(new Error("Execution has no exact authorized method provenance"))
       return { selection: selected, run: undefined, deadline: contract?.spec.budget.deadline, targetVersion: undefined }
     })
 
@@ -528,7 +529,7 @@ const layer = Layer.effect(
       const source = yield* contracts.get(experiment.source.contractID)
       if (!source || source.revision !== experiment.source.revision)
         return yield* Effect.die(new Error("Research experiment source revision changed"))
-      const execution = yield* researcher(state, source.id, experiment.source.runID)
+      const execution = yield* executionSource(state, source.id, experiment.source.runID)
       if (
         execution.selection.bundleHash !== experiment.executorHash ||
         !state.versions.some((version) => version.bundleHash === experiment.targetVersion) ||
@@ -562,8 +563,8 @@ const layer = Layer.effect(
         generation.revision !== request.generation.revision ||
         generation.handoff?.subjectHash !== request.generation.subjectHash
       )
-        return yield* Effect.die(new Error("Candidate generation is not an exact frozen research handoff"))
-      const execution = yield* researcher(state, generation.id, request.generation.runID)
+        return yield* Effect.die(new Error("Candidate generation is not an exact frozen execution handoff"))
+      const execution = yield* executionSource(state, generation.id, request.generation.runID)
       const executor = execution.selection
       if (
         execution.run &&
@@ -1071,7 +1072,7 @@ const layer = Layer.effect(
                   request.experiment.source.runID !== request.generation.runID
                 )
                   return yield* Effect.die(new Error("Research completion does not match the frozen report"))
-                const execution = yield* researcher(state, contract.id, request.generation.runID)
+                const execution = yield* executionSource(state, contract.id, request.generation.runID)
                 if (
                   execution.run &&
                   (execution.run.status !== "completed" ||
