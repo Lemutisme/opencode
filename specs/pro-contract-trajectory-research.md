@@ -536,14 +536,18 @@ invalidates independently accepted task results.
 
 ## 6. Technical validation is not research qualification
 
-Final indexed-code validation at `2e77c5f54c` passed **1,535 Core tests / 6,057
-assertions**, both Core and OpenCode package typechecks, and **12 native tests /
-569 assertions**. Before/after inventories of 6,807 files were identical. The
-native binary was reused only after verifying its host source was unchanged;
-the new research workflow also ran through its real frozen-workflow tests.
-Genuine redirected logs, command results and byte inventories are retained in
-`R/analysis/validation-indexed-20261005/`. The earlier pre-index receipt remains
-separate rather than being relabeled as coverage of the newer implementation.
+Final validation including the post-g4 schema guide at `51f2d0dc5e` passed
+**1,536 Core tests / 6,075 assertions** and both Core and OpenCode package
+typechecks. Tested files were byte-identical before and after the run. Genuine
+redirected logs, source snapshots and inventories are retained in
+`R/analysis/validation-final-20261005/`.
+
+The preceding indexed-code run at `2e77c5f54c` independently passed **12 native
+tests / 569 assertions**, recorded in `R/analysis/validation-indexed-20261005/`.
+The host source and native binary have not changed; that result is retained,
+not described as a new native rerun after the guide. The new research workflow
+and guide also ran through their real frozen-workflow tests. Earlier receipts
+remain separate rather than being relabeled as coverage of later code.
 No public Protocol or Server `HttpApi` changed, so no generated Client/SDK update
 was required. These checks support
 the implementation's tested behavior, not causal research quality, solver
