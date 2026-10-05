@@ -68,6 +68,17 @@ candidate-local files. Operation pipe capture is cancelled on timeout/output
 limits; the outer Version namespace cleans up residual descendants on exit.
 There is no cgroup memory/disk/PID denial-of-service guarantee.
 
+The compute prompt documents the actual public-packet schema, with a structural
+example. `tool.output` is availability, not the body: captured strings live in
+`tool.content[i].text.text`, with `tool.error.text` separate. Input text is decoded
+according to its encoding. Record IDs differ from message IDs; field status,
+hashes, content order and missingness must survive extraction. Absent text is not
+empty output, and tool completion is not inner-command success. This is schema
+guidance, not a new accessor or mandatory research stage. It followed offline
+replay of g4's wrong-field extraction; **the frozen g4 method did not contain or
+test this later guide**. No improved model decisions are established by that
+replay or by implementation tests.
+
 Full research events stay under `.research/events`. The next reasoning prompt
 separates recent evidence detail from an index of what the method declared and
 what outcomes were recorded:
