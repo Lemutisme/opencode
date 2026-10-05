@@ -353,6 +353,8 @@ accepted results after method withdrawal. See
 The source fixtures are deterministic mechanisms, not paid model-quality
 measurements or evidence that a successor is better at generating successors.
 That claim requires the separately controlled same-starting-point experiment.
+The [qualification record](pro-contract-research-qualification.md) identifies
+the implementation, binary, validation commands, and bounded delivery claims.
 
 Run package checks from their package directories. Relevant suites include
 Core's `pro-contract-policy`, `pro-contract-authorization`,
