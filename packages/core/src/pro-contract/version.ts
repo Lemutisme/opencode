@@ -14,6 +14,7 @@ const Workspace = Schema.Struct({
   complete: Schema.Boolean,
   files: Schema.Array(Entry),
   requestHash: Schema.optional(Digest),
+  baselineHash: Schema.optional(Digest),
 })
 export const Manifest = Schema.Struct({
   version: Schema.Literal(1),
@@ -31,6 +32,7 @@ export const Output = Schema.Struct({
   observations: Schema.Array(Schema.Json),
   requests: Schema.Array(Schema.Json),
   artifacts: Schema.Array(Schema.String),
+  checkpoint: Schema.optional(Schema.String),
 })
 export type Output = typeof Output.Type
 export const Record = Schema.Struct({
@@ -41,6 +43,7 @@ export const Record = Schema.Struct({
   requestHash: Digest,
   workspaceHash: Schema.optional(Digest),
   supervisorHash: Schema.optional(Digest),
+  checkpoint: Schema.optional(Schema.Struct({ runID: Schema.String, subjectHash: Digest, path: Schema.String })),
   startedAt: Schema.Int,
   completedAt: Schema.Int,
   status: Schema.Literals(["completed", "failed", "cancelled", "deadline"]),
@@ -298,6 +301,7 @@ export function make(options: { directory: string; runtime?: string; sandbox?: s
       view: Schema.Json
       workspace: string
       deadline: number
+      checkpoint?: string
       signal?: AbortSignal
     }): Promise<Record> {
       Schema.decodeUnknownSync(Digest)(input.versionHash)
@@ -311,12 +315,13 @@ export function make(options: { directory: string; runtime?: string; sandbox?: s
         version: 1,
         versionHash: input.versionHash,
         ...(input.targetVersion === undefined ? {} : { targetVersion: input.targetVersion }),
+        ...(input.checkpoint === undefined ? {} : { checkpoint: input.checkpoint }),
         task: Schema.decodeUnknownSync(Schema.Json)(input.task),
         view: Schema.decodeUnknownSync(Schema.Json)(input.view),
         deadline: input.deadline,
       })
       await Bun.write(path.join(location, "request.json"), request)
-      const workspace: { hash?: string } = {}
+      const workspace: { hash?: string; baselineHash?: string; checkpoint?: Record["checkpoint"] } = {}
       const record: Record = {
         version: 1,
         id,
@@ -340,6 +345,7 @@ export function make(options: { directory: string; runtime?: string; sandbox?: s
           complete: files !== undefined,
           files: files ?? [],
           requestHash: record.requestHash,
+          baselineHash: workspace.baselineHash,
         })
         const hash = Hash.sha256(encoded)
         await Bun.write(path.join(location, "input.json.pending"), encoded)
@@ -352,7 +358,15 @@ export function make(options: { directory: string; runtime?: string; sandbox?: s
       const complete = async (result: Partial<Record>) => {
         // An unavailable input is explicit, never disguised as an empty captured workspace.
         if (workspace.hash === undefined) await capture()
-        return finish({ ...record, workspaceHash: workspace.hash, ...result }, location)
+        return finish(
+          {
+            ...record,
+            workspaceHash: workspace.hash,
+            ...(workspace.checkpoint ? { checkpoint: workspace.checkpoint } : {}),
+            ...result,
+          },
+          location,
+        )
       }
       await mkdir(path.join(location, "artifacts"), { mode: 0o700 })
       try {
@@ -369,8 +383,56 @@ export function make(options: { directory: string; runtime?: string; sandbox?: s
         disjoint(await realpath(input.workspace), await realpath(directory))
         // Never bind an arbitrary host tree writable: hardlinks and Unix sockets cross pathname isolation.
         const files = await snapshot(input.workspace, path.join(location, "input.pending"))
+        workspace.baselineHash = Hash.sha256(JSON.stringify(files))
+        if (input.checkpoint !== undefined) {
+          const previous = await read(input.checkpoint)
+          if (previous.status !== "completed" || !previous.result?.checkpoint)
+            throw new Error("Only a completed run with an explicit checkpoint can continue workspace state")
+          const prefix = checkpoint(previous.result)!
+          const priorInput = await readInput(previous.id)
+          if (
+            !priorInput?.complete ||
+            workspace.baselineHash !== (priorInput.baselineHash ?? Hash.sha256(JSON.stringify(priorInput.files)))
+          )
+            throw new Error("Checkpoint belongs to another original workspace")
+          const prior = decode(
+            Schema.Struct({
+              version: Schema.Literal(1),
+              versionHash: Digest,
+              targetVersion: Schema.optional(Digest),
+              checkpoint: Schema.optional(Schema.String),
+              task: Schema.Json,
+              view: Schema.Json,
+              deadline: Schema.Int,
+            }),
+            await Bun.file(path.join(runDirectory(previous.id), "request.json")).text(),
+          )
+          if (
+            previous.versionHash !== input.versionHash ||
+            prior.versionHash !== input.versionHash ||
+            previous.targetVersion !== input.targetVersion ||
+            prior.targetVersion !== input.targetVersion ||
+            prior.deadline !== input.deadline ||
+            JSON.stringify(prior.task) !== JSON.stringify(input.task)
+          )
+            throw new Error("Checkpoint belongs to another frozen execution")
+          const artifacts = path.join(runDirectory(previous.id), "artifacts")
+          if (JSON.stringify(await snapshot(artifacts)) !== JSON.stringify(previous.artifacts))
+            throw new Error("Checkpoint artifacts changed")
+          if (files.some((file) => file.kind !== "directory" && prefix.startsWith(file.path + "/")))
+            throw new Error("Checkpoint cannot replace an ancestor outside its declared prefix")
+          // One explicit state namespace: replace it completely so deleted files cannot reappear.
+          // Everything outside this prefix remains the independently captured original input.
+          await rm(path.join(location, "input.pending", prefix), { recursive: true, force: true })
+          const copied = await snapshot(artifacts, path.join(location, "input.pending"), false, [prefix])
+          const expected = previous.artifacts.filter(
+            (file) => file.path === prefix || file.path.startsWith(prefix + "/") || prefix.startsWith(file.path + "/"),
+          )
+          if (JSON.stringify(copied) !== JSON.stringify(expected)) throw new Error("Checkpoint changed during restore")
+          workspace.checkpoint = { runID: previous.id, subjectHash: subjectHash(previous), path: prefix }
+        }
         await rename(path.join(location, "input.pending"), path.join(location, "input"))
-        await capture(files)
+        await capture(input.checkpoint === undefined ? files : await snapshot(path.join(location, "input")))
         await snapshot(path.join(location, "input"), scratch, true)
         const envelope = JSON.stringify({ ...(decode(Schema.Json, request) as object), config: manifest.config })
         if (Buffer.byteLength(envelope) > MAX_INPUT_BYTES)
@@ -394,7 +456,10 @@ export function make(options: { directory: string; runtime?: string; sandbox?: s
         execution.value = result
         if (result.status !== "completed") return await complete(result)
         const output = decode(Output, result.stdout)
+        const prefix = checkpoint(output)
         const artifacts = await snapshot(scratch, path.join(location, "artifacts.pending"), false, output.artifacts)
+        if (prefix && !artifacts.some((file) => file.path === prefix))
+          throw new Error("Checkpoint is absent from the retained artifacts")
         await rename(path.join(location, "artifacts.pending"), path.join(location, "artifacts"))
         return await complete({ ...result, result: output, artifacts })
       } catch (error) {
@@ -410,6 +475,14 @@ export function make(options: { directory: string; runtime?: string; sandbox?: s
       }
     },
   }
+}
+
+function checkpoint(output: Output) {
+  if (output.checkpoint === undefined) return
+  const prefix = relative(output.checkpoint)
+  if (!output.artifacts.map(relative).some((artifact) => prefix === artifact || prefix.startsWith(artifact + "/")))
+    throw new Error("Checkpoint must be fully retained by a declared artifact")
+  return prefix
 }
 
 function relative(value: string) {

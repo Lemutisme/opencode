@@ -170,11 +170,18 @@ const layer = Layer.effect(
           const run = await versions.read(id)
           const envelope = Schema.decodeUnknownSync(
             Schema.Struct({
+              versionHash: Schema.String,
+              targetVersion: Schema.optional(Schema.String),
               task: Schema.Struct({ contractID: ProContract.ID, revision: Schema.Number, specHash: Schema.String }),
+              deadline: Schema.Int,
             }),
           )(await versions.request(id))
           if (
             run.versionHash !== current.request.versionHash ||
+            envelope.versionHash !== current.request.versionHash ||
+            run.targetVersion !== current.request.targetExecutable ||
+            envelope.targetVersion !== current.request.targetExecutable ||
+            envelope.deadline !== current.contract.spec.budget.deadline ||
             envelope.task.contractID !== contractID ||
             envelope.task.revision !== current.contract.revision ||
             envelope.task.specHash !== current.contract.specHash
@@ -565,6 +572,7 @@ const layer = Layer.effect(
                           Schema.Struct({
                             versionHash: Schema.String,
                             targetVersion: Schema.optional(Schema.String),
+                            deadline: Schema.Int,
                             task: Schema.Struct({
                               contractID: ProContract.ID,
                               revision: Schema.Number,
@@ -575,6 +583,7 @@ const layer = Layer.effect(
                         if (
                           envelope.versionHash !== current.request.versionHash ||
                           envelope.targetVersion !== current.request.targetExecutable ||
+                          envelope.deadline !== current.contract.spec.budget.deadline ||
                           envelope.task.contractID !== current.contract.id ||
                           envelope.task.revision !== current.contract.revision ||
                           envelope.task.specHash !== current.contract.specHash
@@ -641,6 +650,8 @@ const layer = Layer.effect(
                       }),
                     ),
                     workspace,
+                    checkpoint: previous.runs.findLast((run) => run.status === "completed" && run.result?.checkpoint)
+                      ?.id,
                     deadline: current.contract.spec.budget.deadline,
                     signal: stop.signal,
                   })

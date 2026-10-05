@@ -920,3 +920,115 @@ it.live(
         }),
     ),
 )
+
+it.live("explicit checkpoint state survives real version code → native Reason → stateless version code", () =>
+  fixture(
+    `const input = await Bun.stdin.json();
+     if (!input.view.responses.length) {
+       await Bun.write("state/hypothesis.txt", "differentiate explanations before another repair");
+       await Bun.write("input.txt", "uncommitted scratch outside checkpoint");
+       console.log(JSON.stringify({version:1,observations:[],requests:[{type:"reason",id:"diagnose",prompt:"Propose a discriminating test."}],artifacts:["state"],checkpoint:"state"}));
+     } else {
+       console.log(JSON.stringify({version:1,observations:[await Bun.file("state/hypothesis.txt").text(),await Bun.file("input.txt").text(),input.view.responses[0].summary],requests:[],artifacts:["state"],checkpoint:"state"}));
+     }`,
+    ({ input, versions, requests }) =>
+      Effect.gen(function* () {
+        const runs = yield* ProContractRun.Service
+        const duty = yield* runs.issue({ ...input, model })
+        const result = yield* runs.execute({ contractID: duty.id })
+        const history = yield* runs.get(duty.id)
+        expect(requests).toHaveLength(1)
+        expect(history.runs).toHaveLength(2)
+        expect(history.responses).toHaveLength(1)
+        expect(result.run.result?.observations).toEqual([
+          "differentiate explanations before another repair",
+          "frozen input",
+          answer,
+        ])
+        expect(result.run.checkpoint).toEqual({
+          runID: history.runs[0]!.id,
+          subjectHash: ProContractVersion.subjectHash(history.runs[0]!),
+          path: "state",
+        })
+        expect(result.contract.status).toBe("verification")
+        expect(result.contract.attestationID).toBeUndefined()
+        expect(result.contract.spec.budget).toEqual({ deadline: input.deadline })
+        expect(yield* Effect.promise(() => versions.input(result.run.id))).toMatchObject({
+          complete: true,
+          baselineHash: (yield* Effect.promise(() => versions.input(history.runs[0]!.id)))!.baselineHash,
+        })
+      }),
+  ),
+)
+
+it.live(
+  "explicit resume restores the latest completed checkpoint, never later failed scratch or a changed live workspace",
+  () =>
+    fixture(
+      `const input = await Bun.stdin.json();
+     if (!input.view.responses.length) {
+       await Bun.write("state/decision.txt", "retained experiment design");
+       console.log(JSON.stringify({version:1,observations:[],requests:[{type:"reason",id:"inspect",prompt:"Critique this experiment."}],artifacts:["state"],checkpoint:"state"}));
+     } else if (!input.view.previous.some(run => run.status === "failed")) {
+       await Bun.write("state/decision.txt", "uncommitted failed repair");
+       process.exit(1);
+     } else {
+       console.log(JSON.stringify({version:1,observations:[await Bun.file("state/decision.txt").text(),await Bun.file("input.txt").text()],requests:[],artifacts:["state"],checkpoint:"state"}));
+     }`,
+      ({ input, requests }) =>
+        Effect.gen(function* () {
+          const runs = yield* ProContractRun.Service
+          const duty = yield* runs.issue({ ...input, model })
+          const failed = yield* runs.execute({ contractID: duty.id })
+          expect(failed.run.status).toBe("failed")
+          expect(failed.contract.status).toBe("escalated")
+          expect(failed.contract.handoff).toBeUndefined()
+          expect(Exit.isFailure(yield* runs.execute({ contractID: duty.id }).pipe(Effect.exit))).toBe(true)
+          yield* Effect.promise(async () => {
+            await Bun.write(path.join(input.workspace, "input.txt"), "changed live input")
+            await Bun.write(path.join(input.workspace, "state/decision.txt"), "changed live state")
+          })
+          const resumed = yield* runs.execute({ contractID: duty.id, resume: true })
+          const history = yield* runs.get(duty.id)
+          expect(requests).toHaveLength(1)
+          expect(history.runs.map((run) => run.status)).toEqual(["completed", "failed", "completed"])
+          expect(resumed.run.checkpoint?.runID).toBe(history.runs[0]!.id)
+          expect(resumed.run.result?.observations).toEqual(["retained experiment design", "frozen input"])
+          expect(resumed.contract.status).toBe("verification")
+          expect(resumed.contract.attestationID).toBeUndefined()
+          expect(resumed.contract.spec.budget).toEqual({ deadline: input.deadline })
+          expect(history.responses).toHaveLength(1)
+        }),
+    ),
+)
+
+it.live(
+  "a completed reasoning step without a new checkpoint keeps the latest explicit state, not its unretained scratch",
+  () =>
+    fixture(
+      `const input = await Bun.stdin.json();
+     if (!input.view.responses.length) {
+       await Bun.write("state/hypothesis.txt", "retained question");
+       console.log(JSON.stringify({version:1,observations:[],requests:[{type:"reason",id:"first",prompt:"Find an explanation."}],artifacts:["state"],checkpoint:"state"}));
+     } else if (input.view.responses.length === 1) {
+       await Bun.write("state/hypothesis.txt", "unretained speculation");
+       console.log(JSON.stringify({version:1,observations:[],requests:[{type:"reason",id:"second",prompt:"Try to falsify the explanation."}],artifacts:[]}));
+     } else {
+       console.log(JSON.stringify({version:1,observations:[await Bun.file("state/hypothesis.txt").text()],requests:[],artifacts:["state"],checkpoint:"state"}));
+     }`,
+      ({ input, requests }) =>
+        Effect.gen(function* () {
+          const runs = yield* ProContractRun.Service
+          const duty = yield* runs.issue({ ...input, model })
+          const result = yield* runs.execute({ contractID: duty.id })
+          const history = yield* runs.get(duty.id)
+          expect(requests).toHaveLength(2)
+          expect(history.responses).toHaveLength(2)
+          expect(history.runs.map((run) => run.status)).toEqual(["completed", "completed", "completed"])
+          expect(history.runs[1]!.result?.checkpoint).toBeUndefined()
+          expect(result.run.checkpoint?.runID).toBe(history.runs[0]!.id)
+          expect(result.run.result?.observations).toEqual(["retained question"])
+          expect(result.contract.spec.budget).toEqual({ deadline: input.deadline })
+        }),
+    ),
+)
