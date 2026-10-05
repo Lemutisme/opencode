@@ -90,6 +90,11 @@ const layer = Layer.effect(
                     : [
                         contract.spec.brief || contract.spec.goal,
                         ...(current.executionPolicy ? ["Execution policy:", current.executionPolicy] : []),
+                        ...(contract.spec.evidence.replay
+                          ? [
+                              "Use contract_check for snapshot-bound replay feedback while improving the candidate. It does not hand off or settle the Contract, and failures do not start a new attempt.",
+                            ]
+                          : []),
                         ...dependencies.flatMap((item) =>
                           item
                             ? [

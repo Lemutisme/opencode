@@ -4,6 +4,14 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
+## ProgramBench Experiments
+
+- User preference (2026-09-22, superseding the earlier 1 pp margin): OTA may promote any strictly positive task-level improvement, with no task-level mean regression (`performanceRule: "task-pareto"`). Compare each instance's mean over its fixed repeats; all ties do not promote. Keep safety, complete development/confirmation evidence and established-full-pass protections. Apply through a separately frozen protocol; never hot-edit a cohort or relabel post-hoc readmission as preregistered evidence.
+- User preference (2026-09-13): future experiments have a six-hour per-instance wall-clock budget only, with no cumulative provider-turn, tool-action, request-count, or monetary budget cap unless the user explicitly requests one. A six-hour ceiling is not a requirement to keep a completed task busy.
+- Do not change budgets, source, or configuration of a running/frozen cohort. The existing Terra Max run retains its original six-hour / 1000-turn coordinates.
+- Historical frozen runners/runtimes still have count ceilings. Deadline-only support is isolated in `/home/duozhou/opencode-deadline-only` and `/home/duozhou/ProgramBench-deadline-only`; consult `specs/programbench-deadline-only.md` and the new cohort's validation/status before reuse. Before launching a future cohort, verify matching support across configuration, Contract/Session admission, gateway, and usage/reporting; do not simulate unlimited execution with a large finite sentinel. Verify continuation beyond the former limits and termination at the original deadline.
+- Preserve network/credential isolation, explicit cancellation, bounded individual operations, infrastructure fault guards, complete accounting, and all historical experiment artifacts. Label deadline-only cohorts separately from historical six-hour / 1000-turn cohorts.
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.

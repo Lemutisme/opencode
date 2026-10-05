@@ -62,6 +62,7 @@ type Config<
 
 type Runtime = {
   readonly permission?: string
+  readonly subactions?: boolean
   readonly definition: (name: string) => ToolDefinition
   readonly settle: (call: ToolCall, context: Context) => Effect.Effect<ToolOutput, ToolFailure>
 }
@@ -146,6 +147,15 @@ export const withPermission = <Input extends SchemaType<any>, Output extends Sch
 }
 
 export const permission = (tool: AnyTool, name: string) => runtimeOf(tool).permission ?? name
+/** Internal composition marker: actual child invocations still reserve their own actions in the registry. */
+export const withSubactions = <Input extends SchemaType<unknown>, Output extends SchemaType<unknown>>(
+  tool: Definition<Input, Output>,
+) => {
+  const decorated = Object.freeze({}) as Definition<Input, Output>
+  runtimes.set(decorated, { ...runtimeOf(tool), subactions: true })
+  return decorated
+}
+export const hasSubactions = (tool: AnyTool) => runtimeOf(tool).subactions === true
 export const definition = (name: string, tool: AnyTool) => runtimeOf(tool).definition(name)
 export const settle = (tool: AnyTool, call: ToolCall, context: Context) => runtimeOf(tool).settle(call, context)
 

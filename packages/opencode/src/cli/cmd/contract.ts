@@ -1,14 +1,13 @@
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
-import { buildLocationServiceMap, LocationServiceMap } from "@opencode-ai/core/location-services"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AbsolutePath } from "@opencode-ai/core/schema"
-import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Clock, Effect, Schema } from "effect"
 import path from "path"
 import type { Argv } from "yargs"
 import { effectCmd, fail } from "../effect-cmd"
+import { cmd } from "./cmd"
 
 const IssueCommand = effectCmd({
   command: "issue",
@@ -225,32 +224,33 @@ const ShowCommand = effectCmd({
   }),
 })
 
-const ExportCommand = effectCmd({
+const ExportCommand = cmd({
   command: "export <contractID> <directory>",
   describe: "materialize the exact contract handoff",
-  instance: false,
   builder: (yargs) =>
     yargs
       .positional("contractID", { type: "string", demandOption: true, describe: "contract ID" })
       .positional("directory", { type: "string", demandOption: true, describe: "new output directory" }),
-  handler: Effect.fn("Cli.contract.export")(function* (args) {
-    const contractID = ProContract.ID.make(args.contractID)
-    const contract = yield* ProContract.Service.use((service) => service.get(contractID))
-    if (!contract) return yield* fail(`Contract not found: ${contractID}`)
-    const handoff = contract.handoff
-    if (!handoff) return yield* fail(`Contract has no current handoff: ${contractID}`)
-    const binding = yield* ProContractOpenCode.Service.use((service) => service.get(contractID))
-    if (!binding) return yield* fail(`OpenCode execution not found: ${contractID}`)
-    const directory = AbsolutePath.make(path.resolve(args.directory))
-    yield* Snapshot.Service.use((service) =>
-      service.materialize({ snapshot: Snapshot.ID.make(handoff.subjectHash), directory }),
-    ).pipe(
-      Effect.provide(LocationServiceMap.Service.get(binding.location)),
-      Effect.provide(buildLocationServiceMap()),
-      Effect.catchTag("Snapshot.Error", (error) => fail(error.message)),
+  async handler(args) {
+    const { ProContractExport } = await import("@opencode-ai/core/pro-contract/export")
+    const { AppNodeBuilder } = await import("@opencode-ai/core/effect/app-node-builder")
+    const { makeRuntime } = await import("@opencode-ai/core/effect/runtime")
+    const runtime = makeRuntime(ProContractExport.Service, AppNodeBuilder.build(ProContractExport.node))
+    const exported = await runtime.runPromise((service) =>
+      service
+        .materialize({
+          contractID: ProContract.ID.make(args.contractID),
+          directory: AbsolutePath.make(path.resolve(args.directory)),
+        })
+        .pipe(
+          Effect.catchTags({
+            "ProContractExport.Error": (error) => fail(error.message),
+            "Snapshot.Error": (error) => fail(error.message),
+          }),
+        ),
     )
-    console.log(JSON.stringify({ contractID, subjectHash: handoff.subjectHash, directory }, null, 2))
-  }),
+    console.log(JSON.stringify(exported, null, 2))
+  },
 })
 
 const QuietCommand = effectCmd({

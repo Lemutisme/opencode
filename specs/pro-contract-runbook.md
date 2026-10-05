@@ -307,10 +307,33 @@ issuer release -> released
 The executor may call:
 
 ```text
+contract_check
 contract_report_ready
 contract_report_blocked
 contract_propose_revision
 ```
+
+For a replay-configured Contract, `contract_check` rehearses the frozen replay
+policy against a snapshot of the current candidate. It returns a subject-bound
+diagnostic, without creating a handoff, challenge, or new semantic attempt.
+The executor can repair and check again in the same Session. Checks consume
+the shared action budget and are bounded by the Contract deadline; they do not
+create a second retry budget. A passing check cannot authorize discharge or
+be inherited by a changed candidate. `contract_report_ready` still captures
+and verifies its own exact handoff before principal adjudication. A configured
+readiness replay also spends one shared action and is bounded by the remaining
+Contract deadline. A failed completed readiness replay returns its evidence hash,
+subject hash, and repair diagnostic without submitting a handoff or starting a
+new semantic attempt. The same Session may repair and try again while budget
+remains. Unavailable verification still escalates; exhausting the budget does
+not authorize a handoff or quiet state.
+
+V2 selects Contract lifecycle guidance from the durable Session binding. The
+default unbound agent receives admission guidance; an already-bound executor
+receives execution guidance instead. The latter does not ask the executor to
+propose another Contract merely because external evaluation will occur later.
+Guidance is a domain-owned System Context source, not another authority check.
+Actual revision proposals still require the principal's decision.
 
 A revision petition pauses executor turns, actions, leases, and retries until
 the principal decides it through the existing permission boundary. Approval
@@ -372,7 +395,7 @@ For holdout or official-test failures, use `disclosure: "sealed"`, omit
 
 Before adding a task-specific adapter, use the optional harness replay policy
 for finite repository checks. The policy is part of `spec.evidence`, so
-ratification freezes its argv, expected exits, protected file hashes, required
+ratification freezes its argv, stdin, exact output predicates, expected exits, protected file hashes, required
 artifacts, and ten-minute-per-check maximum timeout:
 
 ```json
@@ -393,22 +416,43 @@ At `contract_report_ready`, OpenCode captures the candidate subject,
 materializes that exact tree into a temporary worktree, runs the checks there,
 and stores a hashed finite report under the control-plane data directory. A
 completed check that returns the wrong exit, a protected-file mismatch, or a
-missing artifact becomes an executor-visible, subject-bound challenge. Failure
+missing artifact becomes subject-bound repair feedback in the same Session,
+without admitting that failed result as a kernel `report-ready` command. Failure
 to materialize or start the verifier escalates the Contract without creating a
 new executor attempt. A pass is recorded in the handoff and is required before
 the principal can attest; replay does not replace principal judgment in this
 conservative policy.
+
+The kernel's explicit negative-replay and principal-challenge transitions are
+unchanged: an admitted challenge may still rotate the semantic attempt. Keeping
+an unsuccessful readiness check inside search does not weaken those transitions.
 
 A replay-passing handoff proceeds to verification with every reported material
 uncertainty preserved. Uncertainty never triggers executor self-review; unknown
 blind spots require an actual verifier or principal challenge. Principal
 attestation must cite evidence independent of the replay report.
 
-Replay inherits the verifier process environment and network namespace. It
-isolates filesystem mutations from the candidate but does not provide host or
-credential isolation. Files named in `protected` must be regular files with the
+Replay uses a host-owned `ProContractExecutor` adapter. The default local adapter
+passes only PATH, home-directory, locale, temporary-directory and Windows process
+variables; it does not inherit model or authentication environment variables.
+It still shares the host network and filesystem authority. A separate writable
+snapshot protects the live candidate from ordinary replay mutations; it is not
+a security sandbox. Files named in `protected` must be regular files with the
 approved SHA-256; candidate-owned tests that are not protected remain a weak
 proxy.
+
+Each replay check retains a structured observation and content-addressed input,
+stdout and stderr under `pro-contract/observations` in the host data directory.
+`contract_check` returns per-check execution and predicate status;
+`contract_read_observation` reads exact byte ranges using the replay evidence
+hash, check index and stream. A missing executable is unavailable; a timed-out
+process retains partial output marked incomplete. Neither can pass replay.
+An outer exit of zero cannot override a mismatched or unobserved frozen output
+predicate. `targetExecution: unobserved` is explicit even when all byte predicates
+match: proving statement execution or coverage requires a separate trusted observer.
+
+For reference tool configuration, storage semantics and the experiment gates,
+see [the observation boundary](pro-contract-observation-loop.md).
 
 ### 4.7 Automatic task verifier adapter
 
@@ -1121,3 +1165,23 @@ test -z "${RUN_ID:-}" || docker stop "$RUN_ID"
 
 Do not delete run artifacts that support a reported result. Use a new `RUN_ID`
 for remediation or reruns.
+
+### Observation packing
+
+After rebuilding and restarting the host, ProContract Sessions use observation
+packing and exact paged recall by default. Ordinary Sessions remain opt-in.
+
+| Host setting | ProContract Sessions | Ordinary Sessions |
+|---|---|---|
+| Unset | Enabled | Disabled |
+| `OPENCODE_OBSERVATION_PACK=0` | Disabled | Disabled |
+| `OPENCODE_OBSERVATION_PACK=1` | Enabled | Enabled |
+
+Other explicit values disable packing. Registration and request projection share
+the host setting captured when the service graph starts. Contract terms,
+authority and shared budgets are unchanged.
+
+The [promotion decision](pro-contract-observation-promotion.md) follows the user's
+priority on behavioral performance. The [original ProgramBench study](pro-contract-observation-live.md)
+still records its failed cost gate and the interrupted bartib pair; promotion
+does not revise those experimental results.

@@ -124,8 +124,10 @@ describe("LocationServiceMap", () => {
             "application_context",
             "apply_patch",
             "bash",
+            "contract_check",
             "contract_propose",
             "contract_propose_revision",
+            "contract_read_observation",
             "contract_report_blocked",
             "contract_report_ready",
             "edit",
@@ -133,6 +135,7 @@ describe("LocationServiceMap", () => {
             "grep",
             "question",
             "read",
+            "session_read_observation",
             "skill",
             "todowrite",
             "webfetch",
@@ -145,8 +148,10 @@ describe("LocationServiceMap", () => {
             "application_context",
             "apply_patch",
             "bash",
+            "contract_check",
             "contract_propose",
             "contract_propose_revision",
+            "contract_read_observation",
             "contract_report_blocked",
             "contract_report_ready",
             "edit",
@@ -154,6 +159,7 @@ describe("LocationServiceMap", () => {
             "grep",
             "question",
             "read",
+            "session_read_observation",
             "skill",
             "todowrite",
             "webfetch",
@@ -369,6 +375,7 @@ describe("LocationServiceMap", () => {
           yield* agents.transform((draft) =>
             draft.update(AgentV2.defaultID, (agent) => {
               agent.permissions.push({ action: "contract_revision", resource: "*", effect: "deny" })
+              agent.permissions.push({ action: "*", resource: "*", effect: "allow" })
             }),
           )
           const rejected = yield* settleTool(registry, {
@@ -421,7 +428,202 @@ describe("LocationServiceMap", () => {
     ),
   )
 
-  it.live("turns failed replay into a subject-bound challenge", () =>
+  it.live("repairs replay failures in one attempt without treating checks as settlement", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.writeFile(path.join(dir.path, "candidate.txt"), "broken\n")
+            await $`git init`.cwd(dir.path).quiet()
+            await $`git config core.fsmonitor false`.cwd(dir.path).quiet()
+            await $`git config commit.gpgsign false`.cwd(dir.path).quiet()
+            await $`git config user.email test@opencode.test`.cwd(dir.path).quiet()
+            await $`git config user.name Test`.cwd(dir.path).quiet()
+            await $`git add .`.cwd(dir.path).quiet()
+            await $`git commit -m initial`.cwd(dir.path).quiet()
+          })
+          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+          yield* Effect.gen(function* () {
+            const contracts = yield* ProContract.Service
+            const bindings = yield* ProContractOpenCode.Service
+            const registry = yield* ToolRegistry.Service
+            const contractID = ProContract.ID.make("pct_replay_check")
+            const base = ProContract.defaultSpec("Repair the candidate before handoff", Date.now())
+            const spec = {
+              ...base,
+              budget: { ...base.budget, actions: 5 },
+              resolution: { ...base.resolution, maxAttempts: 1 },
+              evidence: {
+                type: "principal" as const,
+                replay: {
+                  checks: [
+                    {
+                      argv: [
+                        process.execPath,
+                        "-e",
+                        "if(require('fs').readFileSync('candidate.txt','utf8').trim()!=='fixed'){process.stderr.write('candidate broken');process.exit(1)}",
+                      ],
+                      timeout: 10_000,
+                      exit: 0,
+                    },
+                  ],
+                  protected: [],
+                  artifacts: [],
+                },
+              },
+            }
+            yield* contracts.issue({ id: contractID, scope: "check", spec, executor: "opencode" })
+            yield* bindings.create({
+              contractID,
+              revision: 1,
+              location,
+              model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") }),
+              nextActionAt: 0,
+            })
+            yield* contracts.activate(contractID, 1, Date.now())
+            const binding = yield* bindings.claim(contractID, Date.now())
+            if (!binding) return yield* Effect.die("Check attempt was not claimed")
+            const check = (id: string) =>
+              settleTool(registry, {
+                sessionID: binding.sessionID,
+                ...toolIdentity,
+                call: { type: "tool-call", id, name: "contract_check", input: {} },
+              })
+            for (const id of ["check-failure-one", "check-failure-two"]) {
+              const failed = yield* check(id)
+              expect(failed.result.type, JSON.stringify(failed.result)).not.toBe("error")
+              expect(failed.output?.structured).toMatchObject({ settled: false, replay: { passed: false } })
+              if (id === "check-failure-one") {
+                const report = Schema.decodeUnknownSync(Schema.Struct({ replay: ProContract.ReplayResult }))(
+                  failed.output?.structured,
+                )
+                const raw = yield* settleTool(registry, {
+                  sessionID: binding.sessionID,
+                  ...toolIdentity,
+                  call: {
+                    type: "tool-call",
+                    id: "read-failure",
+                    name: "contract_read_observation",
+                    input: {
+                      evidenceHash: report.replay.evidenceHash,
+                      check: 0,
+                      stream: "stderr",
+                      offset: 0,
+                      length: 64,
+                    },
+                  },
+                })
+                expect(raw.output?.structured).toMatchObject({
+                  observation: { receipt: { execution: "completed", exit: 1 } },
+                  content: { complete: true, data: Buffer.from("candidate broken").toString("base64") },
+                })
+              }
+              const current = yield* contracts.get(contractID)
+              expect(current?.status).toBe("active")
+              expect(current?.handoff).toBeUndefined()
+              expect(current?.challenge).toBeUndefined()
+              expect(yield* bindings.get(contractID)).toMatchObject({ sessionID: binding.sessionID, attempts: 1 })
+              expect(yield* contracts.history({ contractID })).toHaveLength(2)
+            }
+            yield* Effect.promise(() => fs.writeFile(path.join(dir.path, "candidate.txt"), "fixed\n"))
+            const passed = yield* check("check-fixed")
+            expect(passed.output?.structured).toMatchObject({ settled: false, replay: { passed: true } })
+            expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, actionsUsed: 4 })
+            expect((yield* contracts.get(contractID))?.status).toBe("active")
+            expect((yield* contracts.get(contractID))?.handoff).toBeUndefined()
+            expect(yield* contracts.quiet("check")).toMatchObject({ quiet: false })
+            expect(
+              (yield* contracts.principalAttest({ contractID, evidenceHash: "not-a-handoff" })).decision.type,
+            ).toBe("rejected")
+            yield* Effect.promise(() => fs.writeFile(path.join(dir.path, "candidate.txt"), "regressed\n"))
+            const ready = yield* settleTool(registry, {
+              sessionID: binding.sessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "check-stale-success",
+                name: "contract_report_ready",
+                input: { summary: "candidate complete", uncertainties: [] },
+              },
+            })
+            expect(ready.result).toMatchObject({ type: "error" })
+            expect((yield* contracts.get(contractID))?.status).toBe("active")
+            expect((yield* contracts.get(contractID))?.handoff).toBeUndefined()
+            expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, actionsUsed: 5 })
+            const exhausted = yield* settleTool(registry, {
+              sessionID: binding.sessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "ready-budget-exhausted",
+                name: "contract_report_ready",
+                input: { summary: "cannot retry outside budget", uncertainties: [] },
+              },
+            })
+            expect(exhausted.result).toMatchObject({ type: "error", value: "Contract action budget exhausted" })
+            expect((yield* contracts.get(contractID))?.status).toBe("escalated")
+            expect(yield* contracts.quiet("check")).toMatchObject({ quiet: false })
+          }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
+        }),
+      ),
+    ),
+  )
+
+  it.live("charges diagnostic checks to the Contract action budget", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) => {
+        const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
+        return Effect.gen(function* () {
+          const contracts = yield* ProContract.Service
+          const bindings = yield* ProContractOpenCode.Service
+          const registry = yield* ToolRegistry.Service
+          const contractID = ProContract.ID.make("pct_check_budget")
+          const spec = ProContract.defaultSpec("Check within the shared budget", Date.now())
+          yield* contracts.issue({
+            id: contractID,
+            scope: "check-budget",
+            spec: { ...spec, budget: { ...spec.budget, actions: 1 } },
+            executor: "opencode",
+          })
+          yield* bindings.create({
+            contractID,
+            revision: 1,
+            location,
+            model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") }),
+            nextActionAt: 0,
+          })
+          yield* contracts.activate(contractID, 1, Date.now())
+          const binding = yield* bindings.claim(contractID, Date.now())
+          if (!binding) return yield* Effect.die("Budget attempt was not claimed")
+          const first = yield* settleTool(registry, {
+            sessionID: binding.sessionID,
+            ...toolIdentity,
+            call: { type: "tool-call", id: "check-no-policy", name: "contract_check", input: {} },
+          })
+          expect(first.result).toMatchObject({ type: "error", value: "Contract has no approved replay policy" })
+          expect(yield* contracts.get(contractID)).toMatchObject({ status: "active" })
+          const exhausted = yield* settleTool(registry, {
+            sessionID: binding.sessionID,
+            ...toolIdentity,
+            call: { type: "tool-call", id: "check-budget-exhausted", name: "contract_check", input: {} },
+          })
+          expect(exhausted.result).toMatchObject({ type: "error", value: "Contract action budget exhausted" })
+          expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, actionsUsed: 1 })
+          expect((yield* contracts.get(contractID))?.status).toBe("escalated")
+          expect((yield* contracts.get(contractID))?.handoff).toBeUndefined()
+          expect(yield* contracts.quiet("check-budget")).toMatchObject({ quiet: false })
+        }).pipe(Effect.provide(LocationServiceMap.Service.get(location)))
+      }),
+    ),
+  )
+
+  it.live("repairs failed readiness replay in the same attempt without handing off failed evidence", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -443,15 +645,26 @@ describe("LocationServiceMap", () => {
             const contracts = yield* ProContract.Service
             const bindings = yield* ProContractOpenCode.Service
             const registry = yield* ToolRegistry.Service
-            const contractID = ProContract.ID.make("pct_replay_challenge")
+            const contractID = ProContract.ID.make("pct_replay_repair")
             const base = ProContract.defaultSpec("Replay the frozen candidate", Date.now())
             const spec = {
               ...base,
-              budget: { ...base.budget, actions: 1 },
+              budget: { ...base.budget, actions: 2 },
+              resolution: { ...base.resolution, maxAttempts: 1 },
               evidence: {
                 type: "principal" as const,
                 replay: {
-                  checks: [{ argv: [process.execPath, "-e", "process.exit(1)"], timeout: 10_000, exit: 0 }],
+                  checks: [
+                    {
+                      argv: [
+                        process.execPath,
+                        "-e",
+                        "process.exit(require('fs').readFileSync('candidate.txt','utf8') === 'repaired\\n' ? 0 : 1)",
+                      ],
+                      timeout: 10_000,
+                      exit: 0,
+                    },
+                  ],
                   protected: [],
                   artifacts: [],
                 },
@@ -470,8 +683,6 @@ describe("LocationServiceMap", () => {
             const contractSessionID = claimed
               ? claimed.sessionID
               : yield* Effect.die("Contract attempt was not claimed")
-            expect(yield* bindings.reserveAction(contractSessionID, Date.now())).toBe(true)
-
             const settled = yield* settleTool(registry, {
               sessionID: contractSessionID,
               ...toolIdentity,
@@ -483,15 +694,41 @@ describe("LocationServiceMap", () => {
               },
             })
 
-            expect(settled.result).toMatchObject({ type: "error" })
+            expect(settled.result).toMatchObject({
+              type: "error",
+              value: expect.stringContaining("No handoff was recorded"),
+            })
             expect(yield* contracts.get(contractID)).toMatchObject({
-              status: "dormant",
-              challenge: {
-                disclosure: "executor",
-                summary: expect.stringContaining(`Replay check ${process.execPath} -e process.exit(1)`),
+              status: "active",
+              revision: 1,
+            })
+            expect((yield* contracts.get(contractID))?.handoff).toBeUndefined()
+            expect((yield* contracts.get(contractID))?.challenge).toBeUndefined()
+            expect(yield* bindings.get(contractID)).toMatchObject({ attempts: 1, actionsUsed: 1 })
+            expect(yield* contracts.history({ contractID })).toHaveLength(2)
+            yield* Effect.promise(() => fs.writeFile(path.join(dir.path, "candidate.txt"), "repaired\n"))
+            const repaired = yield* settleTool(registry, {
+              sessionID: contractSessionID,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-report-repaired",
+                name: "contract_report_ready",
+                input: { summary: "candidate repaired", uncertainties: [] },
               },
             })
-            expect(yield* contracts.history({ contractID })).toHaveLength(3)
+            expect(repaired.result).toMatchObject({ type: "json", value: { recorded: true } })
+            expect(yield* contracts.get(contractID)).toMatchObject({
+              status: "verification",
+              revision: 1,
+              handoff: { replay: { passed: true } },
+            })
+            expect(yield* bindings.get(contractID)).toMatchObject({
+              attempts: 1,
+              actionsUsed: 2,
+              sessionID: contractSessionID,
+            })
+            expect(yield* contracts.quiet("replay")).toMatchObject({ quiet: false })
 
             const unavailableID = ProContract.ID.make("pct_replay_unavailable")
             const unavailableSpec = {

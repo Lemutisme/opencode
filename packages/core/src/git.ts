@@ -2,7 +2,7 @@ export * as Git from "./git"
 
 import path from "path"
 import { randomUUID } from "crypto"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { AbsolutePath, RelativePath } from "./schema"
 import { FSUtil } from "./fs-util"
@@ -74,6 +74,8 @@ export interface Interface {
       worktree: AbsolutePath
       gitDirectory: AbsolutePath
       seed?: Repository
+      /** Retain seed-index objects locally instead of depending on the seed's lifetime. */
+      dissociate?: boolean
     }) => Effect.Effect<Repository, OperationError>
   }
   readonly remote: {
@@ -130,6 +132,7 @@ export interface Interface {
       scope: RelativePath
       ignores?: Repository
       maximumUntrackedFileBytes?: number
+      skipUnreadableImmutable?: boolean
     }) => Effect.Effect<{ readonly skipped: readonly RelativePath[] }, OperationError>
     readonly ignored: (input: {
       repository: Repository
@@ -142,9 +145,15 @@ export interface Interface {
       scopes: readonly RelativePath[]
       ignores?: Repository
       maximumUntrackedFileBytes?: number
+      skipUnreadableImmutable?: boolean
       forceInclude?: readonly RelativePath[]
     }) => Effect.Effect<TreeID, OperationError>
     readonly write: (repository: Repository) => Effect.Effect<TreeID, OperationError>
+    readonly retain: (input: {
+      repository: Repository
+      source: Repository
+      tree: TreeID
+    }) => Effect.Effect<void, OperationError>
     readonly files: (input: {
       repository: Repository
       from: TreeID
@@ -326,7 +335,7 @@ const layer = Layer.effect(
       operationName: OperationError["operation"],
       repository: Repository,
       args: string[],
-      options?: { stdin?: string; env?: Record<string, string> },
+      options?: { stdin?: string; env?: Record<string, string>; timeout?: number },
     ) {
       const result = yield* proc
         .run(
@@ -335,7 +344,7 @@ const layer = Layer.effect(
             env: options?.env,
             extendEnv: true,
           }),
-          { stdin: options?.stdin },
+          { stdin: options?.stdin, timeout: options?.timeout },
         )
         .pipe(
           Effect.mapError(
@@ -361,6 +370,7 @@ const layer = Layer.effect(
       worktree: AbsolutePath
       gitDirectory: AbsolutePath
       seed?: Repository
+      dissociate?: boolean
     }) {
       yield* fs.ensureDir(input.gitDirectory).pipe(
         Effect.mapError(
@@ -421,9 +431,34 @@ const layer = Layer.effect(
               }),
           ),
         )
-      yield* fs
-        .copyFile(path.join(input.seed.gitDirectory, "index"), path.join(input.gitDirectory, "index"))
-        .pipe(Effect.catch(() => Effect.void))
+      yield* fs.copyFile(path.join(input.seed.gitDirectory, "index"), path.join(input.gitDirectory, "index")).pipe(
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.void),
+        Effect.mapError(
+          (cause) =>
+            new OperationError({
+              operation: "create",
+              directory: input.gitDirectory,
+              message: "Failed to copy the Git seed index",
+              cause,
+            }),
+        ),
+      )
+      if (input.dissociate) {
+        // Repack includes index-reachable objects even without a commit or branch.
+        yield* repositoryOperation("create", repository, ["write-tree"])
+        yield* repositoryOperation("create", repository, ["repack", "-a"], { timeout: 120_000 })
+        yield* fs.remove(path.join(input.gitDirectory, "objects", "info", "alternates")).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OperationError({
+                operation: "create",
+                directory: input.gitDirectory,
+                message: "Failed to detach retained Git objects from the seed",
+                cause,
+              }),
+          ),
+        )
+      }
       return repository
     })
 
@@ -432,6 +467,7 @@ const layer = Layer.effect(
       scope: RelativePath
       ignores?: Repository
       maximumUntrackedFileBytes?: number
+      skipUnreadableImmutable?: boolean
     }) {
       const list = (args: string[]) =>
         repositoryOperation("refresh", input.repository, args).pipe(
@@ -456,6 +492,28 @@ const layer = Layer.effect(
           )
         : new Set<string>()
       const allowed = candidates.filter((item) => !ignored.has(item))
+      const immutableUnreadable = input.skipUnreadableImmutable
+        ? (yield* Effect.forEach(
+            untracked.filter((item) => allowed.includes(item)),
+            (item) =>
+              Effect.gen(function* () {
+                const filename = path.join(input.repository.worktree, item)
+                const info = yield* fs.stat(filename)
+                if (info.type !== "File" || Option.getOrUndefined(info.uid) === process.getuid?.()) return undefined
+                const readable = yield* fs.access(filename, { readable: true }).pipe(
+                  Effect.as(true),
+                  Effect.catch(() => Effect.succeed(false)),
+                )
+                if (readable) return undefined
+                const replaceable = yield* fs.access(path.dirname(filename), { writable: true }).pipe(
+                  Effect.as(true),
+                  Effect.catch(() => Effect.succeed(false)),
+                )
+                return replaceable ? undefined : RelativePath.make(item)
+              }).pipe(Effect.catch(() => Effect.succeed(undefined))),
+            { concurrency: 8 },
+          )).filter((item): item is RelativePath => item !== undefined)
+        : []
       const maximum = input.maximumUntrackedFileBytes
       const skipped = maximum
         ? (yield* Effect.forEach(
@@ -470,6 +528,7 @@ const layer = Layer.effect(
             { concurrency: 8 },
           )).filter((item): item is RelativePath => item !== undefined)
         : []
+      skipped.push(...immutableUnreadable)
       const stage = allowed.filter((item) => !skipped.includes(RelativePath.make(item)))
       const remove = [...ignored, ...skipped]
       if (remove.length)
@@ -532,28 +591,50 @@ const layer = Layer.effect(
       return TreeID.make((yield* repositoryOperation("write_tree", repository, ["write-tree"])).text.trim())
     })
 
+    const retainTree = Effect.fn("Git.tree.retain")(function* (input: {
+      repository: Repository
+      source: Repository
+      tree: TreeID
+    }) {
+      if (input.repository.gitDirectory === input.source.gitDirectory) return
+      // Import exactly this tree closure without changing refs or borrowing its object store.
+      yield* repositoryOperation(
+        "fetch",
+        input.repository,
+        [
+          "fetch",
+          "--no-tags",
+          "--no-write-fetch-head",
+          "--no-auto-maintenance",
+          "--",
+          input.source.gitDirectory,
+          input.tree,
+        ],
+        { timeout: 120_000 },
+      )
+    })
+
     const captureTree = Effect.fn("Git.tree.capture")(
       (input: {
         repository: Repository
         scopes: readonly RelativePath[]
         ignores?: Repository
         maximumUntrackedFileBytes?: number
+        skipUnreadableImmutable?: boolean
         forceInclude?: readonly RelativePath[]
       }) =>
         locked(
           input.repository,
           Effect.gen(function* () {
             yield* Effect.forEach(input.scopes, (scope) => refresh({ ...input, scope }), { discard: true })
-            const force = (
-              yield* Effect.forEach(
-                input.forceInclude ?? [],
-                (item) =>
-                  fs
-                    .existsSafe(path.join(input.repository.worktree, item))
-                    .pipe(Effect.map((exists) => (exists ? item : undefined))),
-                { concurrency: 8 },
-              )
-            ).filter((item): item is RelativePath => item !== undefined)
+            const force = (yield* Effect.forEach(
+              input.forceInclude ?? [],
+              (item) =>
+                fs
+                  .existsSafe(path.join(input.repository.worktree, item))
+                  .pipe(Effect.map((exists) => (exists ? item : undefined))),
+              { concurrency: 8 },
+            )).filter((item): item is RelativePath => item !== undefined)
             if (force.length)
               yield* repositoryOperation(
                 "refresh",
@@ -952,6 +1033,7 @@ const layer = Layer.effect(
       tree: {
         capture: captureTree,
         write: writeTree,
+        retain: retainTree,
         files: treeFiles,
         diff: treeDiff,
         preview,

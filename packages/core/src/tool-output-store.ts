@@ -155,7 +155,11 @@ const layer = Layer.effect(
           outputPaths: [],
         }
 
-      const outputPath = yield* write(contextual)
+      const outputPath = yield* write(contextual).pipe(
+        Effect.catchTag("ToolOutputStore.StorageError", () => Effect.succeed(undefined)),
+      )
+      // Bounding is a model projection. Failed retention must not erase the actual tool observation.
+      if (!outputPath) return { output: input.output, outputPaths: [] }
       const marker = `... output truncated; full content saved to ${outputPath} ...`
 
       return {

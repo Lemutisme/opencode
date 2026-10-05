@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Cause, Deferred, Effect, Fiber, Layer } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
@@ -23,6 +23,17 @@ const current = Layer.succeed(
   Location.Service,
   Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
 )
+
+test.each(["contract_issue", "contract_revision"])("requires an explicit issuer grant for %s", (action) => {
+  const allow = { action: "*", resource: "*", effect: "allow" as const }
+  expect(PermissionV2.evaluate(action, "spec", [allow]).effect).toBe("ask")
+  expect(PermissionV2.evaluate(action, "spec", [{ ...allow, action: "contract_*" }]).effect).toBe("ask")
+  expect(PermissionV2.evaluate(action, "spec", [{ action, resource: "*", effect: "deny" }, allow]).effect).toBe("deny")
+  expect(PermissionV2.evaluate(action, "spec", [{ action, resource: "spec", effect: "allow" }, allow]).effect).toBe(
+    "allow",
+  )
+  expect(PermissionV2.evaluate("bash", "command", [allow]).effect).toBe("allow")
+})
 const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([

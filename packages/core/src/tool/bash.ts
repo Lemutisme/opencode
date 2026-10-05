@@ -9,6 +9,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { AppProcess } from "../process"
+import { oomCommand } from "../process-priority"
 import { PermissionV2 } from "../permission"
 import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
@@ -155,7 +156,7 @@ const layer = Layer.effectDiscard(
               const shell =
                 Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
                   .shell ?? defaultShell()
-              const command = ChildProcess.make(input.command, [], {
+              const command = ChildProcess.make(oomCommand(input.command), [], {
                 cwd: target.canonical,
                 shell,
                 stdin: "ignore",
@@ -193,7 +194,14 @@ const layer = Layer.effectDiscard(
                 truncated: result.outputTruncated === true,
                 ...(warnings.length ? { warnings } : {}),
               }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to execute command: ${input.command}` }))),
+            }).pipe(
+              Effect.mapError(
+                (error) =>
+                  new ToolFailure({
+                    message: `Unable to execute command: ${input.command}\n${error instanceof Error ? error.message : String(error)}`,
+                  }),
+              ),
+            ),
         }),
       })
       .pipe(Effect.orDie)

@@ -75,9 +75,15 @@ export type Error = BlockedError | CorrectedError
 
 export function evaluate(action: string, resource: string, ...rulesets: Permission.Ruleset[]): Permission.Rule {
   return (
-    rulesets
-      .flat()
-      .findLast((rule) => Wildcard.match(action, rule.action) && Wildcard.match(resource, rule.resource)) ?? {
+    rulesets.flat().findLast(
+      (rule) =>
+        Wildcard.match(action, rule.action) &&
+        Wildcard.match(resource, rule.resource) &&
+        // General tool access cannot grant the issuer's power to create or revise obligations.
+        (!(action === "contract_issue" || action === "contract_revision") ||
+          rule.effect !== "allow" ||
+          rule.action === action),
+    ) ?? {
       action,
       resource: "*",
       effect: "ask",

@@ -19,6 +19,7 @@ import { PermissionV2 } from "../../permission"
 import { ProviderV2 } from "../../provider"
 import { ProContract } from "../../pro-contract"
 import { ProContractOpenCode } from "../../pro-contract/open-code"
+import { ProContractContext } from "../../pro-contract/context"
 import { QuestionV2 } from "../../question"
 import { SystemContext } from "../../system-context/index"
 import { SystemContextRegistry } from "../../system-context/registry"
@@ -28,9 +29,11 @@ import { ToolRegistry } from "../../tool/registry"
 import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
 import { SessionCompaction } from "../compaction"
+import { ContextBudget } from "../context-budget"
 import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
+import { SessionObservationPack } from "../observation-pack"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
@@ -112,6 +115,7 @@ const layer = Layer.effect(
     const snapshots = yield* Snapshot.Service
     const contracts = yield* ProContract.Service
     const contractBindings = yield* ProContractOpenCode.Service
+    const observationPolicy = yield* SessionObservationPack.Policy
     const db = (yield* Database.Service).db
     const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
@@ -172,10 +176,17 @@ const layer = Layer.effect(
     const continueAfterOverflowCompaction = (step: number) =>
       new TurnTransitionError({ _tag: "ContinueAfterOverflowCompaction", step })
 
-    const loadSystemContext = (agent: AgentV2.Selection) =>
+    const loadSystemContext = (agent: AgentV2.Selection, bound: boolean) =>
       Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
         concurrency: "unbounded",
-      }).pipe(Effect.map(SystemContext.combine))
+      }).pipe(
+        Effect.map((contexts) =>
+          SystemContext.combine([
+            ...contexts,
+            ProContractContext.make(bound ? "execution" : agent.id === AgentV2.defaultID ? "admission" : undefined),
+          ]),
+        ),
+      )
 
     const runTurnAttempt = Effect.fn("SessionRunner.runTurn")(function* (
       sessionID: SessionSchema.ID,
@@ -198,7 +209,11 @@ const layer = Layer.effect(
             contract.challenge?.disclosure === "executor" ||
             contract.blocked !== undefined
           : contractBinding.attemptKey !== ProContractOpenCode.attemptKey(contract))
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
+      const initialized = yield* SessionContextEpoch.initialize(
+        db,
+        loadSystemContext(agent, contractBinding !== undefined),
+        session.id,
+      )
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
       let currentStep = step
@@ -223,8 +238,15 @@ const layer = Layer.effect(
       )
         return { needsContinuation: false, step: currentStep }
       const system =
-        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
+        initialized ??
+        (yield* SessionContextEpoch.prepare(
+          db,
+          events,
+          loadSystemContext(agent, contractBinding !== undefined),
+          session.id,
+        ))
       const model = yield* models.resolve(session)
+      if (process.env.OPENCODE_RUNTIME_GC === "1" && typeof Bun !== "undefined") Bun.gc(true)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
@@ -232,10 +254,22 @@ const layer = Layer.effect(
       const contractPermissions = contractBinding
         ? [
             { action: "*", resource: "*", effect: "deny" as const },
+            ...(contract?.spec.evidence.replay
+              ? [{ action: "contract_check", resource: "*", effect: "allow" as const }]
+              : []),
             { action: "contract_report_ready", resource: "*", effect: "allow" as const },
+            { action: "contract_read_observation", resource: "*", effect: "allow" as const },
             { action: "contract_report_blocked", resource: "*", effect: "allow" as const },
             { action: "contract_propose_revision", resource: "*", effect: "allow" as const },
             { action: "todowrite", resource: "*", effect: "allow" as const },
+            ...(process.env.OPENCODE_STRATEGY_PORTFOLIO === "1"
+              ? [
+                  "strategy_plan",
+                  "strategy_status",
+                  ...(authority.includes("process.execute") ? ["strategy_verify"] : []),
+                ].map((action) => ({ action, resource: "*", effect: "allow" as const }))
+              : []),
+            { action: SessionObservationPack.toolName, resource: "*", effect: "allow" as const },
             ...(authority.includes("filesystem.read")
               ? [
                   { action: "read", resource: "*", effect: "allow" as const },
@@ -247,35 +281,62 @@ const layer = Layer.effect(
               ? [{ action: "edit", resource: "*", effect: "allow" as const }]
               : []),
             ...(authority.includes("process.execute")
-              ? [{ action: "bash", resource: "*", effect: "allow" as const }]
+              ? [
+                  { action: "bash", resource: "*", effect: "allow" as const },
+                  ...(authority.includes("filesystem.write")
+                    ? [{ action: "mutate_run", resource: "*", effect: "allow" as const }]
+                    : []),
+                ]
+              : []),
+            ...(authority.includes("reference.run")
+              ? [
+                  { action: "reference_run", resource: "*", effect: "allow" as const },
+                  { action: "reference_read", resource: "*", effect: "allow" as const },
+                ]
               : []),
           ]
         : [
+            { action: "mutate_run", resource: "*", effect: "deny" as const },
+            { action: "reference_run", resource: "*", effect: "deny" as const },
+            { action: "reference_read", resource: "*", effect: "deny" as const },
+            { action: "contract_check", resource: "*", effect: "deny" as const },
+            { action: "contract_read_observation", resource: "*", effect: "deny" as const },
             { action: "contract_report_ready", resource: "*", effect: "deny" as const },
             { action: "contract_report_blocked", resource: "*", effect: "deny" as const },
             { action: "contract_propose_revision", resource: "*", effect: "deny" as const },
           ]
       const toolMaterialization = isLastStep
         ? undefined
-        : yield* tools.materialize([...(agent.info?.permissions ?? []), ...contractPermissions])
+        : yield* tools.materialize([
+            ...(agent.info?.permissions ?? []),
+            ...contractPermissions,
+            ...(observationPolicy === "off" || (observationPolicy === "contract" && !contractBinding)
+              ? [{ action: SessionObservationPack.toolName, resource: "*", effect: "deny" as const }]
+              : []),
+          ])
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const settlementWindow =
         contract?.status === "active" &&
         contractBinding !== undefined &&
         (contract.spec.budget.turns - contractBinding.turnsUsed <= SETTLEMENT_WINDOW ||
           contract.spec.budget.actions - contractBinding.actionsUsed <= SETTLEMENT_WINDOW)
-      const request = LLM.request({
+      const originalRequest = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
         system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [
-          ...toLLMMessages(context, model),
+          ...toLLMMessages(
+            toolMaterialization?.definitions.some((tool) => tool.name === SessionObservationPack.toolName)
+              ? SessionObservationPack.project(context)
+              : context,
+            model,
+          ),
           ...(settlementWindow
             ? [
                 Message.system(
-                  "Settlement window active. Stop opening speculative work; petition verification when the evidence policy can adjudicate its claim, otherwise report blocked or petition revision.",
+                  "Settlement window active. Stop opening speculative work; petition verification when the evidence policy can adjudicate its claim, otherwise report blocked. Petition revision only for a necessary change to approved terms, not to restate the task or bypass the shared budget.",
                 ),
               ]
             : []),
@@ -284,7 +345,18 @@ const layer = Layer.effect(
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })
-      if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
+      const request = LLM.updateRequest(originalRequest, {
+        messages: ContextBudget.selectMedia(originalRequest.messages),
+      })
+      if (
+        yield* compaction.compactIfNeeded({
+          sessionID: session.id,
+          entries,
+          model,
+          request,
+          deadline: contract?.spec.budget.deadline,
+        })
+      )
         return yield* Effect.die(continueAfterCompaction(currentStep))
       if (contractBinding && !(yield* contractBindings.reserveTurn(session.id, yield* Clock.currentTimeMillis)))
         return { needsContinuation: false, step: currentStep }
@@ -307,7 +379,11 @@ const layer = Layer.effect(
         Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
         Stream.runForEach((event) =>
           Effect.gen(function* () {
-            if (overflowFailure || publisher.hasProviderError()) return
+            if (
+              overflowFailure ||
+              (publisher.hasProviderError() && event.type !== "step-finish" && event.type !== "finish")
+            )
+              return
             if (LLMEvent.is.providerError(event)) {
               if (isContextOverflowFailure(event) && !publisher.hasAssistantStarted()) {
                 overflowFailure = event
@@ -370,13 +446,20 @@ const layer = Layer.effect(
             recoverOverflow &&
             !publisher.hasAssistantStarted() &&
             isContextOverflowFailure(overflowFailure ?? failure) &&
-            (yield* restore(recoverOverflow({ sessionID: session.id, entries, model, request })))
+            (yield* restore(
+              recoverOverflow({
+                sessionID: session.id,
+                entries,
+                model,
+                request,
+                deadline: contract?.spec.budget.deadline,
+              }),
+            ))
           )
             return yield* Effect.die(continueAfterOverflowCompaction(currentStep))
           if (overflowFailure) yield* publish(overflowFailure)
           const llmFailure = failure instanceof LLMError ? failure : undefined
           if (llmFailure && !publisher.hasProviderError()) {
-            yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
             yield* withPublication(publisher.failAssistant(llmFailure.reason.message))
           }
           if (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) yield* FiberSet.clear(toolFibers)
@@ -400,8 +483,14 @@ const layer = Layer.effect(
             const message = failure instanceof Error ? failure.message : String(failure)
             yield* withPublication(publisher.failUnsettledTools(`Tool execution failed: ${message}`))
           }
+          if (stream._tag === "Success" && !publisher.hasProviderError() && publisher.hasUncalledTools())
+            yield* publish(LLMEvent.providerError({ message: "Provider ended with unexecuted tool arguments" }))
+          if (llmFailure)
+            yield* withPublication(
+              publisher.failUnsettledTools("Provider failed before completing tool input or result"),
+            )
           const stepSettlement = publisher.stepSettlement()
-          if (stepSettlement && !publisher.hasProviderError()) {
+          if (stepSettlement) {
             const endSnapshot = yield* snapshots.capture()
             const files =
               startSnapshot && endSnapshot
@@ -414,7 +503,7 @@ const layer = Layer.effect(
                 sessionID: session.id,
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
-                finish: stepSettlement.finish,
+                finish: publisher.hasProviderError() || stream._tag === "Failure" ? "error" : stepSettlement.finish,
                 cost: yield* models.cost(session, stepSettlement.tokens),
                 tokens: stepSettlement.tokens,
                 snapshot: endSnapshot,
@@ -517,5 +606,6 @@ export const node = makeLocationNode({
     Database.node,
     ProContract.node,
     ProContractOpenCode.node,
+    SessionObservationPack.policyNode,
   ],
 })

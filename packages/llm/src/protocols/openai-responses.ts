@@ -5,6 +5,7 @@ import { Endpoint } from "../route/endpoint"
 import { HttpTransport, WebSocketTransport } from "../route/transport"
 import { Protocol } from "../route/protocol"
 import {
+  LLMError,
   LLMEvent,
   Usage,
   type FinishReason,
@@ -227,13 +228,15 @@ const OpenAIResponsesEvent = Schema.Struct({
       [Schema.Record(Schema.String, Schema.Unknown)],
     ),
   ),
-  code: Schema.optional(Schema.String),
-  message: Schema.optional(Schema.String),
-  param: Schema.optional(Schema.String),
+  code: optionalNull(Schema.String),
+  message: optionalNull(Schema.String),
+  param: optionalNull(Schema.String),
 })
 type OpenAIResponsesEvent = Schema.Schema.Type<typeof OpenAIResponsesEvent>
 
 interface ParserState {
+  readonly terminal: boolean
+  readonly invalidTools: ReadonlyArray<string>
   readonly tools: ToolStream.State<string>
   readonly hasFunctionCall: boolean
   readonly lifecycle: Lifecycle.State
@@ -606,10 +609,7 @@ type StepResult = readonly [ParserState, ReadonlyArray<LLMEvent>]
 
 const NO_EVENTS: StepResult["1"] = []
 
-// `response.completed` / `response.incomplete` are clean finishes that emit a
-// `finish` event; `response.failed` is a hard failure that emits a
-// `provider-error`. All three end the stream — kept in one set so `step` and
-// the protocol's `terminal` predicate stay in sync.
+// Consume terminal usage even when an earlier tool's arguments were invalid.
 const TERMINAL_TYPES = new Set(["response.completed", "response.incomplete", "response.failed"])
 
 const onOutputTextDelta = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
@@ -817,13 +817,27 @@ const onOutputItemDone = Effect.fn("OpenAIResponses.onOutputItemDone")(function*
     const tools = state.tools[item.id]
       ? state.tools
       : ToolStream.start(state.tools, item.id, { id: item.call_id, name: item.name })
-    const result =
-      item.arguments === undefined
-        ? yield* ToolStream.finish(ADAPTER, tools, item.id)
-        : yield* ToolStream.finishWithInput(ADAPTER, tools, item.id, item.arguments)
     const events: LLMEvent[] = []
+    const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
+    if (!state.tools[item.id]) {
+      events.push(LLMEvent.toolInputStart({ id: item.call_id, name: item.name }))
+      if (item.arguments)
+        events.push(LLMEvent.toolInputDelta({ id: item.call_id, name: item.name, text: item.arguments }))
+    }
+    const result = yield* (
+      item.arguments === undefined
+        ? ToolStream.finish(ADAPTER, tools, item.id)
+        : ToolStream.finishWithInput(ADAPTER, tools, item.id, item.arguments)
+    ).pipe(Effect.catchTag("LLM.Error", (error) => Effect.succeed(error)))
+    if (result instanceof LLMError) {
+      // Do not execute or guess-repair partial JSON. Keep consuming the response
+      // so terminal usage survives; raw deltas are retained by the consumer.
+      return [
+        { ...state, lifecycle, tools, invalidTools: [...state.invalidTools, result.reason.message] },
+        events,
+      ] satisfies StepResult
+    }
     const resultEvents = result.events ?? []
-    const lifecycle = resultEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
     events.push(...resultEvents)
     return [
       {
@@ -885,7 +899,19 @@ const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): Step
           })
         : undefined,
   })
-  return [{ ...state, lifecycle }, events]
+  const pending = Object.values(state.tools).filter((tool) => tool !== undefined)
+  if (event.type === "response.incomplete" || pending.length || state.invalidTools.length) {
+    events.push(
+      LLMEvent.providerError({
+        message:
+          state.invalidTools[0] ??
+          (pending.length
+            ? `OpenAI Responses ended with ${pending.length} unexecuted tool argument stream(s)`
+            : `OpenAI Responses incomplete: ${event.response?.incomplete_details?.reason ?? "unknown"}`),
+      }),
+    )
+  }
+  return [{ ...state, lifecycle, terminal: true }, events]
 }
 
 // Build a single human-readable message from whatever the provider supplied.
@@ -910,13 +936,20 @@ const providerError = (event: OpenAIResponsesEvent, fallback: string) => {
   })
 }
 
-const onResponseFailed = (state: ParserState, event: OpenAIResponsesEvent): StepResult => [
-  state,
-  [providerError(event, "OpenAI Responses response failed")],
-]
+const onResponseFailed = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
+  if (!event.response?.usage)
+    return [{ ...state, terminal: true }, [providerError(event, "OpenAI Responses response failed")]]
+  const events: LLMEvent[] = []
+  const lifecycle = Lifecycle.finish(state.lifecycle, events, {
+    reason: "error",
+    usage: mapUsage(event.response?.usage),
+  })
+  events.push(providerError(event, "OpenAI Responses response failed"))
+  return [{ ...state, lifecycle, terminal: true }, events]
+}
 
 const onError = (state: ParserState, event: OpenAIResponsesEvent): StepResult => [
-  state,
+  { ...state, terminal: true },
   [providerError(event, "OpenAI Responses stream error")],
 ]
 
@@ -965,6 +998,8 @@ export const protocol = Protocol.make({
   stream: {
     event: Protocol.jsonEvent(OpenAIResponsesEvent),
     initial: (request) => ({
+      terminal: false,
+      invalidTools: [],
       hasFunctionCall: false,
       tools: ToolStream.empty<string>(),
       lifecycle: Lifecycle.initial(),
@@ -973,6 +1008,15 @@ export const protocol = Protocol.make({
     }),
     step,
     terminal: (event) => TERMINAL_TYPES.has(event.type),
+    onHalt: (state) =>
+      state.terminal
+        ? []
+        : [
+            LLMEvent.providerError({
+              message:
+                "OpenAI Responses stream ended before a terminal event; any pending tool arguments were not executed and usage is unknown",
+            }),
+          ],
   },
 })
 

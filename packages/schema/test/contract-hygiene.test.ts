@@ -64,12 +64,30 @@ describe("contract hygiene", () => {
     })
   })
 
+  test("replay observations round-trip exact input and reject invalid byte predicates", () => {
+    const check = { argv: ["./program"], timeout: 1000, exit: 0 }
+    expect(Schema.encodeSync(ProContract.ReplayCheck)({ ...check, stdin: undefined, observations: undefined })).toEqual(
+      check,
+    )
+    const observed = {
+      ...check,
+      stdin: "\u0000字\n",
+      observations: [{ id: "stdout-bytes", stream: "stdout" as const, hash: "a".repeat(64) }],
+    }
+    expect(
+      Schema.decodeUnknownSync(ProContract.ReplayCheck)(Schema.encodeSync(ProContract.ReplayCheck)(observed)),
+    ).toEqual(observed)
+    expect(() =>
+      Schema.decodeUnknownSync(ProContract.ReplayCheck)({
+        ...observed,
+        observations: [{ ...observed.observations[0], hash: "expected" }],
+      }),
+    ).toThrow()
+  })
+
   test("contract authority identifiers stay adapter-defined", () => {
     const decode = Schema.decodeUnknownSync(Schema.Array(ProContract.Capability))
-    expect(decode(["filesystem.read", "organization.approve"])).toEqual([
-      "filesystem.read",
-      "organization.approve",
-    ])
+    expect(decode(["filesystem.read", "organization.approve"])).toEqual(["filesystem.read", "organization.approve"])
     expect(() => decode([""])).toThrow()
   })
 

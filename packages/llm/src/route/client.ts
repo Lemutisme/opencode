@@ -278,20 +278,27 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
         }),
       streamPrepared: (prepared: Prepared, request: LLMRequest, runtime: TransportRuntime) => {
         const route = `${request.model.provider}/${request.model.route.id}`
-        const events = routeInput.transport
-          .frames(prepared, request, runtime)
-          .pipe(
+        return Stream.suspend(() => {
+          const interrupted = { failed: false }
+          const events = routeInput.transport.frames(prepared, request, runtime).pipe(
             Stream.mapEffect(decodeEvent(route)),
             protocol.stream.terminal ? Stream.takeUntil(protocol.stream.terminal) : (stream) => stream,
+            Stream.catchCause((cause) => {
+              interrupted.failed = true
+              return Stream.failCause(cause)
+            }),
           )
-        return events.pipe(
-          Stream.mapAccumEffect(
-            () => protocol.stream.initial(request),
-            protocol.stream.step,
-            protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
-          ),
-          Stream.catchCause((cause) => Stream.fail(streamError(route, `Failed to read ${route} stream`, cause))),
-        )
+          return events.pipe(
+            Stream.mapAccumEffect(
+              () => protocol.stream.initial(request),
+              protocol.stream.step,
+              protocol.stream.onHalt
+                ? { onHalt: (state) => (interrupted.failed ? [] : protocol.stream.onHalt!(state)) }
+                : undefined,
+            ),
+            Stream.catchCause((cause) => Stream.fail(streamError(route, `Failed to read ${route} stream`, cause))),
+          )
+        })
       },
     } satisfies Route<Body, Prepared>
     return route

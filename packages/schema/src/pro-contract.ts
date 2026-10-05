@@ -53,6 +53,19 @@ const CandidatePath = RelativePath.check(
 export const ReplayCheck = Schema.Struct({
   argv: Schema.Array(Schema.NonEmptyString),
   cwd: CandidatePath.pipe(optional),
+  stdin: Schema.String.pipe(optional),
+  observations: Schema.Array(
+    Schema.Struct({
+      id: Schema.NonEmptyString,
+      stream: Schema.Literals(["stdout", "stderr"]),
+      hash: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+    }),
+  )
+    .pipe(optional)
+    .annotate({
+      description:
+        "Issuer-frozen exact output predicates. A match supports only these bytes, not target-statement execution or behavioral coverage. Missing or incomplete capture cannot satisfy a predicate.",
+    }),
   timeout: PositiveInt.check(
     Schema.isGreaterThanOrEqualTo(1_000),
     Schema.isLessThanOrEqualTo(10 * 60 * 1_000),

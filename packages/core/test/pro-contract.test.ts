@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { AuthenticationReason, LLMError, RateLimitReason } from "@opencode-ai/llm"
+import {
+  AuthenticationReason,
+  LLMError,
+  RateLimitReason,
+  TransportReason,
+  InvalidProviderOutputReason,
+} from "@opencode-ai/llm"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ProContract } from "@opencode-ai/core/pro-contract"
+import { Hash } from "@opencode-ai/core/util/hash"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -905,6 +912,25 @@ describe("ProContract kernel", () => {
     ).toEqual({ type: "rejected", reason: "principal evidence must be independent of replay" })
     expect(ProContract.transition(ready(true).state, discharge).state.contracts[contractID]?.status).toBe("discharged")
   })
+
+  test("binds probe input and output predicates without changing legacy replay identities", () => {
+    expect(ProContract.hashReplay(replayPolicy)).toBe(Hash.sha256(JSON.stringify(replayPolicy)))
+    const observed = {
+      ...replayPolicy,
+      checks: replayPolicy.checks.map((check) => ({
+        ...check,
+        stdin: "probe-input",
+        observations: [{ id: "observed-bytes", stream: "stdout" as const, hash: "a".repeat(64) }],
+      })),
+    }
+    expect(ProContract.hashReplay(observed)).not.toBe(ProContract.hashReplay(replayPolicy))
+    expect(
+      ProContract.hashReplay({ ...observed, checks: observed.checks.map((check) => ({ ...check, stdin: "changed" })) }),
+    ).not.toBe(ProContract.hashReplay(observed))
+    expect(
+      ProContract.hashReplay({ ...observed, checks: observed.checks.map((check) => ({ ...check, observations: [] })) }),
+    ).not.toBe(ProContract.hashReplay(observed))
+  })
 })
 
 const it = testEffect(LayerNode.compile(ProContract.node))
@@ -1348,6 +1374,41 @@ function makeTerminalExecutionIt(run: SessionRunner.Interface["run"]) {
 }
 
 describe("OpenCode Contract binding", () => {
+  for (const reason of [
+    new TransportReason({ message: "HTTP transport failed" }),
+    new InvalidProviderOutputReason({ message: "Truncated JSON" }),
+  ]) {
+    const failure = new LLMError({ module: "test", method: "stream", reason })
+    makeTerminalExecutionIt(() => Effect.fail(failure)).effect(
+      `preserves Session and consumed budgets after ${reason._tag}`,
+      () =>
+        Effect.gen(function* () {
+          const contracts = yield* ProContract.Service
+          const bindings = yield* ProContractOpenCode.Service
+          const execution = yield* SessionExecution.Service
+          yield* contracts.issue({ id: contractID, scope: draft.scope, spec, executor: "opencode" })
+          yield* bindings.create({
+            contractID,
+            revision: 1,
+            location: { directory: AbsolutePath.make("/project") },
+            model: executionModel,
+            nextActionAt: 0,
+          })
+          yield* contracts.activate(contractID, 1, 0)
+          const attempt = yield* bindings.claim(contractID, 0)
+          expect(yield* bindings.reserveTurn(attempt!.sessionID, 0)).toBe(true)
+          expect(yield* execution.resume(attempt!.sessionID).pipe(Effect.flip)).toBe(failure)
+          expect(yield* contracts.get(contractID)).toMatchObject({ status: "active", revision: 1 })
+          expect(yield* bindings.get(contractID)).toMatchObject({
+            sessionID: attempt!.sessionID,
+            attempts: 1,
+            dispatched: false,
+            turnsUsed: 1,
+            actionsUsed: 0,
+          })
+        }),
+    )
+  }
   terminalExecutionIt.effect("reschedules an unclassified durable provider error in the same semantic attempt", () =>
     Effect.gen(function* () {
       const contracts = yield* ProContract.Service

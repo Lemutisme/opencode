@@ -2835,6 +2835,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -2864,6 +2870,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -2893,6 +2905,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -2922,6 +2940,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -2951,6 +2975,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -2980,6 +3010,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3009,6 +3045,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3038,6 +3080,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3067,6 +3115,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3096,6 +3150,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3125,6 +3185,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3154,6 +3220,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3183,6 +3255,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3212,6 +3290,12 @@ export type ServerProContractIssueInput = {
         readonly checks: ReadonlyArray<{
           readonly argv: ReadonlyArray<string>
           readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
           readonly timeout: number
           readonly exit: number
         }>
@@ -3241,6 +3325,12 @@ export type ServerProContractIssueOutput = {
           readonly checks: ReadonlyArray<{
             readonly argv: ReadonlyArray<string>
             readonly cwd?: string
+            readonly stdin?: string
+            readonly observations?: ReadonlyArray<{
+              readonly id: string
+              readonly stream: "stdout" | "stderr"
+              readonly hash: string
+            }>
             readonly timeout: number
             readonly exit: number
           }>
@@ -3293,6 +3383,12 @@ export type ServerProContractIssueOutput = {
             readonly checks: ReadonlyArray<{
               readonly argv: ReadonlyArray<string>
               readonly cwd?: string
+              readonly stdin?: string
+              readonly observations?: ReadonlyArray<{
+                readonly id: string
+                readonly stream: "stdout" | "stderr"
+                readonly hash: string
+              }>
               readonly timeout: number
               readonly exit: number
             }>
@@ -3346,6 +3442,12 @@ export type ServerProContractListOutput = {
           readonly checks: ReadonlyArray<{
             readonly argv: ReadonlyArray<string>
             readonly cwd?: string
+            readonly stdin?: string
+            readonly observations?: ReadonlyArray<{
+              readonly id: string
+              readonly stream: "stdout" | "stderr"
+              readonly hash: string
+            }>
             readonly timeout: number
             readonly exit: number
           }>
@@ -3398,6 +3500,12 @@ export type ServerProContractListOutput = {
             readonly checks: ReadonlyArray<{
               readonly argv: ReadonlyArray<string>
               readonly cwd?: string
+              readonly stdin?: string
+              readonly observations?: ReadonlyArray<{
+                readonly id: string
+                readonly stream: "stdout" | "stderr"
+                readonly hash: string
+              }>
               readonly timeout: number
               readonly exit: number
             }>
@@ -3445,6 +3553,12 @@ export type ServerProContractGetOutput = {
           readonly checks: ReadonlyArray<{
             readonly argv: ReadonlyArray<string>
             readonly cwd?: string
+            readonly stdin?: string
+            readonly observations?: ReadonlyArray<{
+              readonly id: string
+              readonly stream: "stdout" | "stderr"
+              readonly hash: string
+            }>
             readonly timeout: number
             readonly exit: number
           }>
@@ -3497,6 +3611,12 @@ export type ServerProContractGetOutput = {
             readonly checks: ReadonlyArray<{
               readonly argv: ReadonlyArray<string>
               readonly cwd?: string
+              readonly stdin?: string
+              readonly observations?: ReadonlyArray<{
+                readonly id: string
+                readonly stream: "stdout" | "stderr"
+                readonly hash: string
+              }>
               readonly timeout: number
               readonly exit: number
             }>

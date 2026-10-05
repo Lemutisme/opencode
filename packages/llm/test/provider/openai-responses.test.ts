@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { ConfigProvider, Effect, Layer, Stream } from "effect"
 import { Headers, HttpClientRequest } from "effect/unstable/http"
-import { LLM, LLMError, Message, Model, ToolCallPart, Usage } from "../../src"
+import { LLM, LLMError, LLMEvent, Message, Model, ToolCallPart, Usage } from "../../src"
 import { Auth, LLMClient, RequestExecutor, WebSocketExecutor } from "../../src/route"
 import * as Azure from "../../src/providers/azure"
 import * as OpenAI from "../../src/providers/openai"
@@ -1452,6 +1452,41 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  for (const mode of ["malformed", "pending", "eof", "failed"] as const) {
+    it.effect(`retains usage and rejects unexecuted tool arguments: ${mode}`, () =>
+      Effect.gen(function* () {
+        const item = { type: "function_call", id: "fc_broken", call_id: "call_broken", name: "bash" }
+        const frames = [
+          { type: "response.output_item.added", item },
+          { type: "response.function_call_arguments.delta", item_id: item.id, delta: '{"command":"unfinished' },
+          ...(mode === "malformed"
+            ? [{ type: "response.output_item.done", item: { ...item, arguments: '{"command":"unfinished' } }]
+            : []),
+          ...(mode === "eof"
+            ? []
+            : [
+                {
+                  type: mode === "failed" ? "response.failed" : "response.incomplete",
+                  response: {
+                    usage: { input_tokens: 7, output_tokens: 128000 },
+                    incomplete_details: { reason: "max_output_tokens" },
+                  },
+                },
+              ]),
+        ]
+        const events = Array.from(
+          yield* LLMClient.stream(request).pipe(Stream.runCollect, Effect.provide(fixedResponse(sseEvents(...frames)))),
+        )
+        expect(events.filter(LLMEvent.is.toolCall)).toHaveLength(0)
+        expect(events.filter(LLMEvent.is.providerError)).toHaveLength(1)
+        expect(events.filter(LLMEvent.is.toolInputDelta)[0]?.text).toBe('{"command":"unfinished')
+        const finish = events.find(LLMEvent.is.stepFinish)
+        if (mode === "eof") expect(finish).toBeUndefined()
+        else expect(finish?.usage).toMatchObject({ inputTokens: 7, outputTokens: 128000 })
+      }),
+    )
+  }
+
   it.effect("fails HTTP provider errors before stream parsing", () =>
     Effect.gen(function* () {
       const error = yield* LLMClient.generate(request).pipe(
@@ -1467,6 +1502,33 @@ describe("OpenAI Responses route", () => {
       expect(error).toBeInstanceOf(LLMError)
       expect(error.reason).toMatchObject({ _tag: "InvalidRequest" })
       expect(error.message).toContain("HTTP 400")
+    }),
+  )
+
+  it.effect("accepts nullable fields in a documented streaming error", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(sseEvents({ type: "error", code: "server_error", message: "Retry later", param: null })),
+        ),
+      )
+      expect(response.events.filter(LLMEvent.is.providerError)).toHaveLength(1)
+      expect(response.events.find(LLMEvent.is.providerError)?.message).toBe("server_error: Retry later")
+    }),
+  )
+
+  it.effect("preserves a malformed-frame error instead of masking it as clean EOF", () =>
+    Effect.gen(function* () {
+      const events: LLMEvent[] = []
+      const error = yield* LLMClient.stream(request).pipe(
+        Stream.tap((event) => Effect.sync(() => events.push(event))),
+        Stream.runDrain,
+        Effect.provide(fixedResponse(sseEvents({ type: "response.output_text.delta", delta: { invalid: true } }))),
+        Effect.flip,
+      )
+      expect(error.reason).toMatchObject({ _tag: "InvalidProviderOutput" })
+      expect(error.reason.message).toContain("Invalid")
+      expect(events.filter(LLMEvent.is.providerError)).toEqual([])
     }),
   )
 })
