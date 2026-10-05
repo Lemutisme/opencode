@@ -201,3 +201,41 @@ the existing text-only native reasoning bridge remains optional.
 The goal is not to require a special research workflow for every task. It is to
 let ordinary work produce replaceable methods while keeping responsibility,
 provenance, and permission honest.
+
+## Qualification
+
+The 2026-10-05 implementation is `1ff9c866501ffff83e7640c033e64d4a600d5098`
+on `essential-execution`. Source was committed before the final full Core run
+and native build; subsequent qualification edits are documentation-only.
+
+- Full Core: **1,483 passed, 0 failed**, 5,525 assertions across 180 files.
+- Built-binary version/strategy CLI and lifecycle/research suites: **12 passed,
+  0 failed**, 589 assertions across four files.
+- Core, OpenCode, Schema, Protocol, Server, Client and SDK Next package type
+  checks passed.
+- Linux x64 binary with embedded Web UI built successfully:
+  `0.0.0-essential-execution-1ff9c86650`.
+- Binary SHA-256:
+  `7db6581908abe67c19b619ebf9a400cf8530e32b5cd81ca18c591f9757538078`.
+- The complete offline CLI example above was separately exercised against
+  source. It is a mechanism fixture, not a paid-model or capability experiment.
+
+Final commands run from package directories:
+
+```bash
+# packages/core
+umask 0022
+bun test --timeout 120000 --only-failures
+
+# packages/opencode, after building the committed source
+OPENCODE_TEST_BINARY="$PWD/dist/opencode-linux-x64/bin/opencode" \
+  bun test test/cli/contract-version.test.ts test/cli/contract-strategy.test.ts \
+    test/cli/serve/pro-contract-research-process.test.ts \
+    test/cli/serve/pro-contract-process.test.ts --timeout 120000 --only-failures
+```
+
+Local logs are in `tmp/essential-execution-eval/`. No public Protocol/Schema or
+generated SDK files changed, so generators were not run during measurement.
+The earlier full OpenCode qualification remains historical; it is not counted
+as a fresh full-package run for this increment. No frozen campaign, model
+weights, or production ledger was modified.
