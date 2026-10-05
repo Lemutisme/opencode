@@ -438,3 +438,7 @@ Change gate：本轮只修正执行适配层的计数、输入校验和兼容性
 新增 Research 用例首次定向运行时，把严格模式的既有通用关闭提示误写成 advisory 专用提示；核对源码后只更正新增断言，随后定向通过。该次失败保留在 [focused-process.log](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/focused-process.log)，更正后的日志为 [focused-research.log](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/focused-research.log)。
 
 本次交付为[相对本轮保存工作树的增量补丁](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/incremental.patch)、[验证汇总](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/VERIFICATION.md)和[完整命令及机器记录](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/verification.json)。[保留核验](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/baseline-preservation.json)及[补丁应用核验](/workspace/opencode-blocked-routing-review-validation-20261004T071511582681Z/patch-verification.json)证明 HEAD / 分支 / index 未变，基线中的其他文件及既有修改保留，规划文档严格追加。未提交、未推送、未调用真实模型，也未做演练或试运行；完成后等待 Claude 复核。
+
+### 10.2 第三轮正式运行观察（2026-10-05）
+
+A0 和 B(iii′) 已随 `d51b45c83` 用于第三轮行为冒烟测试。attempt-3 两组的 `session.project_id` 都等于根提交，受保护输入始终未变；签发后的 binding 保存了 `escalate-after-repeat`。正式运行中没有发生输入损坏或 blocked，Git 恢复和连续 blocked 转交都没有被触发，仍以 §7 的测试和演练为准；§9 的残余风险不变。详见[实施记录的第三轮收尾](pro-contract-researcher-native-advisory-implementation.md#2026-10-05第三轮行为冒烟测试与系列收尾)。

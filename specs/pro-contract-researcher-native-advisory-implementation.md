@@ -349,3 +349,48 @@ SDK 全套首次执行在既有 embedded 测试中遇到持续的 SQLite 锁等�
 完整命令、退出码、独立数据库路径、日志哈希和前后对照见[验证汇总](/workspace/opencode-materials-format-validation-20261004T202623472056Z/VERIFICATION.md)及[机器可读记录](/workspace/opencode-materials-format-validation-20261004T202623472056Z/verification.json)。[进程读取证据](/workspace/opencode-materials-format-validation-20261004T202623472056Z/materials-read-evidence.json)保留实际 reviewer 工具结果的位置、材料身份和完整读取核对。[增量补丁](/workspace/opencode-materials-format-validation-20261004T202623472056Z/baseline-delta.patch)相对本轮保存的干净基线生成，已在独立基线文件副本正向应用并核对结果，也已在当前工作树反向检查。
 
 HEAD、分支及 index 保持不变，只有一个生产文件、两个相关测试文件和本实施记录发生变化。未提交、未推送、未运行 generate，未调用真实模型；停在送审工作树，等待 Claude 把关。
+
+## 2026-10-05：第三轮行为冒烟测试与系列收尾
+
+第三轮的代码为 `d51b45c83`，包含 A0（受保护输入在首次启动前提交）、B(iii′)（新原生 binding 默认 `blockedRouting=escalate-after-repeat`）和分行写出的 `materials.json`。任务、两份 brief、模型路由（`gpt-5.6-luna`，Researcher low、reviewer high）、隔离、CPU、固定 `acceptance.mjs`、6 小时 deadline-only 和全部时间参数都与第二轮相同。同一套冻结脚本先后正式尝试了三次。
+
+| 尝试 | 运行写入位置 | 关闭组 | 开启组 |
+| --- | --- | --- | --- |
+| attempt-1 | `/workspace`（MooseFS） | 宿主未就绪，`startup_timeout`，清理 `unconfirmed`；未签发 | 未启动 |
+| attempt-2 | `/workspace`（MooseFS） | `native_handoff`，replay 2 次通过 | 运行 155 秒后，IPC `get` 交付超时停止；未审阅 |
+| attempt-3 | 本地 overlay | `native_handoff`，replay 2 次通过；从签发到清理结束 68 秒 | `native_handoff`，交付前审阅 1 次；从签发到清理结束 258 秒 |
+
+**前两次停止的原因：均是环境问题，与 ProContract 和 advisory 无关。**
+
+- attempt-1：正常启动只需 1.0–1.7 秒。这次宿主在模块加载阶段就停住了，`global.ts` 顶层的 mkdir 一个都没执行，也没有任何 stderr。收到 SIGKILL 后 5 秒仍未退出，监督进程按 `isolate.c` 的回收期限以 126 退出，所以清理记为 `unconfirmed` 是正确的。部署 argv、env 和配置与成功的演练相比只有端口不同。最可能是 FUSE 不可中断等待，但缺少当时的进程状态，未能证实。
+- attempt-2：`host-journal.ts` 在同步写入之前就打上时间戳。response 362 的时间戳与随后的 `delivery_expired` 相隔 50.6 秒，中间只执行了一次 949 字节 CAS 对象的同步写入；该对象的目录项建于 02:42:31，文件 mtime 却是 02:43:21。同组此前已有两次同类卡顿（28.4 秒、16.7 秒），第一次离 30 秒的操作时限只差 1.6 秒。宿主数据库在同一窗口内也没有写入，两个进程几乎同时恢复。据此定位为 `/workspace` 的 I/O 卡顿。
+- attempt-3：把全部运行写入（宿主存储、SQLite、CAS 日志、归档、工作区）移到本地盘，仓库、`node_modules` 和 Bun 仍只读使用原路径。两组 command 到 response 的最长间隔为 60 ms 和 232 ms，没有 timeout。这不是对照实验，但与上述诊断一致。
+
+**attempt-3 的结论：**
+
+- A0：两组的 `session.project_id` 都等于各自的根提交，四份受保护输入从头到尾哈希不变。没有发生输入损坏，Git 恢复路径在正式运行中没有被触发。
+- B(iii′)：签发后、初始和最终的 binding 都保存了 `escalate-after-repeat`。没有 blocked 报告，路由没有被触发。上述两项未触发的路径已有测试和演练覆盖。
+- 交付前节点在真实运行中完整走通：交付被拦截，捕获 9 份材料、`missing=[]`，经可信路由走 high，发出 8 次 reviewer 请求，意见只投递一次并回到原 Session，然后重新交付。从请求到恢复共 135 秒。
+- `materials.json`：reviewer 用 `limit: 2000` 分页读取，第 93 行（`reviewer.instructions`）和第 108 行（`task.brief`）被截断。这是 2026-10-04 实施记录"已知局限"里声明过的情况。两个字段的全文都已在 reviewer 提示中，执行者声明（summary 537 字符，最长一条 uncertainty 196 字符）、`files` 和 `missing` 都完整读到，本次没有信息损失。
+- 审阅质量好坏参半。第 1 条主要问题是错的：reviewer 把 `sbno.py:23` 引作 `einsum('ilj,jd->ilj', …)`，而工具三次返回给它的都是正确的 `'ild,jd->ilj'`；它据此断言单元测试无法运行，这与 replay 结果矛盾。第 2–4 条成立：`reconstruct` 把频率写死、分子里没有 A0（`sbno.py:34`、`:38`）；`SBNO` 是作用于像素的普通 MLP（`sbno.py:41-44`），正是 brief 禁止的"悄悄换成常规图像网络"；`fock_loss` 只是归一化的 MSE（`sbno.py:46`）。
+- Researcher 收到意见后没有改代码。第二次交付重写了 uncertainties，承认重建、系数空间算子和 Fock/density 损失三方面的缺口，第一次交付没有披露这些；对错误的 einsum 指控未作回应。它在签发后 4 分 12 秒交付，距 deadline 还有约 5 小时 55 分。
+- 按两条原则对照：建议没有阻碍收敛，错误的指控也没有导致有害修改；重要节点按设计触发。效果上，review 提高了交付声明的诚实度，没有提高正确性，因为 Researcher 选择了披露后交付，而不是修改。这只是一个样本。按 ProContract 的设计，诚实的 uncertainties 由 Principal 的 `challenge` 来兑现。
+- 关闭组候选的模型作用于系数（`sbno.py:62-65`，`2*(ny+1)` 维），结构上反而更贴近文档。各组只有一个样本，这是 Researcher 自身的随机差异，不是 review 的效果。
+- 用量：正式 44 次请求，合计 1,210,602 tokens，其中 reviewer 8 次、198,995 tokens；预检 4 次、268 tokens 另计。费用未知。
+
+**合同状态：**attempt-2、attempt-3 的四个合同都在各自独立的试运行数据库中，交付停在 `verification`，attempt-2 开启组为 `active`。宿主都已退出，没有作 Principal 认可，也不需要进一步处理。
+
+**操作者收尾副作用：**attempt-3 的离线审计在正式工作区上运行了 `git diff`，刷新了两个 `.git/index` 的 stat 缓存。路径、blob、mode 和根提交未变，前后版本已保存，对证据没有影响。
+
+**系列收尾：**Principal 于 2026-10-05 决定结束第三轮及整个 advisory 行为冒烟系列。机制已在正式运行中验证，不再为未触发的路径追加冒烟测试。
+
+**后续事项（只记录，不在本次实施）：**
+
+1. `materials.json` 的长字符串字段：执行者声明长度没有上限，写长了在分页读取时仍会被截。可从材料中去掉与提示重复的 `brief`、`instructions`，或把长文本写成单独的纯文本文件。
+2. reviewer 错误引用代码：只有一个样本，先观察，不改提示。
+3. Researcher 明知有实质缺口仍提前交付：这是 reviewer 价值的核心问题。可考虑测试 Principal `challenge` 回路或调整 Researcher 档位，但必须保持"只提建议、决定权在 Researcher"，另行讨论。
+4. 今后的长时实验（包括 6 小时 ProgramBench 实验）应把运行写入放在本地盘，结束后回存并核验。MooseFS 在一天内出现三次卡顿，最长约 50 秒。
+5. 离线审计只在副本上运行 git。
+6. 2026-10-02 一节的遗留事项 3（中途节点每轮事务）和 4（SDK embedded 测试的数据库隔离）仍未处理；受保护输入规划 §9 的残余风险不变。
+
+**证据目录：**都在 `/workspace/sbno-native-advisory-preparation-20260924T054618Z/` 下：attempt-1 为 `third-preparation-20261004T213025Z/approved-execution-20261005T005243Z/`，attempt-2 为 `third-attempt-2-20261005T022916Z/`，attempt-3 为 `third-attempt-3-20261005T050601Z/`（本地原件在 `/var/tmp/sbno-native-advisory-local-20261005T050601Z/`，删除需 Principal 明确同意）。三次尝试各有 `RESULTS.md` 和通过核验的封存。
