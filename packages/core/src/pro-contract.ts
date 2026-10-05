@@ -8,6 +8,7 @@ export {
   Capability,
   Challenge,
   Evidence,
+  ExecutionAuthorization,
   Handoff,
   ID,
   Info,

@@ -30,6 +30,7 @@ const protocol = {
 const Selection = Schema.Struct({
   revision: Schema.Number,
   selected: Schema.Number,
+  roles: Schema.Struct({ incumbent: Schema.Number, research_executor: Schema.Number }),
   history: Schema.Array(
     Schema.Struct({ contractID: Schema.String, revision: Schema.Number, bundleHash: Schema.String }),
   ),
@@ -37,7 +38,7 @@ const Selection = Schema.Struct({
 
 describe("contract strategy CLI", () => {
   cliIt.live(
-    "persists local seed authority, resolves both roles, and fails closed after revocation",
+    "persists independent seed authority for both roles and revokes only the selected role",
     ({ home, opencode, llm }) =>
       Effect.gen(function* () {
         const run = (args: string[]) =>
@@ -52,7 +53,8 @@ describe("contract strategy CLI", () => {
         const state = Schema.decodeUnknownSync(Schema.fromJsonString(Selection))(initial.stdout)
         expect(state.revision).toBe(1)
         expect(state.selected).toBe(0)
-        expect(state.history).toHaveLength(1)
+        expect(state.roles).toEqual({ incumbent: 0, research_executor: 1 })
+        expect(state.history).toHaveLength(2)
         expect(state.history[0].bundleHash).toBe(ProContractPolicy.hashBundle(bundle))
 
         const shown = yield* run(["show", "test"])
@@ -61,17 +63,29 @@ describe("contract strategy CLI", () => {
           revision: 1,
           protocol,
           protocolHash: ProContractPromotion.hashProtocol(protocol),
-          history: [{ bundle }],
+          history: [
+            { bundle, role: "incumbent" },
+            { bundle, role: "research_executor" },
+          ],
         })
 
         yield* Effect.forEach(["solver", "generator"] as const, (role) =>
           Effect.gen(function* () {
             const bound = yield* run(["bind", "test", "--role", role])
             opencode.expectExit(bound, 0, `bind ${role}`)
-            expect(Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(bound.stdout)).toEqual({
+            const identity = role === "solver" ? "incumbent" : "research_executor"
+            expect(Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(bound.stdout)).toMatchObject({
               executionPolicy: bundle[role],
-              requirement: { contractID: state.history[0].contractID, revision: state.history[0].revision },
-              identity: { scope: "test", revision: 1, bundleHash: ProContractPolicy.hashBundle(bundle), role },
+              authorization: {
+                contractID: state.history[state.roles[identity]].contractID,
+                revision: state.history[state.roles[identity]].revision,
+              },
+              identity: {
+                scope: "test",
+                revision: 1,
+                bundleHash: ProContractPolicy.hashBundle(bundle),
+                role: identity,
+              },
             })
           }),
         )
@@ -99,9 +113,11 @@ describe("contract strategy CLI", () => {
 
         const revoked = yield* run(["revoke", "test", "--expected-revision", "1", "--evidence-hash", "b".repeat(64)])
         opencode.expectExit(revoked, 0, "revoke seed")
-        const blocked = yield* run(["bind", "test", "--role", "generator"])
+        const blocked = yield* run(["bind", "test", "--role", "solver"])
         expect(blocked.exitCode).not.toBe(0)
         expect(blocked.stderr).toContain("Selected policy support was withdrawn")
+        const research = yield* run(["bind", "test", "--role", "generator"])
+        opencode.expectExit(research, 0, "incumbent revocation preserves independent research grant")
 
         const support = yield* opencode.spawn(["contract", "show", state.history[0].contractID], {
           env: { OPENCODE_DB: path.join(home, "contracts.sqlite") },

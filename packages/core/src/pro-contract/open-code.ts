@@ -18,6 +18,8 @@ export type Binding = {
   readonly location: Location.Ref
   readonly model: Model.Ref
   readonly executionPolicy?: string
+  readonly authorization?: Schema.ExecutionAuthorization
+  readonly mode?: "reason"
   readonly sessionID: SessionSchema.ID
   readonly promptID: SessionMessage.ID
   readonly dispatched: boolean
@@ -46,6 +48,8 @@ export interface Interface {
     readonly location: Location.Ref
     readonly model: Model.Ref
     readonly executionPolicy?: string
+    readonly authorization?: Schema.ExecutionAuthorization
+    readonly mode?: "reason"
     readonly now: number
   }) => Effect.Effect<IssueReceipt>
   readonly create: (input: {
@@ -54,6 +58,8 @@ export interface Interface {
     readonly location: Location.Ref
     readonly model: Model.Ref
     readonly executionPolicy?: string
+    readonly authorization?: Schema.ExecutionAuthorization
+    readonly mode?: "reason"
     readonly nextActionAt: number
   }) => Effect.Effect<Binding>
   readonly claim: (contractID: Schema.ID, now: number) => Effect.Effect<Binding | undefined>
@@ -63,6 +69,8 @@ export interface Interface {
   readonly current: (sessionID: SessionSchema.ID, now: number) => Effect.Effect<Execution | undefined>
   readonly due: (now: number) => Effect.Effect<ReadonlyArray<Binding>>
   readonly heartbeat: (sessionIDs: ReadonlySet<SessionSchema.ID>, now: number) => Effect.Effect<void>
+  /** Withdraw execution only. Accepted results are governed by their own evidence, never their executor's grant. */
+  readonly reconcile: (now: number) => Effect.Effect<ReadonlyArray<SessionSchema.ID>>
   readonly reschedule: (input: {
     readonly contractID: Schema.ID
     readonly revision: number
@@ -89,6 +97,48 @@ export function attemptKey(contract: ProContract.Contract) {
   return contract.revision + ":" + context
 }
 
+/** The caller must read the Contract and act on this check within one transaction. */
+export function authorizationMatches(
+  contract: ProContract.Contract | undefined,
+  authorization: Schema.ExecutionAuthorization,
+) {
+  return (
+    contract?.status === "discharged" &&
+    !contract.pendingRevision &&
+    contract.id === authorization.contractID &&
+    contract.revision === authorization.revision &&
+    contract.specHash === authorization.specHash &&
+    contract.handoff?.subjectHash === authorization.subjectHash &&
+    contract.attestationID === authorization.attestationID
+  )
+}
+
+function sameAuthorization(a?: Schema.ExecutionAuthorization, b?: Schema.ExecutionAuthorization) {
+  return (
+    a?.contractID === b?.contractID &&
+    a?.revision === b?.revision &&
+    a?.specHash === b?.specHash &&
+    a?.subjectHash === b?.subjectHash &&
+    a?.attestationID === b?.attestationID
+  )
+}
+
+export function sameBinding(
+  binding: Binding,
+  input: Pick<Binding, "location" | "model" | "executionPolicy" | "authorization" | "mode">,
+) {
+  return (
+    binding.location.directory === input.location.directory &&
+    binding.location.workspaceID === input.location.workspaceID &&
+    binding.model.id === input.model.id &&
+    binding.model.providerID === input.model.providerID &&
+    (binding.model.variant ?? "default") === (input.model.variant ?? "default") &&
+    binding.executionPolicy === input.executionPolicy &&
+    binding.mode === input.mode &&
+    sameAuthorization(binding.authorization, input.authorization)
+  )
+}
+
 function ownsExecution(execution: Execution, owner: string, now: number) {
   const binding = execution.binding
   const contract = execution.contract
@@ -111,6 +161,31 @@ const layer = Layer.effect(
     const { db } = yield* Database.Service
     const contracts = yield* ProContract.Service
     const owner = crypto.randomUUID()
+
+    const authorized = Effect.fn("ProContractOpenCode.authorized")(function* (
+      authorization?: Schema.ExecutionAuthorization,
+    ) {
+      if (!authorization) return true
+      return authorizationMatches(yield* contracts.get(authorization.contractID), authorization)
+    })
+
+    const withdraw = Effect.fn("ProContractOpenCode.withdraw")(function* (execution: Execution, now: number) {
+      if (
+        execution.contract.status === "discharged" ||
+        execution.contract.status === "released" ||
+        !execution.binding.authorization ||
+        (yield* authorized(execution.binding.authorization))
+      )
+        return false
+      if (execution.contract.status !== "escalated")
+        yield* contracts.escalate({
+          contractID: execution.contract.id,
+          revision: execution.contract.revision,
+          reason: `OpenCode execution authorization withdrawn: ${execution.binding.authorization.contractID}`,
+          time: now,
+        })
+      return true
+    })
 
     const get = Effect.fn("ProContractOpenCode.get")(function* (contractID: Schema.ID) {
       return yield* db
@@ -168,7 +243,12 @@ const layer = Layer.effect(
                 .get()
                 .pipe(Effect.orDie)
               if (!row) return { allowed: false }
+              if (yield* withdraw(row, now)) return { allowed: false }
               if (!ownsExecution(row, owner, now)) return { allowed: false }
+              // A native request ID denotes one observation, not a retryable provider loop. Additional
+              // reasoning needs a new explicit request under the parent's unchanged deadline, not a larger cap.
+              if (kind === "turn" && row.binding.mode === "reason" && row.binding.turnsUsed > 0)
+                return { allowed: false }
               if (now >= row.contract.spec.budget.deadline)
                 return {
                   allowed: false,
@@ -217,61 +297,77 @@ const layer = Layer.effect(
       readonly location: Location.Ref
       readonly model: Model.Ref
       readonly executionPolicy?: string
+      readonly authorization?: Schema.ExecutionAuthorization
+      readonly mode?: "reason"
       readonly nextActionAt: number
     }) {
-      const binding: Binding = {
-        contractID: input.contractID,
-        revision: input.revision,
-        location: input.location,
-        model: input.model,
-        executionPolicy: input.executionPolicy,
-        sessionID: SessionSchema.ID.create(),
-        promptID: SessionMessage.ID.create(),
-        dispatched: false,
-        attempts: 0,
-        nextActionAt: input.nextActionAt,
-        turnsUsed: 0,
-        actionsUsed: 0,
-        attemptKey: `${input.revision}:`,
-      }
-      yield* db
-        .insert(ProContractOpenCodeTable)
-        .values({ contract_id: binding.contractID, session_id: binding.sessionID, data: binding })
-        .onConflictDoNothing()
-        .run()
+      const request = structuredClone(input)
+      return yield* db
+        .transaction(
+          () =>
+            Effect.gen(function* () {
+              const existing = yield* get(request.contractID)
+              if (existing && !sameBinding(existing, request))
+                return yield* Effect.die(new Error("OpenCode execution binding does not match"))
+              if (!(yield* authorized(request.authorization)))
+                return yield* Effect.die(new Error("OpenCode execution authorization is no longer current"))
+              const binding: Binding = existing ?? {
+                contractID: request.contractID,
+                revision: request.revision,
+                location: request.location,
+                model: request.model,
+                executionPolicy: request.executionPolicy,
+                authorization: request.authorization,
+                mode: request.mode,
+                sessionID: SessionSchema.ID.create(),
+                promptID: SessionMessage.ID.create(),
+                dispatched: false,
+                attempts: 0,
+                nextActionAt: request.nextActionAt,
+                turnsUsed: 0,
+                actionsUsed: 0,
+                attemptKey: `${request.revision}:`,
+              }
+              if (!existing)
+                yield* db
+                  .insert(ProContractOpenCodeTable)
+                  .values({ contract_id: binding.contractID, session_id: binding.sessionID, data: binding })
+                  .run()
+                  .pipe(Effect.orDie)
+              yield* db
+                .insert(ProContractOpenCodeSessionTable)
+                .values({ session_id: binding.sessionID, contract_id: binding.contractID })
+                .onConflictDoNothing()
+                .run()
+                .pipe(Effect.orDie)
+              return binding
+            }),
+          { behavior: "immediate" },
+        )
         .pipe(Effect.orDie)
-      const stored = (yield* get(input.contractID)) ?? binding
-      yield* db
-        .insert(ProContractOpenCodeSessionTable)
-        .values({ session_id: stored.sessionID, contract_id: stored.contractID })
-        .onConflictDoNothing()
-        .run()
-        .pipe(Effect.orDie)
-      return stored
     })
 
     return Service.of({
       owner,
       issue: Effect.fn("ProContractOpenCode.issue")(function* (input) {
+        const request = structuredClone(input)
         // The duty, its execution binding, and the Session index are admitted as one durable unit.
         return yield* db
           .transaction(
             () =>
               Effect.gen(function* () {
-                const existing = yield* get(input.id)
-                if (
-                  existing &&
-                  (existing.location.directory !== input.location.directory ||
-                    existing.location.workspaceID !== input.location.workspaceID ||
-                    existing.model.id !== input.model.id ||
-                    existing.model.providerID !== input.model.providerID ||
-                    (existing.model.variant ?? "default") !== (input.model.variant ?? "default") ||
-                    existing.executionPolicy !== input.executionPolicy)
-                ) {
-                  const head = yield* contracts.quiet(input.scope)
+                const existing = yield* get(request.id)
+                const reason =
+                  existing && !sameBinding(existing, request)
+                    ? "OpenCode execution binding does not match"
+                    : !(yield* authorized(request.authorization))
+                      ? "OpenCode execution authorization is no longer current"
+                      : undefined
+                if (reason) {
+                  const head = yield* contracts.quiet(request.scope)
                   // This is an adapter admission rejection, not a Kernel command; report the unchanged ledger head.
                   return {
-                    decision: { type: "rejected" as const, reason: "OpenCode execution binding does not match" },
+                    decision: { type: "rejected" as const, reason },
                     state: {
                       contracts: Object.fromEntries(
                         (yield* contracts.list()).map((contract) => [contract.id, contract]),
@@ -283,19 +379,21 @@ const layer = Layer.effect(
                   }
                 }
                 const receipt = yield* contracts.issue({
-                  id: input.id,
-                  scope: input.scope,
-                  spec: input.spec,
+                  id: request.id,
+                  scope: request.scope,
+                  spec: request.spec,
                   executor: "opencode",
                 })
                 if (receipt.decision.type === "rejected" || !receipt.contract) return receipt
                 const execution = yield* create({
                   contractID: receipt.contract.id,
                   revision: receipt.contract.revision,
-                  location: input.location,
-                  model: input.model,
-                  executionPolicy: input.executionPolicy,
-                  nextActionAt: input.spec.trigger.type === "time" ? input.spec.trigger.at : input.now,
+                  location: request.location,
+                  model: request.model,
+                  executionPolicy: request.executionPolicy,
+                  authorization: request.authorization,
+                  mode: request.mode,
+                  nextActionAt: request.spec.trigger.type === "time" ? request.spec.trigger.at : request.now,
                 })
                 return { ...receipt, execution }
               }),
@@ -317,6 +415,9 @@ const layer = Layer.effect(
                   .get()
                   .pipe(Effect.orDie)
                 if (!row || row.contract.status !== "active" || row.contract.pendingRevision) return {}
+                if (yield* withdraw(row, now)) return {}
+                // A native observation is explicitly owned by its host; never replay a started request.
+                if (row.binding.mode === "reason" && row.binding.attempts > 0) return {}
                 // Transport retries preserve this key; authoritative context changes replace the Session.
                 const key = attemptKey(row.contract)
                 const attemptChanged =
@@ -384,7 +485,12 @@ const layer = Layer.effect(
           .where(eq(ProContractOpenCodeTable.session_id, sessionID))
           .get()
           .pipe(Effect.orDie)
-        return row && ownsExecution(row, owner, now) && now < row.contract.spec.budget.deadline ? row : undefined
+        return row &&
+          ownsExecution(row, owner, now) &&
+          now < row.contract.spec.budget.deadline &&
+          (yield* authorized(row.binding.authorization))
+          ? row
+          : undefined
       }),
       due: Effect.fn("ProContractOpenCode.due")(function* (now) {
         const rows = yield* db
@@ -397,6 +503,8 @@ const layer = Layer.effect(
           .filter(
             (row) =>
               row.contract.status === "active" &&
+              // Native requests are host-owned. The scheduler may only retire them at their original deadline.
+              (row.binding.mode !== "reason" || now >= row.contract.spec.budget.deadline) &&
               !row.contract.pendingRevision &&
               (row.binding.revision !== row.contract.revision ||
                 (row.contract.challenge?.disclosure === "executor" &&
@@ -426,17 +534,37 @@ const layer = Layer.effect(
                       row.contract.status === "active" &&
                       !row.contract.pendingRevision,
                   ),
-                  (row) => {
-                    const expires = Math.min(now + LEASE_MS, row.contract.spec.budget.deadline)
-                    return tx
-                      .update(ProContractOpenCodeTable)
-                      .set({ data: { ...row.binding, nextActionAt: expires, leaseExpiresAt: expires } })
-                      .where(eq(ProContractOpenCodeTable.contract_id, row.binding.contractID))
-                      .run()
-                      .pipe(Effect.orDie)
-                  },
+                  (row) =>
+                    Effect.gen(function* () {
+                      if (yield* withdraw(row, now)) return
+                      const expires = Math.min(now + LEASE_MS, row.contract.spec.budget.deadline)
+                      yield* tx
+                        .update(ProContractOpenCodeTable)
+                        .set({ data: { ...row.binding, nextActionAt: expires, leaseExpiresAt: expires } })
+                        .where(eq(ProContractOpenCodeTable.contract_id, row.binding.contractID))
+                        .run()
+                        .pipe(Effect.orDie)
+                    }),
                   { discard: true },
                 )
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(Effect.orDie)
+      }),
+      reconcile: Effect.fn("ProContractOpenCode.reconcile")(function* (now) {
+        return yield* db
+          .transaction(
+            (tx) =>
+              Effect.gen(function* () {
+                const rows = yield* tx
+                  .select({ binding: ProContractOpenCodeTable.data, contract: ProContractTable.data })
+                  .from(ProContractOpenCodeTable)
+                  .innerJoin(ProContractTable, eq(ProContractTable.id, ProContractOpenCodeTable.contract_id))
+                  .all()
+                  .pipe(Effect.orDie)
+                const withdrawn = yield* Effect.filter(rows, (row) => withdraw(row, now))
+                return withdrawn.map((row) => row.binding.sessionID)
               }),
             { behavior: "immediate" },
           )
@@ -464,6 +592,13 @@ const layer = Layer.effect(
                   !row.binding.dispatched
                 )
                   return undefined
+                if (yield* withdraw(row, input.now)) return undefined
+                if (row.binding.mode === "reason")
+                  return {
+                    contractID: row.contract.id,
+                    revision: row.contract.revision,
+                    reason: "Native reasoning interrupted; automatic replay is forbidden",
+                  }
                 if (row.contract.pendingRevision) {
                   yield* tx
                     .update(ProContractOpenCodeTable)

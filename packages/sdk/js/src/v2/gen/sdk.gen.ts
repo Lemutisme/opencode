@@ -134,6 +134,7 @@ import type {
   ProContractBudget,
   ProContractCapability,
   ProContractEvidence,
+  ProContractExecutionAuthorization,
   ProContractRequirement,
   ProContractResolution,
   ProContractTrigger,
@@ -7041,6 +7042,7 @@ export class ProContract extends HeyApiClient {
       scope?: string
       goal?: string
       executionPolicy?: string
+      authorization?: ProContractExecutionAuthorization
       policy?: string
       brief?: string
       requires?: Array<ProContractRequirement>
@@ -7063,6 +7065,7 @@ export class ProContract extends HeyApiClient {
             { in: "body", key: "scope" },
             { in: "body", key: "goal" },
             { in: "body", key: "executionPolicy" },
+            { in: "body", key: "authorization" },
             { in: "body", key: "policy" },
             { in: "body", key: "brief" },
             { in: "body", key: "requires" },

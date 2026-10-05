@@ -150,7 +150,8 @@ const nativeLayer = (config: Config) =>
     Effect.gen(function* () {
       const native = new DatabaseSync(config.filename, {
         readOnly: config.readonly,
-        timeout: config.timeout,
+        // Install the bounded busy handler before the first WAL access.
+        timeout: config.timeout ?? 5000,
         allowExtension: config.allowExtension,
         enableForeignKeyConstraints: true,
         open: true,

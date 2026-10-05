@@ -6,6 +6,8 @@ import path from "path"
 import type { Argv } from "yargs"
 import { effectCmd, fail } from "../effect-cmd"
 
+const roles = ["incumbent", "research_executor", "solver", "generator"] as const
+
 const AuthorizeCommand = effectCmd({
   command: "authorize",
   describe: "locally authorize a seed and freeze its task-pareto protocol; no improvement is claimed",
@@ -14,7 +16,7 @@ const AuthorizeCommand = effectCmd({
     yargs
       .option("scope", { type: "string", demandOption: true, describe: "new strategy scope" })
       .option("protocol", { type: "string", demandOption: true, describe: "frozen evaluation protocol JSON file" })
-      .option("bundle", { type: "string", demandOption: true, describe: "solver/generator bundle JSON file" }),
+      .option("bundle", { type: "string", demandOption: true, describe: "strategy bundle JSON file" }),
   handler: Effect.fn("Cli.contract.strategy.authorize")(function* (args) {
     const protocol = yield* readJson(args.protocol, ProContractPromotion.Protocol)
     const bundle = yield* readJson(args.bundle, ProContractPolicy.Bundle)
@@ -40,12 +42,14 @@ const ShowCommand = effectCmd({
 
 const BindCommand = effectCmd({
   command: "bind <scope>",
-  describe: "resolve a standing policy and its ordinary Contract requirement without executing it",
+  describe: "resolve a role's execution authorization without adding a result-evidence dependency",
   instance: false,
   builder: (yargs) =>
-    yargs
-      .positional("scope", { type: "string", demandOption: true, describe: "strategy scope" })
-      .option("role", { choices: ["solver", "generator"] as const, demandOption: true, describe: "execution role" }),
+    yargs.positional("scope", { type: "string", demandOption: true, describe: "strategy scope" }).option("role", {
+      choices: roles,
+      demandOption: true,
+      describe: "execution role (solver/generator are aliases)",
+    }),
   handler: Effect.fn("Cli.contract.strategy.bind")(function* (args) {
     const policies = yield* ProContractPolicy.Service
     console.log(JSON.stringify(yield* policies.bind({ scope: args.scope, role: args.role }), null, 2))
@@ -56,15 +60,7 @@ const ProposeCommand = effectCmd({
   command: "propose",
   describe: "issue an ordinary promotion Contract for an exact generated strategy.json handoff",
   instance: false,
-  builder: (yargs) =>
-    withRevision(yargs)
-      .option("scope", { type: "string", demandOption: true, describe: "strategy scope" })
-      .option("bundle", { type: "string", demandOption: true, describe: "generated solver/generator bundle JSON file" })
-      .option("generation", {
-        type: "string",
-        demandOption: true,
-        describe: "JSON file containing the generation Contract's exact contractID, revision, and subjectHash",
-      }),
+  builder: withCandidate,
   handler: Effect.fn("Cli.contract.strategy.propose")(function* (args) {
     const bundle = yield* readJson(args.bundle, ProContractPolicy.Bundle)
     const generation = yield* readJson(args.generation, ProContractPolicy.Generation)
@@ -72,12 +68,35 @@ const ProposeCommand = effectCmd({
     const now = yield* Clock.currentTimeMillis
     const contract = yield* policies.propose({
       scope: args.scope,
-      expectedRevision: args.expectedRevision,
+      expectedRevision: args["expected-revision"],
       bundle,
       generation,
+      targetVersion: args["target-version"],
       now,
     })
     console.log(JSON.stringify(ProContract.info(contract), null, 2))
+  }),
+})
+
+const ArchiveCommand = effectCmd({
+  command: "archive",
+  describe: "retain an exact generated candidate without requesting formal adoption",
+  instance: false,
+  builder: withCandidate,
+  handler: Effect.fn("Cli.contract.strategy.archive")(function* (args) {
+    const bundle = yield* readJson(args.bundle, ProContractPolicy.Bundle)
+    const generation = yield* readJson(args.generation, ProContractPolicy.Generation)
+    const policies = yield* ProContractPolicy.Service
+    const now = yield* Clock.currentTimeMillis
+    const state = yield* policies.archiveCandidate({
+      scope: args.scope,
+      expectedRevision: args["expected-revision"],
+      bundle,
+      generation,
+      targetVersion: args["target-version"],
+      now,
+    })
+    console.log(JSON.stringify(state, null, 2))
   }),
 })
 
@@ -103,27 +122,139 @@ const SettleCommand = effectCmd({
   }),
 })
 
+const SelectResearchCommand = effectCmd({
+  command: "select-research",
+  describe: "authorize an archived candidate to conduct research without adopting it for service",
+  instance: false,
+  builder: (yargs) =>
+    withRevision(yargs)
+      .option("scope", { type: "string", demandOption: true, describe: "strategy scope" })
+      .option("bundle-hash", { type: "string", demandOption: true, describe: "exact archived strategy bundle hash" })
+      .option("qualification", {
+        type: "string",
+        describe: "independent research-use qualification JSON file, not deployment evidence",
+      }),
+  handler: Effect.fn("Cli.contract.strategy.selectResearch")(function* (args) {
+    const qualification =
+      args.qualification === undefined
+        ? undefined
+        : yield* readJson(args.qualification, ProContractPolicy.Qualification)
+    const policies = yield* ProContractPolicy.Service
+    const now = yield* Clock.currentTimeMillis
+    const state = yield* policies.selectResearch({
+      scope: args.scope,
+      expectedRevision: args.expectedRevision,
+      bundleHash: args.bundleHash,
+      qualification,
+      now,
+    })
+    console.log(JSON.stringify(state, null, 2))
+  }),
+})
+
+const RecordExperimentCommand = effectCmd({
+  command: "record-experiment",
+  describe: "retain a source-bound experiment, including negative or inconclusive outcomes",
+  instance: false,
+  builder: (yargs) =>
+    withRevision(yargs)
+      .option("scope", { type: "string", demandOption: true, describe: "strategy scope" })
+      .option("experiment", { type: "string", demandOption: true, describe: "experiment record JSON file" }),
+  handler: Effect.fn("Cli.contract.strategy.recordExperiment")(function* (args) {
+    const experiment = yield* readJson(args.experiment, ProContractPolicy.Experiment)
+    const policies = yield* ProContractPolicy.Service
+    const state = yield* policies.recordExperiment({
+      scope: args.scope,
+      expectedRevision: args.expectedRevision,
+      experiment,
+    })
+    console.log(JSON.stringify(state, null, 2))
+  }),
+})
+
+const CompleteResearchCommand = effectCmd({
+  command: "complete-research",
+  describe: "locally accept an exact research handoff and retain its experiment without granting deployment",
+  instance: false,
+  builder: (yargs) =>
+    withRevision(yargs)
+      .option("scope", { type: "string", demandOption: true, describe: "strategy scope" })
+      .option("generation", { type: "string", demandOption: true, describe: "exact research handoff JSON file" })
+      .option("experiment", {
+        type: "string",
+        demandOption: true,
+        describe: "experiment record and evidence hash JSON file",
+      }),
+  handler: Effect.fn("Cli.contract.strategy.completeResearch")(function* (args) {
+    const generation = yield* readJson(args.generation, ProContractPolicy.Generation)
+    const experiment = yield* readJson(args.experiment, ProContractPolicy.Experiment)
+    const policies = yield* ProContractPolicy.Service
+    const now = yield* Clock.currentTimeMillis
+    const result = yield* policies.completeResearch({
+      scope: args.scope,
+      expectedRevision: args.expectedRevision,
+      generation,
+      experiment,
+      now,
+    })
+    console.log(JSON.stringify({ ...result, contract: ProContract.info(result.contract) }, null, 2))
+  }),
+})
+
+const ViewCommand = effectCmd({
+  command: "view <scope>",
+  describe: "read only the explicitly selected archived versions and experiments",
+  instance: false,
+  builder: (yargs) =>
+    yargs
+      .version(false)
+      .positional("scope", { type: "string", demandOption: true, describe: "strategy scope" })
+      .option("version", { type: "array", string: true, default: [], describe: "archived bundle hashes" })
+      .option("experiment", { type: "array", string: true, default: [], describe: "archived experiment IDs" }),
+  handler: Effect.fn("Cli.contract.strategy.view")(function* (args) {
+    const policies = yield* ProContractPolicy.Service
+    const view = yield* policies.view({
+      scope: args.scope,
+      versionHashes: args.version,
+      experimentIDs: args.experiment,
+    })
+    console.log(JSON.stringify(view, null, 2))
+  }),
+})
+
 const RollbackCommand = effectCmd({
   command: "rollback <scope>",
   describe: "locally select the previous strategy with standing Contract support",
   instance: false,
   builder: (yargs) =>
-    withRevision(yargs).positional("scope", { type: "string", demandOption: true, describe: "strategy scope" }),
+    withRevision(yargs)
+      .positional("scope", { type: "string", demandOption: true, describe: "strategy scope" })
+      .option("role", { choices: roles, default: "incumbent" as const, describe: "role to roll back" }),
   handler: Effect.fn("Cli.contract.strategy.rollback")(function* (args) {
     const policies = yield* ProContractPolicy.Service
     const now = yield* Clock.currentTimeMillis
-    const state = yield* policies.rollback({ scope: args.scope, expectedRevision: args.expectedRevision, now })
+    const state = yield* policies.rollback({
+      scope: args.scope,
+      expectedRevision: args.expectedRevision,
+      role: args.role,
+      now,
+    })
     console.log(JSON.stringify(state, null, 2))
   }),
 })
 
 const RevokeCommand = effectCmd({
   command: "revoke <scope>",
-  describe: "locally withdraw selected strategy support and close dependent execution",
+  describe: "locally withdraw a role's execution authorization without invalidating independent results",
   instance: false,
   builder: (yargs) =>
     withRevision(yargs)
       .positional("scope", { type: "string", demandOption: true, describe: "strategy scope" })
+      .option("role", {
+        choices: roles,
+        default: "incumbent" as const,
+        describe: "role whose authorization is withdrawn",
+      })
       .option("evidence-hash", { type: "string", demandOption: true, describe: "SHA-256 of the revocation evidence" })
       .check(
         (args) => /^[a-f0-9]{64}$/.test(args["evidence-hash"]) || "--evidence-hash must be a lowercase SHA-256 digest",
@@ -135,6 +266,7 @@ const RevokeCommand = effectCmd({
       scope: args.scope,
       expectedRevision: args.expectedRevision,
       evidenceHash: args.evidenceHash,
+      role: args.role,
       now,
     })
     console.log(JSON.stringify(state, null, 2))
@@ -150,13 +282,34 @@ export const ContractStrategyCommand = effectCmd({
       .command(AuthorizeCommand)
       .command(ShowCommand)
       .command(BindCommand)
+      .command(ArchiveCommand)
       .command(ProposeCommand)
       .command(SettleCommand)
+      .command(SelectResearchCommand)
+      .command(RecordExperimentCommand)
+      .command(CompleteResearchCommand)
+      .command(ViewCommand)
       .command(RollbackCommand)
       .command(RevokeCommand)
       .demandCommand(),
   handler: Effect.fn("Cli.contract.strategy")(function* () {}),
 })
+
+function withCandidate(yargs: Argv) {
+  return withRevision(yargs)
+    .option("scope", { type: "string", demandOption: true, describe: "strategy scope" })
+    .option("bundle", { type: "string", demandOption: true, describe: "generated strategy bundle JSON file" })
+    .option("target-version", {
+      type: "string",
+      describe: "bundle hash modified by this research, not its executor",
+    })
+    .option("generation", {
+      type: "string",
+      demandOption: true,
+      describe:
+        "JSON file containing the generation Contract's exact contractID, revision, subjectHash, and optional runID",
+    })
+}
 
 function withRevision(yargs: Argv) {
   return yargs

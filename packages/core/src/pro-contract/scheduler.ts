@@ -21,6 +21,10 @@ const layer = Layer.effect(
 
     const runOnce = Effect.fn("ProContractScheduler.runOnce")(function* () {
       const now = yield* Clock.currentTimeMillis
+      // Withdrawing a method stops unfinished execution without challenging its independently accepted outputs.
+      yield* Effect.forEach(yield* bindings.reconcile(now), (sessionID) => sessions.interrupt(sessionID), {
+        discard: true,
+      })
       yield* Effect.forEach(
         yield* contracts.due(now),
         (contract) =>
@@ -38,7 +42,8 @@ const layer = Layer.effect(
               return
             }
             if (contract.executor !== "opencode") return
-            if (!(yield* bindings.get(contract.id))) {
+            const binding = yield* bindings.get(contract.id)
+            if (!binding) {
               yield* contracts.escalate({
                 contractID: contract.id,
                 revision: contract.revision,
@@ -47,6 +52,7 @@ const layer = Layer.effect(
               })
               return
             }
+            if (binding.mode === "reason") return
             yield* contracts.activate(contract.id, contract.revision, now)
           }),
         { discard: true },
@@ -113,6 +119,7 @@ const layer = Layer.effect(
                 delivery: "queue" as const,
               }
               yield* sessions.prompt({ ...prompt, resume: false })
+              if (!(yield* bindings.current(current.sessionID, yield* Clock.currentTimeMillis))) return
               yield* sessions.prompt(prompt)
             }).pipe(
               Effect.catchCause((cause) =>

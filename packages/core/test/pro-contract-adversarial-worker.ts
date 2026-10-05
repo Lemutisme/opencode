@@ -70,10 +70,11 @@ const propose = Effect.fnUntraced(function* (project: string, bundle: ProContrac
   const issued = yield* bindings.issue({
     id,
     scope: "generation",
-    spec: { ...ProContract.defaultSpec("Produce frozen strategy.json", 0), requires: [bound.requirement] },
+    spec: ProContract.defaultSpec("Produce frozen strategy.json", 0),
     location: { directory: AbsolutePath.make(project) },
     model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("fixture"), id: ModelV2.ID.make("no-provider") }),
     executionPolicy: bound.executionPolicy,
+    authorization: bound.authorization,
     now: 0,
   })
   assert.equal(issued.decision.type, "accepted")
@@ -122,9 +123,10 @@ const observe = Effect.gen(function* () {
 export type Observation = Effect.Success<typeof observe>
 
 if (import.meta.main) {
-  const [stage, directory, contractID] = process.argv.slice(2)
+  const [stage, directory, contractID, opening] = process.argv.slice(2)
   assert(stage && directory)
   const project = path.join(directory, "project")
+  if (opening) await Bun.write(opening, "opening database")
   const result = await Effect.runPromise(
     Effect.gen(function* () {
       const policies = yield* ProContractPolicy.Service
@@ -139,7 +141,7 @@ if (import.meta.main) {
         }
         const settled = yield* policies.settle({ contractID: first.id, evidence: evidence(candidate), now: 4 })
         assert(settled.decision.eligible)
-        assert.equal(settled.state.selected, 1)
+        assert.equal(settled.state.selected, 2)
         assert.deepEqual(settled.state.retainedFull, ["development:task"])
         return yield* observe
       }
@@ -190,7 +192,7 @@ if (import.meta.main) {
         assert.equal(before.state.selected, 0)
         assert.equal((yield* policies.bind({ scope, role: "solver" })).executionPolicy, seed.solver)
         const historical = yield* policies.settle({
-          contractID: before.state.history[1].contractID,
+          contractID: before.state.history[2].contractID,
           evidence: evidence(candidate),
           now: 200,
         })

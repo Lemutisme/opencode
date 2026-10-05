@@ -1,6 +1,13 @@
-# ProContract with opt-in RSI: delivery scope
+# Historical ProContract with opt-in RSI: delivery scope
 
-This release path is a **local, cooperative CLI/API product**: durable task
+> **Historical scope: `contract-delivery@431324f412` and its original binaries.**
+> The qualification records below remain unchanged. For the `research-execution`
+> implementation, use [replaceable research and execution methods](pro-contract-research-execution.md).
+> Its independent roles and execution authorization replace the shared selected
+> bundle and automatic `requires` injection described here. This document is not
+> a current operating recipe or evidence that a new binary passed the old tests.
+
+That release path was a **local, cooperative CLI/API product**: durable task
 responsibility plus explicitly authorized strategy succession. It is not an
 autonomous capability-gain claim, a distributed execution system, or an
 OS-enforced principal/executor security boundary.

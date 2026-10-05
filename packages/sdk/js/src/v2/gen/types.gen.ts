@@ -6160,6 +6160,14 @@ export type ProjectCopyCopy = {
   directory: string
 }
 
+export type ProContractExecutionAuthorization = {
+  contractID: string
+  revision: number
+  specHash: string
+  subjectHash: string
+  attestationID: string
+}
+
 export type ProContractRequirement = {
   contractID: string
   revision: number
@@ -6297,6 +6305,8 @@ export type ProContractOpenCodeExecution = {
   location: LocationRef
   model: ModelRef
   executionPolicy?: string
+  authorization?: ProContractExecutionAuthorization
+  mode?: "reason"
   sessionID: string
   promptID: string
   dispatched: boolean
@@ -13793,6 +13803,7 @@ export type V2ProContractIssueData = {
     scope: string
     goal: string
     executionPolicy?: string
+    authorization?: ProContractExecutionAuthorization
     policy?: string
     brief?: string
     requires?: Array<ProContractRequirement>

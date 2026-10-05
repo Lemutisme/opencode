@@ -21,14 +21,15 @@ async function fixture() {
   return temporary
 }
 
-async function run(directory: string, stage: string, contractID?: ProContract.ID) {
+async function run(directory: string, stage: string, contractID?: ProContract.ID, opening?: string) {
   const child = Bun.spawn(
     [
       process.execPath,
       path.join(import.meta.dir, "pro-contract-adversarial-worker.ts"),
       stage,
       directory,
-      ...(contractID ? [contractID] : []),
+      ...(contractID || opening ? [contractID ?? ""] : []),
+      ...(opening ? [opening] : []),
     ],
     {
       cwd: path.join(import.meta.dir, ".."),
@@ -60,6 +61,33 @@ async function run(directory: string, stage: string, contractID?: ProContract.ID
 }
 
 describe("ProContract adversarial process persistence", () => {
+  test("waits for a concurrent startup lock before reading the unchanged policy", async () => {
+    await using temporary = await fixture()
+    const seeded = await run(temporary.path, "race-seed")
+    const { Database } = await import("bun:sqlite")
+    using database = new Database(path.join(temporary.path, "policy.db"))
+    // Switching from rollback journaling forces the first WAL pragma to take a lock.
+    database.run("PRAGMA journal_mode = DELETE")
+    database.run("BEGIN EXCLUSIVE")
+    const opening = path.join(temporary.path, "opening")
+    const observed = run(temporary.path, "observe", undefined, opening).then(
+      (result) => ({ result }),
+      (error: unknown) => ({ error }),
+    )
+    const deadline = Date.now() + 10_000
+    while (!(await Bun.file(opening).exists())) {
+      if (Date.now() >= deadline) throw new Error("Database worker did not reach initialization")
+      await Bun.sleep(10)
+    }
+    const waiting = await Promise.race([observed.then(() => false), Bun.sleep(200).then(() => true)])
+    database.run("COMMIT")
+    const completed = await observed
+    if ("error" in completed) throw completed.error
+    expect(waiting).toBe(true)
+    expect(completed.result.state).toEqual(seeded.state)
+    expect(completed.result.support).toEqual(seeded.support)
+  }, 30_000)
+
   test("restart preserves policy evidence, explicit withdrawal, and historical full-pass protection", async () => {
     await using temporary = await fixture()
     const promoted = await run(temporary.path, "promote")
@@ -73,8 +101,8 @@ describe("ProContract adversarial process persistence", () => {
     expect(withdrawn.state.revision).toBe(4)
     expect(withdrawn.state.selected).toBe(0)
     expect(withdrawn.state.retainedFull).toEqual(["development:task"])
-    expect(withdrawn.support[1].contract?.status).toBe("escalated")
-    expect(withdrawn.support[1].attestation).toBeUndefined()
+    expect(withdrawn.support[2].contract?.status).toBe("escalated")
+    expect(withdrawn.support[2].attestation).toBeUndefined()
     const retried = await run(temporary.path, "withdrawn-retry")
     expect(retried.state).toEqual(withdrawn.state)
     expect(retried.support).toEqual(withdrawn.support)
@@ -105,8 +133,8 @@ describe("ProContract adversarial process persistence", () => {
     expect(results.map((result) => result.contract?.status).toSorted()).toEqual(["discharged", "dormant"])
     const recovered = await run(temporary.path, "observe")
     expect(recovered.state.revision).toBe(2)
-    expect(recovered.state.history).toHaveLength(2)
+    expect(recovered.state.history).toHaveLength(3)
     expect(recovered.state.evaluations).toHaveLength(1)
-    expect(results.find((result) => result.accepted)?.contract?.id).toBe(recovered.state.history[1].contractID)
+    expect(results.find((result) => result.accepted)?.contract?.id).toBe(recovered.state.history[2].contractID)
   }, 120_000)
 })

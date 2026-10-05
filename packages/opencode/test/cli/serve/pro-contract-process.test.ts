@@ -281,11 +281,24 @@ describe("ProContract release lifecycle (subprocess)", () => {
           "--evidence",
           path.join(home, "evidence.json"),
         ])
-        expect(settlement).toMatchObject({ state: { revision: 2, selected: 1 }, decision: { eligible: true } })
+        expect(settlement).toMatchObject({ state: { revision: 2, selected: 2 }, decision: { eligible: true } })
         expect((yield* contract(server.url, proposal.id)).status).toBe("discharged")
         expect(
           yield* cli(["contract", "strategy", "settle", proposal.id, "--evidence", path.join(home, "evidence.json")]),
         ).toEqual(settlement)
+
+        // Adoption changes service only; continuing research is a separate, explicit authorization.
+        yield* cli([
+          "contract",
+          "strategy",
+          "select-research",
+          "--scope",
+          "process-rsi",
+          "--expected-revision",
+          "2",
+          "--bundle-hash",
+          coordinates.candidateHash,
+        ])
 
         yield* llm.reset
         const next = { ...successor, generator: "NEXT_GENERATOR_POLICY" }
@@ -303,8 +316,8 @@ describe("ProContract release lifecycle (subprocess)", () => {
         expect(yield* Effect.promise(() => Bun.file(path.join(directory, "strategy.json")).json())).toEqual(next)
 
         expect(
-          yield* cli(["contract", "strategy", "rollback", "process-rsi", "--expected-revision", "2"]),
-        ).toMatchObject({ revision: 3, selected: 0 })
+          yield* cli(["contract", "strategy", "rollback", "process-rsi", "--expected-revision", "3"]),
+        ).toMatchObject({ revision: 4, selected: 0 })
         yield* llm.reset
         yield* llm.tool("contract_report_ready", { summary: "Consumed the restored seed solver.", uncertainties: [] })
         yield* issue("pct_process_rollback", "solver")

@@ -25,6 +25,8 @@ export const OpenCodeExecution = Schema.Struct({
   location: Location.Ref,
   model: Model.Ref,
   executionPolicy: Schema.NonEmptyString.pipe(optional),
+  authorization: ProContract.ExecutionAuthorization.pipe(optional),
+  mode: Schema.Literal("reason").pipe(optional),
   sessionID: SessionID,
   promptID: SessionMessage.ID,
   dispatched: Schema.Boolean,
@@ -44,6 +46,7 @@ export const ProContractGroup = HttpApiGroup.make("server.proContract")
         scope: Schema.NonEmptyString,
         goal: Schema.NonEmptyString,
         executionPolicy: Schema.NonEmptyString.pipe(Schema.optional),
+        authorization: ProContract.ExecutionAuthorization.pipe(optional),
         policy: Schema.NonEmptyString.pipe(Schema.optional).annotate({
           description: "Deprecated alias for executionPolicy.",
         }),

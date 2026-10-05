@@ -40,7 +40,7 @@ const controls = [
   { name: "contract_report_blocked", input: { reason: "The prerequisite is unavailable" } },
   { name: "contract_propose_revision", input: { goal: "Deliver the approved revision", reason: "Clarify the target" } },
 ]
-const stale = { type: "error", value: "Contract execution is no longer current for this Session" }
+const stale = { type: "error", value: "Contract execution is no longer current for this Session" } as const
 
 describe("Contract control fencing through ToolRegistry", () => {
   controls.forEach((control) => {

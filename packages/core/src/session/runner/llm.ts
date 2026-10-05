@@ -97,6 +97,8 @@ import { llmClient } from "../../effect/app-node-platform"
 
 const SETTLEMENT_WINDOW = 20
 const MAX_PROVIDER_TURN_MS = 15 * 60 * 1_000
+const REASON_SYSTEM =
+  "Answer the supplied request using only its text. Return text only. No tools, external actions, or independent completion authority are available."
 
 const layer = Layer.effect(
   Service,
@@ -197,8 +199,11 @@ const layer = Layer.effect(
       const session = yield* getSession(sessionID)
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
-      const agent = yield* agents.select(session.agent)
       const contractBinding = yield* contractBindings.forSession(session.id)
+      const reason = contractBinding?.mode === "reason"
+      // A logical reason request is consumed once, including provider failures. A retry needs a new request identity.
+      if (reason && contractBinding.turnsUsed > 0) return { needsContinuation: false, step }
+      const agent = reason ? { id: AgentV2.ID.make("reason"), info: undefined } : yield* agents.select(session.agent)
       const contract = contractBinding ? yield* contracts.get(contractBinding.contractID) : undefined
       const now = yield* Clock.currentTimeMillis
       const contractAttemptChanged =
@@ -209,11 +214,9 @@ const layer = Layer.effect(
             contract.challenge?.disclosure === "executor" ||
             contract.blocked !== undefined
           : contractBinding.attemptKey !== ProContractOpenCode.attemptKey(contract))
-      const initialized = yield* SessionContextEpoch.initialize(
-        db,
-        loadSystemContext(agent, contractBinding !== undefined),
-        session.id,
-      )
+      const initialized = reason
+        ? undefined
+        : yield* SessionContextEpoch.initialize(db, loadSystemContext(agent, contractBinding !== undefined), session.id)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
       let currentStep = step
@@ -252,20 +255,40 @@ const layer = Layer.effect(
         })
         return { needsContinuation: false, step: currentStep }
       }
-      const system =
-        initialized ??
-        (yield* SessionContextEpoch.prepare(
-          db,
-          events,
-          loadSystemContext(agent, contractBinding !== undefined),
-          session.id,
-        ))
+      // The host's explicit text view is the entire context boundary, not the ambient Location or Session history.
+      const system = reason
+        ? { baseline: REASON_SYSTEM, baselineSeq: 0 }
+        : (initialized ??
+          (yield* SessionContextEpoch.prepare(
+            db,
+            events,
+            loadSystemContext(agent, contractBinding !== undefined),
+            session.id,
+          )))
+      const admitted = reason ? yield* SessionInput.find(db, contractBinding.promptID) : undefined
+      if (
+        reason &&
+        (!admitted ||
+          admitted.sessionID !== session.id ||
+          admitted.promotedSeq === undefined ||
+          admitted.prompt.files?.length ||
+          admitted.prompt.agents?.length)
+      ) {
+        yield* contracts.escalate({
+          contractID: contractBinding.contractID,
+          revision: contractBinding.revision,
+          reason: "Reason execution requires its exact admitted text-only prompt",
+          time: now,
+        })
+        return { needsContinuation: false, step: currentStep }
+      }
       const model = yield* models.resolve(session)
       if (process.env.OPENCODE_RUNTIME_GC === "1" && typeof Bun !== "undefined") Bun.gc(true)
-      const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
+      const entries = reason ? [] : yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       // An issued Contract without a turn ceiling must not inherit a generic agent step ceiling.
       const isLastStep =
+        !reason &&
         !(contract && contract.spec.budget.turns === undefined) &&
         agent.info?.steps !== undefined &&
         currentStep >= agent.info.steps
@@ -324,17 +347,19 @@ const layer = Layer.effect(
             { action: "contract_report_blocked", resource: "*", effect: "deny" as const },
             { action: "contract_propose_revision", resource: "*", effect: "deny" as const },
           ]
-      const toolMaterialization = isLastStep
-        ? undefined
-        : yield* tools.materialize([
-            ...(agent.info?.permissions ?? []),
-            ...contractPermissions,
-            ...(observationPolicy === "off" || (observationPolicy === "contract" && !contractBinding)
-              ? [{ action: SessionObservationPack.toolName, resource: "*", effect: "deny" as const }]
-              : []),
-          ])
+      const toolMaterialization =
+        reason || isLastStep
+          ? undefined
+          : yield* tools.materialize([
+              ...(agent.info?.permissions ?? []),
+              ...contractPermissions,
+              ...(observationPolicy === "off" || (observationPolicy === "contract" && !contractBinding)
+                ? [{ action: SessionObservationPack.toolName, resource: "*", effect: "deny" as const }]
+                : []),
+            ])
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const settlementWindow =
+        !reason &&
         contract?.status === "active" &&
         contractBinding !== undefined &&
         ((contract.spec.budget.turns !== undefined &&
@@ -353,16 +378,18 @@ const layer = Layer.effect(
           },
         },
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline]
+        system: [reason ? undefined : agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [
-          ...toLLMMessages(
-            toolMaterialization?.definitions.some((tool) => tool.name === SessionObservationPack.toolName)
-              ? SessionObservationPack.project(context)
-              : context,
-            model,
-          ),
+          ...(reason && admitted
+            ? [Message.make({ id: admitted.id, role: "user", content: admitted.prompt.text })]
+            : toLLMMessages(
+                toolMaterialization?.definitions.some((tool) => tool.name === SessionObservationPack.toolName)
+                  ? SessionObservationPack.project(context)
+                  : context,
+                model,
+              )),
           ...(settlementWindow
             ? [
                 Message.system(
@@ -373,25 +400,26 @@ const layer = Layer.effect(
           ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : []),
         ],
         tools: toolMaterialization?.definitions ?? [],
-        toolChoice: isLastStep ? "none" : undefined,
+        toolChoice: reason || isLastStep ? "none" : undefined,
       })
       const request = LLM.updateRequest(originalRequest, {
         messages: ContextBudget.selectMedia(originalRequest.messages),
       })
       const deadline = contract?.spec.budget.deadline
       if (
-        yield* compaction.compactIfNeeded({
+        !reason &&
+        (yield* compaction.compactIfNeeded({
           sessionID: session.id,
           entries,
           model,
           request,
           deadline,
-        })
+        }))
       )
         return yield* Effect.die(continueAfterCompaction(currentStep))
       if (contractBinding && !(yield* contractBindings.reserveTurn(session.id, yield* Clock.currentTimeMillis)))
         return { needsContinuation: false, step: currentStep }
-      const startSnapshot = yield* snapshots.capture()
+      const startSnapshot = reason ? undefined : yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
         agent: agent.id,
@@ -411,6 +439,17 @@ const layer = Layer.effect(
         Stream.timeoutOrElse({ duration: "10 minutes", orElse: () => Stream.fromEffect(Effect.interrupt) }),
         Stream.runForEach((event) =>
           Effect.gen(function* () {
+            if (reason && event.type.startsWith("tool-")) {
+              const message = "Reason provider violated the text-only execution boundary"
+              yield* publish(LLMEvent.providerError({ message }))
+              yield* contracts.escalate({
+                contractID: contractBinding.contractID,
+                revision: contractBinding.revision,
+                reason: message,
+                time: yield* Clock.currentTimeMillis,
+              })
+              return yield* Effect.interrupt
+            }
             if (
               overflowFailure ||
               (publisher.hasProviderError() && event.type !== "step-finish" && event.type !== "finish")
@@ -475,6 +514,7 @@ const layer = Layer.effect(
           const failure =
             stream._tag === "Failure" ? Option.getOrUndefined(Cause.findErrorOption(stream.cause)) : undefined
           if (
+            !reason &&
             recoverOverflow &&
             !publisher.hasAssistantStarted() &&
             isContextOverflowFailure(overflowFailure ?? failure) &&
@@ -534,7 +574,7 @@ const layer = Layer.effect(
             )
           const stepSettlement = publisher.stepSettlement()
           if (stepSettlement) {
-            const endSnapshot = yield* snapshots.capture()
+            const endSnapshot = reason ? undefined : yield* snapshots.capture()
             const files =
               startSnapshot && endSnapshot
                 ? yield* snapshots
@@ -606,6 +646,10 @@ const layer = Layer.effect(
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
+      if ((yield* contractBindings.forSession(input.sessionID))?.mode === "reason") {
+        yield* runTurn(input.sessionID, hasSteer ? "steer" : hasQueue ? "queue" : undefined, 1)
+        return
+      }
       yield* failInterruptedTools(input.sessionID)
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue

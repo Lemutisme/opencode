@@ -161,6 +161,8 @@ const nativeLayer = (config: Config) =>
         create: config.create ?? true,
       })
       yield* Effect.addFinalizer(() => Effect.sync(() => native.close()))
+      // WAL initialization can race another process before Database.Service is acquired.
+      native.run("PRAGMA busy_timeout = 5000;")
       if (config.disableWAL !== true) native.run("PRAGMA journal_mode = WAL;")
       return native
     }),

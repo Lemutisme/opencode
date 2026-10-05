@@ -60,6 +60,8 @@ import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
 import { ProContractScheduler } from "@opencode-ai/core/pro-contract/scheduler"
 import { ProContractPolicy } from "@opencode-ai/core/pro-contract/policy"
+import { ProContractRun } from "@opencode-ai/core/pro-contract/run"
+import { Global } from "@opencode-ai/core/global"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -89,6 +91,8 @@ export const AppLayer = AppNodeBuilderV1.build(
     ProContractOpenCode.node,
     ProContractScheduler.node,
     ProContractPolicy.node,
+    ProContractRun.node,
+    Global.node,
     SessionStatus.node,
     BackgroundJob.node,
     RuntimeFlags.node,

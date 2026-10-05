@@ -106,11 +106,11 @@ describe("persisted ProContract upgrades", () => {
             spec: {
               ...ProContract.defaultSpec("Current deadline-only admission", historicalTime),
               budget: { deadline: historicalTime + 21_600_000 },
-              requires: [selected.requirement],
             },
             location: { directory: AbsolutePath.make(tmp.path) },
             model: ModelV2.Ref.make({ providerID: ProviderV2.ID.make("fixture"), id: ModelV2.ID.make("no-call") }),
             executionPolicy: selected.executionPolicy,
+            authorization: selected.authorization,
             now: historicalTime,
           })).decision.type,
         ).toBe("accepted")

@@ -59,6 +59,7 @@ export const ProContractHandler = HttpApiBuilder.group(Api, "server.proContract"
             location: ctx.payload.location,
             model: ctx.payload.model,
             executionPolicy,
+            authorization: ctx.payload.authorization,
             now,
           })
           if (issued.decision.type === "rejected")

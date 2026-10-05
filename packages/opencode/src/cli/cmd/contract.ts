@@ -12,6 +12,7 @@ import type { Argv } from "yargs"
 import { effectCmd, fail } from "../effect-cmd"
 import { cmd } from "./cmd"
 import { ContractStrategyCommand } from "./contract-strategy"
+import { ContractVersionCommand } from "./contract-version"
 
 const IssueCommand = effectCmd({
   command: "issue",
@@ -24,7 +25,10 @@ const IssueCommand = effectCmd({
       .option("goal", { type: "string", demandOption: true, describe: "optimization objective" })
       .option("execution-policy", { type: "string", describe: "executor strategy kept outside Contract terms" })
       .option("strategy", { type: "string", describe: "authorized policy scope to consume" })
-      .option("strategy-role", { choices: ["solver", "generator"] as const, default: "solver" as const })
+      .option("strategy-role", {
+        choices: ["incumbent", "research_executor", "solver", "generator"] as const,
+        default: "incumbent" as const,
+      })
       .option("claim", { type: "string", describe: "exact proposition the evidence may settle" })
       .option("brief", { type: "string", describe: "context for the future executor" })
       .option("require", { type: "array", string: true, describe: "required Contract as ID@revision" })
@@ -80,23 +84,13 @@ const IssueCommand = effectCmd({
               ? yield* policies.bind({ scope: args.strategy, role: args.strategyRole })
               : undefined
             const executionPolicy = policy?.executionPolicy ?? args.executionPolicy
+            if (policy?.versionHash) return yield* fail("Executable strategies must run through contract version run")
             const dependencies = args.require === undefined ? base.requires : requires
-            if (
-              policy &&
-              dependencies.some(
-                (item) =>
-                  item.contractID === policy.requirement.contractID && item.revision !== policy.requirement.revision,
-              )
-            )
-              return yield* fail("Strategy dependency revision conflicts with the selected policy")
             const spec = {
               ...base,
               goal: args.goal,
               brief: args.brief ?? base.brief,
-              requires:
-                policy && !dependencies.some((item) => item.contractID === policy.requirement.contractID)
-                  ? [...dependencies, policy.requirement]
-                  : dependencies,
+              requires: dependencies,
               authority: args.write
                 ? (["filesystem.read", "filesystem.write", "process.execute"] as const)
                 : base.authority,
@@ -117,6 +111,7 @@ const IssueCommand = effectCmd({
                 location: { directory: AbsolutePath.make(process.cwd()) },
                 model: executionModel,
                 executionPolicy,
+                authorization: policy?.authorization,
                 now,
               }),
             }
@@ -414,6 +409,7 @@ export const ContractCommand = effectCmd({
     yargs
       .command(IssueCommand)
       .command(ContractStrategyCommand)
+      .command(ContractVersionCommand)
       .command(EvaluationCommand)
       .command(SweepCommand)
       .command(ListCommand)

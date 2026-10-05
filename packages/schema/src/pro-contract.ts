@@ -22,6 +22,19 @@ export const Requirement = Schema.Struct({
 }).annotate({ identifier: "ProContract.Requirement" })
 export interface Requirement extends Schema.Schema.Type<typeof Requirement> {}
 
+export const ExecutionAuthorization = Schema.Struct({
+  contractID: ID,
+  revision: PositiveInt,
+  specHash: Schema.NonEmptyString,
+  subjectHash: Schema.NonEmptyString,
+  attestationID: AttestationID,
+}).annotate({
+  identifier: "ProContract.ExecutionAuthorization",
+  description:
+    "Exact independent authorization for an execution method. Withdrawal stops unfinished execution, not independently accepted results. This is not a result-evidence requirement.",
+})
+export interface ExecutionAuthorization extends Schema.Schema.Type<typeof ExecutionAuthorization> {}
+
 export const Trigger = Schema.Union([
   Schema.Struct({ type: Schema.Literal("immediate") }),
   Schema.Struct({ type: Schema.Literal("time"), at: NonNegativeInt }),

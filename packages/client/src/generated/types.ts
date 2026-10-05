@@ -2820,6 +2820,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -2855,6 +2862,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -2890,6 +2904,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -2925,6 +2946,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -2955,11 +2983,60 @@ export type ServerProContractIssueInput = {
     } | null
     readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
   }["executionPolicy"]
+  readonly authorization?: {
+    readonly id?: string | null
+    readonly scope: string
+    readonly goal: string
+    readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
+    readonly policy?: string | null
+    readonly brief?: string | null
+    readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly trigger?: ({ readonly type: "immediate" } | { readonly type: "time"; readonly at: number }) | null
+    readonly authority?: ReadonlyArray<string> | null
+    readonly budget?: { readonly turns?: number; readonly actions?: number; readonly deadline: number } | null
+    readonly evidence?: {
+      readonly type: "principal"
+      readonly claim?: string
+      readonly replay?: {
+        readonly checks: ReadonlyArray<{
+          readonly argv: ReadonlyArray<string>
+          readonly cwd?: string
+          readonly stdin?: string
+          readonly observations?: ReadonlyArray<{
+            readonly id: string
+            readonly stream: "stdout" | "stderr"
+            readonly hash: string
+          }>
+          readonly timeout: number
+          readonly exit: number
+        }>
+        readonly protected: ReadonlyArray<{ readonly path: string; readonly hash: string }>
+        readonly artifacts: ReadonlyArray<string>
+      }
+    } | null
+    readonly resolution?: { readonly maxAttempts: number; readonly retryDelay: number } | null
+  }["authorization"]
   readonly policy?: {
     readonly id?: string | null
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -2995,6 +3072,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3030,6 +3114,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3065,6 +3156,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3100,6 +3198,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3135,6 +3240,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3170,6 +3282,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3205,6 +3324,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3240,6 +3366,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3275,6 +3408,13 @@ export type ServerProContractIssueInput = {
     readonly scope: string
     readonly goal: string
     readonly executionPolicy?: string | null
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
     readonly policy?: string | null
     readonly brief?: string | null
     readonly requires?: ReadonlyArray<{ readonly contractID: string; readonly revision: number }> | null
@@ -3409,6 +3549,14 @@ export type ServerProContractIssueOutput = {
     readonly location: { readonly directory: string; readonly workspaceID?: string }
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly executionPolicy?: string
+    readonly authorization?: {
+      readonly contractID: string
+      readonly revision: number
+      readonly specHash: string
+      readonly subjectHash: string
+      readonly attestationID: string
+    }
+    readonly mode?: "reason"
     readonly sessionID: string
     readonly promptID: string
     readonly dispatched: boolean
@@ -3641,6 +3789,14 @@ export type ServerProContractExecutionOutput = {
   readonly location: { readonly directory: string; readonly workspaceID?: string }
   readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
   readonly executionPolicy?: string
+  readonly authorization?: {
+    readonly contractID: string
+    readonly revision: number
+    readonly specHash: string
+    readonly subjectHash: string
+    readonly attestationID: string
+  }
+  readonly mode?: "reason"
   readonly sessionID: string
   readonly promptID: string
   readonly dispatched: boolean

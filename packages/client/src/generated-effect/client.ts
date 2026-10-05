@@ -687,6 +687,7 @@ type Endpoint18_0Input = {
   readonly scope: Endpoint18_0Request["payload"]["scope"]
   readonly goal: Endpoint18_0Request["payload"]["goal"]
   readonly executionPolicy?: Endpoint18_0Request["payload"]["executionPolicy"]
+  readonly authorization?: Endpoint18_0Request["payload"]["authorization"]
   readonly policy?: Endpoint18_0Request["payload"]["policy"]
   readonly brief?: Endpoint18_0Request["payload"]["brief"]
   readonly requires?: Endpoint18_0Request["payload"]["requires"]
@@ -705,6 +706,7 @@ const Endpoint18_0 = (raw: RawClient["server.proContract"]) => (input: Endpoint1
       scope: input["scope"],
       goal: input["goal"],
       executionPolicy: input["executionPolicy"],
+      authorization: input["authorization"],
       policy: input["policy"],
       brief: input["brief"],
       requires: input["requires"],

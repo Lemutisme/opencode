@@ -2,7 +2,8 @@
 
 Use one checkout and its generated client for the entire lifecycle. This is the
 current native operation path, not a recipe for replaying historical benchmark
-cohorts. See [delivery qualification](pro-contract-delivery.md), the
+cohorts. See [research and execution methods](pro-contract-research-execution.md),
+[historical delivery qualification](pro-contract-delivery.md), the
 [truth boundary](pro-contract-truth-boundary.md), and the
 [experiment index](pro-contract-experiments.md).
 
@@ -15,16 +16,21 @@ External verifier owns task-specific truth, private tests, and scores
 Principal         approves issuance, attestation, selection, release, and rollback
 ```
 
-The local deployment is cooperative. A shared OS user, process environment, or
+Ordinary local Session execution is cooperative. A shared OS user, process environment, or
 database is not an adversarial isolation boundary. Keep credentials, OpenCode
 state, private evaluators, and reports outside the writable candidate Location.
 For untrusted executors, provide separate OS/container identities, restricted
 mounts, network policy, and a principal service they cannot access. A hash alone
-neither authenticates a verifier nor proves a result.
+neither authenticates a verifier nor proves a result. The separate
+`contract version` workflow path uses a fail-closed Linux x64 bubblewrap sandbox;
+see its [specific boundary and limits](pro-contract-research-execution.md#6-qualification-and-limits).
+It does not sandbox ordinary `contract issue` tasks or qualify arbitrary
+replacement OpenCode binaries.
 
 Prerequisites for local operation: Bun, Git, `curl`, and `jq`. For source installs,
 use Node 24 LTS for dependency native-build hooks; the compiled binary does not
-require Node. Qualification used Bun 1.3.14 and Node 24.21.0. Benchmark tools
+require Node. Historical CLI qualification used Bun 1.3.14 and Node 24.21.0;
+record the versions for the current build separately. Benchmark tools
 and containers belong to the external adapter, not the Contract schema.
 
 ```bash
@@ -357,27 +363,30 @@ The adapter owns these observations. The evaluation executor has no filesystem
 or process authority and cannot be scheduled as an OpenCode executor. A failed
 report challenges the exact delivery; Evaluation remains outstanding.
 
-## 6. Opt-in strategy improvement
+## 6. Opt-in research and strategy improvement
 
-The supported loop keeps candidate generation, evaluation, and promotion
-outside the pure kernel. The strategy service records scoped authorization,
-exact evidence, selection, and rollback. It does not run a benchmark or grant
-itself principal authority.
+Candidate generation, evaluation, and role selection stay outside the pure
+Kernel. The strategy service records scoped grants, exact evidence, archived
+versions/experiments, and role-specific selection. It does not run a benchmark
+or grant itself principal authority. `incumbent` and `research_executor` are
+independent; the modified target version is a task parameter.
 
 ```text
 principal authorizes a frozen protocol
-  -> generator Contract proposes execution text
-  -> external evaluator records complete development and confirmation runs
-  -> task-pareto comparison gates a supported successor
-  -> principal binds the selection
-  -> a new explicitly opted-in solver/generator Contract uses the exact text
-  -> challenge, rollback, or revocation withdraws support without erasing history
+  -> research executor runs an ordinary research Contract
+  -> exact candidate and observations enter the archive
+  -> independent research-use grant may select a non-deployed candidate
+  -> its actual code can conduct the next research task
+  -> independent development/confirmation evidence gates incumbent adoption
+  -> new tasks use the selected method; old bindings and valid results persist
 ```
 
-Use `contract strategy` for this path, not the historical standalone
+Use `contract strategy` with `contract version` for executable workflows, not the historical standalone
 `script/pro-contract-rsi.ts` gate or removed `contract policy` configuration.
-The [delivery guide](pro-contract-delivery.md#strategy-operation) specifies the
-current commands and required input identities.
+The [research/execution guide](pro-contract-research-execution.md#3-principal-workflow)
+specifies current commands and exact input identities. Version-1 text bundles
+remain usable through `contract issue --strategy ...`; executable version-2
+bundles must use `contract version run`, not a text-only Session binding.
 
 `performanceRule:"task-pareto"` compares each `(panel, task)` mean over its fixed
 repeats; development gains cannot mask a confirmation regression.
@@ -388,11 +397,16 @@ percentage-point margin or new cumulative cost/count caps unless explicitly
 requested. Freeze a new protocol for a changed rule; never relabel post-hoc
 readmission as preregistered evidence.
 
-Strategy text is `executionPolicy`, separate from immutable user intent.
-Ordinary Contract requirements carry the selected support. No default global
-policy is silently installed, and existing execution bindings are not rewritten
-when a new selection appears. A recursively generated successor being used is
-mechanism evidence, not proof of sustained capability gains.
+Strategy text is `executionPolicy`, separate from immutable user intent. New
+bindings carry an exact `authorization`, not an automatically injected
+`spec.requires` dependency. Withdrawal fences execution, not independently
+accepted results; actual evidence dependencies still propagate challenges.
+Historical bindings keep their originally declared requirements and semantics.
+No default global policy is silently installed, and existing bindings are not
+rewritten on selection or rollback. A withdrawn old binding requires an explicit
+handoff design before another method could resume it. A negative study can
+complete its report duty without deployment. None of these mechanism properties
+proves sustained capability gains.
 
 ## 7. Benchmark and release records
 
