@@ -372,7 +372,7 @@ async function evidence(state: State) {
   const recent = await Promise.all(
     state.events.slice(-6).map(async (event) => ({
       ...event,
-      observation: preview(await Bun.file(event.path).text(), Math.floor(GUARDS.observation / 6)),
+      observation: renderPreview(await Bun.file(event.path).text(), Math.floor(GUARDS.observation / 6)),
     })),
   )
   return JSON.stringify({
@@ -434,15 +434,154 @@ function emit(state: State) {
   )
 }
 
-function preview(value: string, bytes: number) {
-  const encoded = Buffer.from(value)
-  if (encoded.byteLength <= bytes) return { capture: "complete", text: value }
-  return {
-    capture: "preview",
-    text: encoded.subarray(0, bytes).toString("utf8"),
-    omittedBytes: encoded.byteLength - bytes,
-    fullHash: hash(value),
+/** Presentation only: the source event and its captured fields remain unchanged in the archive. */
+export function renderPreview(value: string, bytes: number): unknown {
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new RangeError("Invalid preview byte budget")
+  const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
+  const complete = { capture: "complete", text: value }
+  if (size(complete) <= bytes) return complete
+  const fullHash = hash(value)
+  const originalBytes = Buffer.byteLength(value)
+  const prefix = (value: string, bytes: number) => {
+    const encoded = Buffer.from(value)
+    // Fatal decoding prevents a cut multibyte character from introducing replacement bytes.
+    const decoder = new TextDecoder("utf-8", { fatal: true })
+    const end = { value: Math.min(bytes, encoded.byteLength) }
+    while (end.value > 0) {
+      try {
+        return decoder.decode(encoded.subarray(0, end.value))
+      } catch {
+        end.value--
+      }
+    }
+    return ""
   }
+  const fit = (render: (quota: number) => unknown) => {
+    const range = { low: 0, high: bytes }
+    while (range.low < range.high) {
+      const middle = Math.ceil((range.low + range.high) / 2)
+      if (size(render(middle)) <= bytes) range.low = middle
+      else range.high = middle - 1
+    }
+    return render(range.low)
+  }
+  const parsed = (() => {
+    try {
+      return JSON.parse(value) as unknown
+    } catch {
+      return null
+    }
+  })()
+  const event = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined
+  const payload = event && "value" in event ? event.value : undefined
+  const inspection = payload !== null && typeof payload === "object" && !Array.isArray(payload) ? payload : undefined
+  if (
+    event &&
+    "kind" in event &&
+    event.kind === "inspection" &&
+    inspection &&
+    "value" in inspection &&
+    Array.isArray(inspection.value)
+  ) {
+    const windows = inspection.value.map((entry) => object(entry, "inspection window"))
+    const sources = new Set(windows.map((window) => window.sourceID))
+    const fields = (record: Record<string, unknown>) => {
+      const captured = (field: string, value: unknown) => {
+        const item = object(value, "captured field")
+        return {
+          field,
+          text: typeof item.text === "string" ? item.text : "",
+          status: item.status ?? "unknown",
+          reason: item.reason,
+        }
+      }
+      if (record.text !== undefined) return [captured("text", record.text)]
+      if (record.tool === undefined) return []
+      const tool = object(record.tool, "record tool")
+      return [
+        ...(tool.input === undefined ? [] : [captured("tool.input", tool.input)]),
+        ...array(tool.content ?? [], "tool content").map((entry, index) => {
+          const item = object(entry, "tool content item")
+          return captured(`tool.content.${item.order ?? index}`, item.text ?? item)
+        }),
+        ...(tool.error === undefined ? [] : [captured("tool.error", tool.error)]),
+      ]
+    }
+    const prepared = windows.map((window) => ({
+      window,
+      source: object(window.source, "inspection source"),
+      scope: object(window.scope ?? {}, "inspection scope"),
+      shares: sources.size * windows.filter((other) => other.sourceID === window.sourceID).length,
+      records: array(window.records, "inspection records").map((entry) => {
+        const record = object(entry, "inspection record")
+        return {
+          record,
+          tool: record.tool === undefined ? undefined : object(record.tool, "record tool"),
+          fields: fields(record),
+        }
+      }),
+    }))
+    const render = (quota: number) => ({
+      capture: "inspection-preview",
+      fullHash,
+      originalBytes,
+      interpretation: "unverified-observations",
+      recordColumns: ["id", "hash", "type", "tool", "status", "output", "fields"],
+      fieldColumns: ["path", "text", "omittedBytes", "sourceStatus"],
+      windows: prepared.map((entry) => ({
+        sourceID: entry.window.sourceID,
+        packetHash: entry.window.packetHash,
+        sourceHash: entry.source.hash,
+        capture: entry.window.capture,
+        sourceCompleteness: entry.scope.sourceCompleteness,
+        totalRecords: entry.window.totalRecords,
+        nextOffset: entry.window.nextOffset,
+        records: entry.records.map((item) => [
+          item.record.id,
+          item.record.hash,
+          item.record.type,
+          item.tool?.name ?? null,
+          item.tool?.status ?? null,
+          item.tool?.output ?? null,
+          item.fields.map((field) => {
+            // Equal shares by source, requested window, record, then field prevent prefix starvation.
+            const text = prefix(
+              field.text,
+              Math.floor(quota / entry.shares / entry.records.length / item.fields.length),
+            )
+            return [
+              field.field,
+              text,
+              Buffer.byteLength(field.text) - Buffer.byteLength(text),
+              field.reason === undefined ? field.status : `${field.status}:${field.reason}`,
+            ]
+          }),
+        ]),
+      })),
+    })
+    const requiredBytes = size(render(0))
+    if (requiredBytes <= bytes) return fit(render)
+    const unavailable = {
+      capture: "unavailable",
+      reason: "inspection-metadata-budget",
+      fullHash,
+      originalBytes,
+      requiredBytes,
+      sourceIDs: [...sources],
+      windows: windows.length,
+      records: prepared.reduce((sum, entry) => sum + entry.records.length, 0),
+    }
+    if (size(unavailable) <= bytes) return unavailable
+    const minimal = { capture: "unavailable", reason: "inspection-metadata-budget", fullHash, requiredBytes }
+    if (size(minimal) <= bytes) return minimal
+    throw new RangeError("Preview byte budget cannot represent an unavailable inspection marker")
+  }
+  const render = (quota: number) => {
+    const text = prefix(value, quota)
+    return { capture: "preview", text, omittedBytes: originalBytes - Buffer.byteLength(text), fullHash }
+  }
+  if (size(render(0)) > bytes) throw new RangeError("Preview byte budget cannot represent an omission marker")
+  return fit(render)
 }
 
 function relative(value: string) {

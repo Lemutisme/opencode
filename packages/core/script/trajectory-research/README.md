@@ -73,6 +73,30 @@ uses the current notebook and six recent, explicitly bounded previews. Older
 records remain available for selected retrieval/local analysis. This is a
 replaceable seed context policy, not a Kernel rule or a cumulative search cap.
 
+Inspection previews divide their text allowance across sources, selected windows,
+records and fields. A large early record therefore cannot hide later selected
+sources. Compact tables retain source/packet hashes, record identities and hashes,
+tool names/statuses and explicit field omissions. If even this metadata exceeds
+the preview budget, the preview says `unavailable` rather than silently omitting
+later records. The bound includes the complete serialized UTF-8 preview, not just
+excerpt text; an impossibly small bound fails explicitly. Full event files are
+unchanged and remain available for retrieval. This rendering policy improves
+visibility of selected evidence; it does not establish better research decisions
+or turn previews into independent evaluation evidence.
+
+The compact preview preserves selected record order but omits detailed timing and
+index metadata. Retrieve or compute over full archived records when those details
+matter. Each event retains the same nominal 21845-byte guard (`128 KiB / 6`,
+rounded down). Historical g0 applied that number to raw prefix bytes **before**
+serialization; this renderer applies it to the entire serialized preview. These
+are not identical realized prompt-byte or token budgets.
+
+This correction followed observed preview starvation in g0 and was
+human/assistant-assisted engineering, not a successor generated or validated by
+g0. Its frozen source, trajectory and reports remain unchanged. A subsequent
+method still needs its own execution and evidence; better evidence visibility
+alone does not prove better research or task performance.
+
 ## Outputs and recursion
 
 All files are under the declared `.research` artifact/checkpoint:
