@@ -5,6 +5,7 @@ import path from "node:path"
 
 type Packet = { path: string; sourceID: string; summary: string }
 type Event = { index: number; kind: string; path: string; hash: string; summary: string }
+type IndexedEvent = Event & { raw: string }
 type Pending = { id: string; prompt: string; kind: "decide" | "critique" }
 type State = {
   version: 1
@@ -266,9 +267,8 @@ async function readPacket(entry: Packet) {
 
 function parseAction(text: string): { action?: Record<string, unknown>; error?: string } {
   // Markdown fences are presentation, not permission to extract arbitrary embedded JSON.
-  const clean = text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, "$1")
   try {
-    const action = object(JSON.parse(clean), "research action")
+    const action = object(decodeAction(text), "research action")
     if (!["inspect", "compute", "critique", "conclude"].includes(String(action.type)))
       throw new Error("Expected inspect, compute, critique or conclude")
     if (action.notes !== undefined) string(action.notes, "working notebook")
@@ -369,18 +369,185 @@ async function record(state: State, kind: string, value: unknown, summary: strin
 }
 
 async function evidence(state: State) {
-  const recent = await Promise.all(
-    state.events.slice(-6).map(async (event) => ({
-      ...event,
-      observation: renderPreview(await Bun.file(event.path).text(), Math.floor(GUARDS.observation / 6)),
-    })),
+  const events = await Promise.all(
+    state.events.map(async (event) => {
+      const raw = await Bun.file(event.path).text()
+      if (hash(raw) !== event.hash) throw new Error("Research event bytes differ from their recorded hash")
+      return { ...event, raw }
+    }),
   )
-  return JSON.stringify({
-    notebook: state.notebook,
-    eventCount: state.events.length,
+  const rows = operationIndex(events)
+  const index = rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : "")
+  // These are candidate-local audit artifacts, not host-authenticated execution or acceptance receipts.
+  const archive = await archiveContext(index, "jsonl")
+  const notebook = await archiveContext(state.notebook, "txt")
+  return JSON.stringify(renderIndexedContext(events, rows, archive, { ...notebook, text: state.notebook }))
+}
+
+async function archiveContext(text: string, extension: string) {
+  if (!text.isWellFormed()) throw new Error("Research context archive requires well-formed Unicode text")
+  await mkdir(".research/context", { recursive: true })
+  const archive = `.research/context/${hash(text)}.${extension}`
+  const directory = path.resolve(".research/context")
+  if ((await realpath(directory)) !== directory) throw new Error("Research context archive must not be a symlink")
+  const file = Bun.file(archive)
+  const existing = await lstat(archive).catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
+    throw error
+  })
+  if (existing) {
+    if (!existing.isFile() || existing.nlink !== 1 || (await realpath(archive)) !== path.resolve(archive))
+      throw new Error("Research context archive must be an ordinary file")
+    if ((await file.text()) !== text) throw new Error("Research context archive bytes changed")
+  }
+  if (!existing) await Bun.write(file, text)
+  return { archive, hash: hash(text), bytes: Buffer.byteLength(text) }
+}
+
+/** Exact local declarations and recorded outcomes; adjacency is not an evidence dependency. */
+export function operationIndex(events: readonly IndexedEvent[]) {
+  const groups: { decision?: IndexedEvent; events: IndexedEvent[]; outcomes: IndexedEvent[] }[] = []
+  events.forEach((event) => {
+    if (event.kind === "decision") {
+      groups.push({ decision: event, events: [event], outcomes: [] })
+      return
+    }
+    const group = groups.at(-1)
+    if (group?.decision) {
+      group.events.push(event)
+      group.outcomes.push(event)
+      return
+    }
+    groups.push({ events: [event], outcomes: [event] })
+  })
+  return groups.map((group, ordinal) => {
+    const decision = group.decision ? object(JSON.parse(group.decision.raw).value, "decision value") : undefined
+    const parsed = decision ? parseAction(string(decision.summary, "decision text")) : undefined
+    return {
+      ordinal,
+      association: "adjacent-method-records-not-evidence-dependencies",
+      events: group.events.map((event) => ({
+        index: event.index,
+        kind: event.kind,
+        path: event.path,
+        hash: event.hash,
+      })),
+      outcome: group.outcomes.length ? "recorded" : "not-recorded",
+      outcomes: group.outcomes.map((event) => {
+        const value = JSON.parse(event.raw).value
+        const outcome = value && typeof value === "object" && !Array.isArray(value) ? object(value, "outcome") : {}
+        return {
+          eventIndex: event.index,
+          kind: event.kind,
+          status: outcome.status ?? (event.kind === "invalid-action" ? "not-executed" : "not-recorded"),
+          interpretation: "unverified-recorded-outcome",
+          ...(event.kind === "compute"
+            ? {
+                exitCode: outcome.exitCode,
+                startedAt: outcome.startedAt,
+                completedAt: outcome.completedAt,
+                stdout: captureFacts(outcome.stdout),
+                stderr: captureFacts(outcome.stderr),
+              }
+            : {}),
+        }
+      }),
+      action: decision
+        ? {
+            interpretation: "unverified-declared-action",
+            requestID: decision.id,
+            validity: parsed?.action ? "valid-action" : "invalid-action",
+            error: parsed?.error,
+            value: parsed?.action
+              ? Object.fromEntries(
+                  // Put declared operation fields before potentially large notes or extension fields.
+                  Object.entries({
+                    type: parsed.action.type,
+                    rationale: parsed.action.rationale,
+                    prediction: parsed.action.prediction,
+                    selections: parsed.action.selections,
+                    claim: parsed.action.claim,
+                    alternatives: parsed.action.alternatives,
+                    question: parsed.action.question,
+                    program: parsed.action.program,
+                    ...parsed.action,
+                  }).map(([key, value]) => [
+                    key,
+                    parsed.action!.type === "compute" && key === "program" && typeof value === "string"
+                      ? {
+                          sourceHash: hash(value),
+                          bytes: Buffer.byteLength(value),
+                          archive: group.decision!.path,
+                          location: "program in JSON action decoded from value.summary",
+                          sourcePreview: {
+                            text: [...value].slice(0, 256).join(""),
+                            omittedBytes:
+                              Buffer.byteLength(value) - Buffer.byteLength([...value].slice(0, 256).join("")),
+                          },
+                          interpretation: "code-text-not-observed-IO",
+                        }
+                      : value,
+                  ]),
+                )
+              : { unparsedAction: decision.summary },
+          }
+        : undefined,
+    }
+  })
+}
+
+function captureFacts(value: unknown) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return { status: "not-recorded" }
+  const capture = object(value, "captured stream")
+  return { bytes: capture.bytes, truncated: capture.truncated }
+}
+
+/** Presentation guards are per-view, not limits on cumulative research or archive retention. */
+export function renderIndexedContext(
+  events: readonly IndexedEvent[],
+  rows: ReturnType<typeof operationIndex>,
+  archive: { archive: string; hash: string; bytes: number },
+  notebook: { archive: string; hash: string; bytes: number; text: string },
+) {
+  const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
+  const recent = events
+    .filter((event) => event.kind !== "decision")
+    .slice(-3)
+    .map(({ raw, ...event }) => ({ ...event, observation: renderPreview(raw, Math.floor(GUARDS.observation / 6)) }))
+  const selected: { ordinal: number; observation: unknown }[] = []
+  const index = () => ({
+    interpretation: "exact-declared-actions-and-recorded-outcomes-not-accepted-results",
+    ...archive,
+    totalRows: rows.length,
+    omittedRanges: selected.length < rows.length ? [{ from: 0, to: rows.length - selected.length - 1 }] : [],
+    selected: [...selected].reverse(),
+  })
+  const notes = {
+    archive: notebook.archive,
+    hash: notebook.hash,
+    bytes: notebook.bytes,
+    observation: renderPreview(notebook.text, 16 * 1024),
+  }
+  const view = () => ({
+    notebook: notes,
+    eventCount: events.length,
     recent,
+    operationIndex: index(),
     archive: ".research/events",
   })
+  if (size(index()) > 32 * 1024 || size(view()) > GUARDS.observation)
+    throw new RangeError("Unchanged recent evidence and metadata exceed the context byte guard")
+  for (const row of [...rows].reverse()) {
+    selected.push({ ordinal: row.ordinal, observation: renderPreview(JSON.stringify(row), 4096) })
+    if (size(index()) <= 32 * 1024 && size(view()) <= GUARDS.observation) continue
+    selected.pop()
+    break
+  }
+  return view()
+}
+
+function decodeAction(text: string): unknown {
+  return JSON.parse(text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, "$1"))
 }
 
 async function prompt(state: State, context: unknown, instructions: string) {
@@ -606,6 +773,7 @@ function array(value: unknown, name: string): unknown[] {
 }
 function string(value: unknown, name: string) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`Expected nonempty ${name}`)
+  if (!value.isWellFormed()) throw new Error(`Expected well-formed Unicode ${name}`)
   return value
 }
 function strings(value: unknown, name: string) {

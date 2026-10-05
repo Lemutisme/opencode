@@ -69,9 +69,47 @@ limits; the outer Version namespace cleans up residual descendants on exit.
 There is no cgroup memory/disk/PID denial-of-service guarantee.
 
 Full research events stay under `.research/events`. The next reasoning prompt
-uses the current notebook and six recent, explicitly bounded previews. Older
-records remain available for selected retrieval/local analysis. This is a
-replaceable seed context policy, not a Kernel rule or a cumulative search cap.
+separates recent evidence detail from an index of what the method declared and
+what outcomes were recorded:
+
+- The latest **three non-decision outcomes** retain their existing 21845-byte
+  preview rendering unchanged, including failed operations, invalid actions and
+  critic observations. Older outcome bodies remain available on disk.
+- An exact local operation index pairs decisions with adjacent recorded outcomes.
+  It retains event references/hashes, declared rationale, prediction and selectors,
+  and recorded status/exit/output-size facts. Missing outcomes are explicitly
+  `not-recorded`; malformed decisions remain unparsed, not successful operations.
+  These associations are not evidence dependencies or acceptance decisions.
+- Full index JSONL and notebook text are materialized as ordinary, hashed files
+  under `.research/context` **before** the prompt advertises their paths. The
+  checkpoint retains them with the full events. Indexing checks event bytes
+  against their local recorded hashes; this is not host authentication.
+- The prompt index is at most 32 KiB, individual row previews at most 4 KiB,
+  and the notebook preview at most 16 KiB. Older index rows leave the view with
+  exact omitted ordinal ranges and a complete archive reference. Clipped fields
+  retain explicit omissions/hashes rather than invented semantic summaries.
+  The complete serialized evidence view is at most 128 KiB; unrepresentable
+  mandatory metadata fails explicitly.
+
+Program entries preserve source hash, byte count and archive location, with a
+short, explicitly clipped code excerpt. They are labeled
+`code-text-not-observed-IO`: a declared `Bun.file` read plus exit code zero does
+not prove that file was read, understood or scientifically validated. Likewise,
+a retained result is not proof that the next reasoner has consulted it. Large
+programs, older output bodies and omitted index rows require selected retrieval
+or local analysis. Repeated experiments are not automatically deduplicated.
+
+These are replaceable context guards, not Kernel rules or cumulative search
+caps. An index can expose earlier work and still fail to improve research;
+it does not guarantee semantic memory or establish a causal mechanism. Each view
+currently rebuilds the index from the full event history; retaining per-prefix
+index snapshots adds cumulative read, derivation and storage overhead. These
+limits bound prompt presentation, not archive size, memory or cumulative work.
+This seed does not add an incremental index store. Protocol-validated action
+string fields must be well-formed Unicode so byte/hash references round-trip
+through ordinary UTF-8 files; malformed fields receive an invalid-action
+observation. Arbitrary extension properties remain JSON data, not program
+execution facts.
 
 Inspection previews divide their text allowance across sources, selected windows,
 records and fields. A large early record therefore cannot hide later selected
@@ -89,7 +127,10 @@ index metadata. Retrieve or compute over full archived records when those detail
 matter. Each event retains the same nominal 21845-byte guard (`128 KiB / 6`,
 rounded down). Historical g0 applied that number to raw prefix bytes **before**
 serialization; this renderer applies it to the entire serialized preview. These
-are not identical realized prompt-byte or token budgets.
+are not identical realized prompt-byte or token budgets. The new 128 KiB guard
+covers the entire serialized evidence view; the earlier six-preview view did
+not bound its notebook and metadata together. It is a stricter serialization
+guarantee, not a claim of equal realized tokens or more effective research.
 
 This correction followed observed preview starvation in g0 and was
 human/assistant-assisted engineering, not a successor generated or validated by
@@ -104,6 +145,8 @@ All files are under the declared `.research` artifact/checkpoint:
 - `state.json`: task/version/deadline-bound pending request and research state;
 - `events/`: local/model observations, decisions, inspections and calculations;
 - `operations/`: proposed program bytes and local execution outcomes;
+- `context/`: hashed full operation-index JSONL and notebook snapshots referenced
+  by bounded prompt views;
 - `report.json`: **unverified** research report, including negative/inconclusive
   outcomes, uncertainty and follow-up questions;
 - `proposals.json`: pointers explicitly marked **proposed-only**;
