@@ -22,7 +22,7 @@ import { Tools } from "./tools"
 import { makeLocationNode } from "../effect/app-node"
 import { ProContractOpenCode } from "../pro-contract/open-code"
 
-const BOUNDED_CONTRACT_TOOLS = new Set(["read", "edit", "write", "apply_patch", "glob", "grep"])
+const BOUNDED_CONTRACT_TOOLS = new Set(["read", "edit", "write", "apply_patch", "glob", "grep", "working_method"])
 const CONTRACT_CONTROL_TOOLS = new Set([
   "contract_report_ready",
   "contract_report_blocked",

@@ -34,6 +34,7 @@ import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
 import { SessionObservationPack } from "../observation-pack"
+import { SessionWorkingMethod } from "../working-method"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
@@ -118,6 +119,7 @@ const layer = Layer.effect(
     const contracts = yield* ProContract.Service
     const contractBindings = yield* ProContractOpenCode.Service
     const observationPolicy = yield* SessionObservationPack.Policy
+    const workingMethods = yield* SessionWorkingMethod.Service
     const db = (yield* Database.Service).db
     const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
@@ -304,6 +306,7 @@ const layer = Layer.effect(
             { action: "contract_report_blocked", resource: "*", effect: "allow" as const },
             { action: "contract_propose_revision", resource: "*", effect: "allow" as const },
             { action: "todowrite", resource: "*", effect: "allow" as const },
+            { action: SessionWorkingMethod.toolName, resource: "*", effect: "allow" as const },
             ...(process.env.OPENCODE_STRATEGY_PORTFOLIO === "1"
               ? [
                   "strategy_plan",
@@ -347,6 +350,11 @@ const layer = Layer.effect(
             { action: "contract_report_blocked", resource: "*", effect: "deny" as const },
             { action: "contract_propose_revision", resource: "*", effect: "deny" as const },
           ]
+      const methodPermission = PermissionV2.evaluate(
+        SessionWorkingMethod.toolName,
+        session.id,
+        agent.info?.permissions ?? [{ action: "*", resource: "*", effect: "deny" }],
+      ).effect
       const toolMaterialization =
         reason || isLastStep
           ? undefined
@@ -355,6 +363,9 @@ const layer = Layer.effect(
               ...contractPermissions,
               ...(observationPolicy === "off" || (observationPolicy === "contract" && !contractBinding)
                 ? [{ action: SessionObservationPack.toolName, resource: "*", effect: "deny" as const }]
+                : []),
+              ...(methodPermission === "deny"
+                ? [{ action: SessionWorkingMethod.toolName, resource: "*", effect: "deny" as const }]
                 : []),
             ])
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
@@ -366,6 +377,21 @@ const layer = Layer.effect(
           contract.spec.budget.turns - contractBinding.turnsUsed <= SETTLEMENT_WINDOW) ||
           (contract.spec.budget.actions !== undefined &&
             contract.spec.budget.actions - contractBinding.actionsUsed <= SETTLEMENT_WINDOW))
+      // Working trials are recoverable model-owned data, never a privileged System Context source.
+      // Reason-mode calls retain their exact text-only boundary and cannot read ambient method state.
+      const methodData =
+        !reason &&
+        methodPermission === "allow" &&
+        toolMaterialization?.definitions.some((tool) => tool.name === SessionWorkingMethod.toolName)
+          ? yield* workingMethods.view(session.id).pipe(
+              Effect.map(SessionWorkingMethod.render),
+              Effect.catchTag("WorkingMethodError", () =>
+                Effect.succeed(
+                  'Working method data is unavailable; no trial advice was loaded. This is not an empty or retracted history. The retained ledger and task obligations are unchanged. Continue from current task evidence or explicitly diagnose with working_method read.\n{"status":"unavailable","retained":true}',
+                ),
+              ),
+            )
+          : undefined
       const originalRequest = LLM.request({
         model,
         http: {
@@ -390,6 +416,7 @@ const layer = Layer.effect(
                   : context,
                 model,
               )),
+          ...(methodData ? [Message.assistant(methodData)] : []),
           ...(settlementWindow
             ? [
                 Message.system(
@@ -694,5 +721,6 @@ export const node = makeLocationNode({
     ProContract.node,
     ProContractOpenCode.node,
     SessionObservationPack.policyNode,
+    SessionWorkingMethod.node,
   ],
 })
