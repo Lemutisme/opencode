@@ -394,3 +394,43 @@ HEAD、分支及 index 保持不变，只有一个生产文件、两个相关测
 6. 2026-10-02 一节的遗留事项 3（中途节点每轮事务）和 4（SDK embedded 测试的数据库隔离）仍未处理；受保护输入规划 §9 的残余风险不变。
 
 **证据目录：**都在 `/workspace/sbno-native-advisory-preparation-20260924T054618Z/` 下：attempt-1 为 `third-preparation-20261004T213025Z/approved-execution-20261005T005243Z/`，attempt-2 为 `third-attempt-2-20261005T022916Z/`，attempt-3 为 `third-attempt-3-20261005T050601Z/`（本地原件在 `/var/tmp/sbno-native-advisory-local-20261005T050601Z/`，删除需 Principal 明确同意）。三次尝试各有 `RESULTS.md` 和通过核验的封存。
+
+## 2026-10-06：第四轮 Researcher 档位对照观察
+
+上一节已结束机制层面的冒烟系列。第四轮不再验证机制，而是观察 Researcher 档位对两个行为的影响：明知有缺口仍在几分钟内交付，以及收到审阅意见后只改声明、不改代码。唯一变量是 Researcher（worker）的推理档位从 low 改为 high；reviewer 仍为 high，与 Researcher 持平。代码为 `481c867c9`，与 `d51b45c83` 只差文档。任务、两份 brief、A0 提交、默认节点（仅交付前）、全部时间参数、`retryDelay`、6 小时 deadline-only、本地盘运行写入都与第三轮 attempt-3 相同。正式运行于 2026-10-05 23:12–23:31 UTC。
+
+| 项目 | 第三轮 attempt-3（low） | 第四轮（high） |
+| --- | --- | --- |
+| 关闭组：签发到交付／worker 请求／worker tokens | 约 1 分钟／13／358,465 | 7.4 分钟／55／5,391,053 |
+| 开启组：签发到交付／worker 请求／worker tokens | 4 分 12 秒／23／653,142 | 10.7 分钟／85／7,449,321（网关口径 7,538,267） |
+| 开启组 reviewer 请求／tokens | 8／198,995 | 8／207,881 |
+| 候选结构 | 开启组是作用于像素的 MLP，违反 brief；关闭组作用于系数 | 两组都在系数空间完整实现：A0、完整复核 Fock 范数加印刷版诊断、字面版与修正版密度、归一化重建、全配对速度损失 |
+| reviewer 第 1 条意见 | 错：引错了代码 | 错：误判了 `torch.linspace` 的行为 |
+| 审阅后 | 不改代码，只改声明 | 49 次工具调用，修改 `sbno.py`、`test_sbno.py`、`FORMULAS.md`、`REPORT.md`，重跑实验 |
+
+两组都以 `native_handoff` 结束，清理 `confirmed`，gate 通过；关闭组 replay 2 次、开启组 3 次，均实际执行并通过。没有 blocked、escalation、issuer resume 或 Git 恢复；签发后 binding 保存了 `escalate-after-repeat`。宿主命令响应最长 60 ms 和 229 ms，没有 timeout。正式合计 148 次请求，SDK 口径 13,048,255 tokens，网关口径 13,137,201 tokens；预检 4 次、325 tokens 另计。费用未知。
+
+**运行中的两个记录事项：**
+
+- `materials.json`：reviewer 再次用 `limit: 2000` 分页读取，`reviewer.instructions` 与 `task.brief` 两行被截断。两个字段的全文都在 reviewer 提示中，执行者声明、`files` 和 `missing` 完整读到，没有信息损失，情况与第三轮相同。
+- 一条 SDK usage 未知：Researcher 的模型在一次流式响应中途发出 `contract_report_ready`，工具在流结束前执行，交付前节点随即拦截并暂停 Session，同一个流在 114 ms 后被切断。请求早已发出，暂停没有造成额外花费；只是 usage 在流末尾的事件里，SDK 没有收到，因此如实记为 `unknown`。网关完整记录了这次调用（88,946 tokens），上表网关口径的差额即来自此。
+
+**事后定性审查（Claude，每组一个样本，只是观察，不打分）：**
+
+- reviewer 第 1 条意见断言 `make_frequency_grid(1)` 会产生零频率。实际运行 `torch.linspace(-0.2, 0.2, 1)` 返回 `[-0.2]`，所以频率为 `(-0.2, -0.2)`，不为零。连续两轮，排在第 1 条的都是对代码运行行为的错误断言；reviewer 只能读、不能运行代码，这类判断它无法自行验证。
+- 第 2 条要求速度损失的初始状态改用原始噪声。文档记号 \hat f^{k,0}_{rkhs} 字面上是重建后的输入，原代码更贴近字面，这是解释上的分歧，不是错误。
+- 其余意见成立：printed 的 `N_density` 第一项确实是 a/2（tex 第 827 行），原"字面版"密度损失并不完全字面；奇异分母被静默截断，而 brief 要求明确报告；复核 Gram 的测试只覆盖零频项；`REPORT.md` 中的参数更新量（0.6864171）与 `result.json`（0.68536）不一致；评估只用了新噪声，没有留出数据，不应称为 held-out。
+- Researcher 对成立的意见都用代码和测试处理了：新增按印刷公式（含 a/2）计算的密度诊断；新增可选的奇异诊断和严格模式，但默认仍静默截断；新增独立的非零复核 Gram 测试；重跑实验并修正报告。
+- 它没有验证就接受了第 1 条错误意见，改写了频率生成方式。改动本身无害，频率仍不为零，但新代码注释写进了错误前提，新增测试在旧代码上同样会通过。速度损失的初始状态也按 reviewer 的解释改成了原始噪声。
+- 关闭组没有审阅，静默截断等问题原样保留；开启组因审阅多了诊断和测试。这是审阅的增量价值，但只有一个样本。
+
+**结论：**调高档位后，Researcher 对审阅意见的反应从"只做披露"变成了"动手修改"，候选本身的完整度也高得多；交付仍在签发后 7–11 分钟内完成，但候选已较完整，问题没有第三轮突出。"只提建议、决定权在 Researcher"在形式上成立，但真正的防线是 Researcher 验证 reviewer 的断言，这一次没有起作用。第三轮后续事项第 3 项据此更新：high 档改变了对意见的处理方式，提前交付仍然存在。
+
+**合同状态：**两个合同都在独立的试运行数据库中，交付停在 `verification`，宿主已退出，没有作 Principal 认可，也不需要进一步处理。
+
+**新增后续事项（只记录，不在本次实施，编号接上一节）：**
+
+7. reviewer 对代码运行行为的错误断言：两轮都排在第 1 条。可讨论的方向有两个：让 reviewer 在沙箱中运行小段检查，或在意见投递文本中要求 Researcher 先验证再修改。两者都会改动设计，需另行决定。
+8. 交付前节点在流式响应中途拦截时，SDK 丢失这次调用的 usage：可考虑让被切断的流在有界时间内收尾以取得 usage，或把这种情况明确记为已知情形。
+
+**证据目录：**`/workspace/sbno-native-advisory-preparation-20260924T054618Z/fourth-preparation-20261005T063051Z/`，含 `RESULTS.md` 和通过核验的封存 `seal-execution-20261005T230410Z/`；本地原件在 `/var/tmp/sbno-native-advisory-local-20261005T063051Z/`，删除需 Principal 明确同意。
