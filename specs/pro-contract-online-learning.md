@@ -216,7 +216,7 @@ cleanup on Session deletion, bounded archive retention, or incremental archive
 index in this change. Full ledger reads/rewrites and research history rebuilding
 can grow with history; bounded prompts do not bound storage or total work.
 
-## Evidence still required
+## Validation and the first ordinary-task diagnostic
 
 Implementation tests exercise real tool feedback, user feedback, revision,
 readback, compaction, retraction, permissions and unchanged Contract boundaries.
@@ -226,10 +226,40 @@ The new diagnostic lives at
 `/home/duozhou/run-artifacts/opencode-online-learning-20261006`.
 Its frozen `PLAN.json` specifies one ordinary repair task, a held-out-from-solver
 17-case diagnostic panel, and Luna/max with only a six-hour cumulative deadline.
-It does not require a lesson or a revision. **PLAN is not LAUNCH:** exact new
-binary/method qualification and launch authorization are separate. At this
-pre-launch documentation point, no model result is available; infrastructure
-smoke tests with a previously frozen binary are not this experiment's learning result.
+It did not require a lesson or a revision. **PLAN is not LAUNCH:** exact new
+binary/method qualification and launch authorization were separately frozen in
+`LAUNCH.json`. The final source was `6744894305`, with binary SHA256
+`386743571794fd0b990e25b58cedaec665a82fa79780d3acaf7d3dc46c7c0644`.
+The new binary passed real network-none startup, restart and isolation checks
+with no model admission before the single paid task.
+
+The task completed its native handoff after **11 provider turns / 18 actions**,
+with recorded model cost **$0.0185213**. The independent frozen panel changed
+from **9/17 to 17/17**, with eight gains, no losses and no invalid executions.
+But the advertised `working_method` tool was called **zero times**, and no ledger
+was created. Persistent method learning, later application and retraction were
+**not elicited**. A genuine task-local test repair occurred after a green check:
+the agent noticed a nested-order test was selecting the wrong key, corrected it,
+and reran it. This is not evidence that the new persistent learning mechanism
+caused a transferable improvement. No second rollout was launched to force one.
+
+The controller's first export comparison failed because snapshot materialization
+adds an administrative `.git` file. That failure remains unchanged. Before any
+scoring, `recovery-v1/IDENTITY-FROZEN.json` independently verified the native Git
+tree and byte/mode equality of all three task files through export and freezing;
+the generated `.git` file was not part of that tree. Evaluation used unchanged
+code, with no additional model calls, feedback, attestation or promotion.
+The audit also retains a literal scope deviation: temporary writes to `/tmp`
+despite the task's `/candidate` restriction. There is no evidence of physical
+isolation escape, but blanket task-constraint compliance is not claimed.
+
+Implementation validation at that source passed **1,579 Core tests / 6,507
+assertions**, both package typechecks, and **12 native tests / 551 assertions**.
+An earlier stale built-in-tool-list test failure is retained separately, not
+relabeled. The build is Linux x64 CLI-only (no embedded Web UI); its compiled
+binary is pinned, but a build-time models catalog fetch prevents a source-only
+bit-reproducibility claim. Logs are in `validation-final/`, task results in
+`results/native-run-v1-recovery/`, and public-only analysis in `analysis/live/`.
 
 The intended audit distinguishes a genuine signal, a scoped update, actual later
 behavior, and local consequences. No-change, ignored trials, measurement failures
