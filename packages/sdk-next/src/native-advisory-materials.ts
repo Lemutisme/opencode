@@ -130,10 +130,10 @@ export const make = Effect.gen(function* () {
         : {}),
     }
     const hash = yield* state.put(materials)
-    yield* fs.writeWithDirs(
-      path.join(directory, "materials.json"),
-      render(ProContractRecognition.canonical(materials)),
-      0o400,
+    yield* Effect.forEach(
+      presentation(ProContractRecognition.canonical(materials)),
+      (file) => fs.writeWithDirs(path.join(directory, file.path), file.content, 0o400),
+      { discard: true },
     )
     return {
       ...snapshot,
@@ -151,8 +151,41 @@ export const make = Effect.gen(function* () {
     const materials = request.materials
     const canonical = Buffer.from(yield* state.bytes(materials.hash))
     const copy = Buffer.from(yield* fs.readFile(path.join(materials.directory, "materials.json")))
-    if (!copy.equals(canonical) && !copy.equals(Buffer.from(render(canonical.toString("utf8")))))
+    const legacy = copy.equals(canonical) || copy.equals(Buffer.from(render(canonical.toString("utf8"))))
+    const files = legacy ? [{ path: "materials.json", content: copy }] : presentation(canonical.toString("utf8"))
+    const entries = (yield* fs.readDirectoryEntries(materials.directory)).filter(
+      (entry) => entry.name !== "candidate" && entry.name !== "evidence",
+    )
+    if (
+      entries.length !== (legacy ? 1 : 2) ||
+      entries.some((entry) =>
+        entry.name === "materials.json"
+          ? entry.type !== "file"
+          : legacy || entry.name !== "context" || entry.type !== "directory",
+      )
+    )
       return yield* new ProContractDelivery.Denied({ message: "Review materials copy is corrupt" })
+    if (!legacy) {
+      const context = yield* fs.readDirectoryEntries(path.join(materials.directory, "context"))
+      if (
+        context.length !== files.length - 1 ||
+        context.some((entry) => entry.type !== "file" || !files.some((file) => file.path === `context/${entry.name}`))
+      )
+        return yield* new ProContractDelivery.Denied({ message: "Review materials copy is corrupt" })
+    }
+    yield* Effect.forEach(
+      files,
+      (file) =>
+        Effect.gen(function* () {
+          const bytes =
+            file.path === "materials.json"
+              ? copy
+              : Buffer.from(yield* fs.readFile(path.join(materials.directory, file.path)))
+          if (!bytes.equals(Buffer.from(file.content)))
+            return yield* new ProContractDelivery.Denied({ message: "Review materials copy is corrupt" })
+        }),
+      { discard: true },
+    )
     const selected = yield* inventory(
       path.join(materials.directory, "candidate"),
       request.registration.configuration.materials,
@@ -258,4 +291,107 @@ function render(canonical: string) {
     if (token === ":") return ": "
     return token
   })}\n`
+}
+
+function presentation(canonical: string) {
+  // These are hash-verified canonical bytes, never the editable materials.json copy.
+  const materials = JSON.parse(canonical) as {
+    task: NativeAdvisoryStore.Registration["task"]
+    reviewer: NativeAdvisoryStore.Registration["configuration"]["reviewer"]
+    executorStatement?: Pick<ProContractDelivery.Request, "summary" | "uncertainties"> & { trust: string }
+  }
+  const files = [
+    {
+      path: "context/task.md",
+      content: context("Task", [
+        ["goal", materials.task.goal],
+        ["brief", materials.task.brief],
+      ]),
+    },
+    {
+      path: "context/reviewer-instructions.md",
+      content: context("Reviewer instructions", [["instructions", materials.reviewer.instructions]]),
+    },
+    ...(materials.executorStatement
+      ? [
+          {
+            path: "context/executor-statement.md",
+            content: context("Executor statement", [
+              ["source", materials.executorStatement.trust],
+              ["summary", materials.executorStatement.summary],
+              ...materials.executorStatement.uncertainties.map((text, index): [string, string] => [
+                `uncertainty ${index + 1}`,
+                text,
+              ]),
+            ]),
+          },
+        ]
+      : []),
+  ]
+  const references = files.map((file) => ({
+    path: file.path,
+    hash: Hash.sha256(file.content),
+    bytes: Buffer.byteLength(file.content),
+  }))
+  return [
+    {
+      path: "materials.json",
+      content: render(
+        ProContractRecognition.canonical({
+          ...materials,
+          task: { ...materials.task, goal: undefined, brief: undefined, text: references[0] },
+          reviewer: { ...materials.reviewer, instructions: references[1] },
+          ...(materials.executorStatement ? { executorStatement: references[2] } : {}),
+        }),
+      ),
+    },
+    ...files,
+  ]
+}
+
+function context(title: string, fields: ReadonlyArray<readonly [string, string]>) {
+  return `# ${title}\n\nText blocks have a "> " prefix on each line. After removing that prefix, an unpaired backslash at line end joins the next line without a newline. Double backslashes encode a literal backslash; \\r encodes a carriage return; \\uXXXX encodes a UTF-16 code unit. Other line breaks are original.\n\n${fields
+    .map(([name, text]) => {
+      const lines = text.split("\n").flatMap((line) => {
+        // Keep escape sequences and Unicode code points intact. Count UTF-16 units
+        // (as the read tool does), including the prefix and continuation marker.
+        const characters = Array.from(line, (character) => ({
+          text:
+            character === "\\"
+              ? "\\\\"
+              : character === "\r"
+                ? "\\r"
+                : /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ud800-\udfff]/u.test(character)
+                  ? `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+                  : character,
+          space: /\s/u.test(character),
+        }))
+        const result: string[] = []
+        let start = 0
+        while (start < characters.length) {
+          let end = start
+          let size = 2
+          let space = start
+          while (
+            end < characters.length &&
+            size + characters[end].text.length <= (end === characters.length - 1 ? 1000 : 999)
+          ) {
+            size += characters[end].text.length
+            if (characters[end].space) space = end + 1
+            end++
+          }
+          const stop = end === characters.length ? end : space > start ? space : end
+          result.push(
+            `> ${characters
+              .slice(start, stop)
+              .map((character) => character.text)
+              .join("")}${stop < characters.length ? "\\" : ""}`,
+          )
+          start = stop
+        }
+        return result.length ? result : ["> "]
+      })
+      return `## ${name}\n\n${lines.join("\n")}\n`
+    })
+    .join("\n")}`
 }

@@ -51,6 +51,7 @@ export const nativeAdvisoryProcess = Effect.fnUntraced(function* (checkpoints = 
       blockedRouting?: ProContractOpenCode.Binding["blockedRouting"]
       time?: Partial<NativeAdvisoryStore.Configuration["time"]>
       reviewerModel?: { providerID: string; id: string }
+      brief?: string
       materials?: ReadonlyArray<string>
       nodes?: NativeAdvisoryStore.Configuration["nodes"]
       defaultNodes?: boolean
@@ -68,7 +69,7 @@ export const nativeAdvisoryProcess = Effect.fnUntraced(function* (checkpoints = 
       spec: {
         trigger: { type: "immediate" },
         goal: "Inspect the native material",
-        brief: `Read answer.txt and deliver the approved native task.\n\n${guidance}`,
+        brief: options?.brief ?? `Read answer.txt and deliver the approved native task.\n\n${guidance}`,
         requires: [],
         authority: ["filesystem.read", "filesystem.write", "process.execute"],
         budget: { deadline },

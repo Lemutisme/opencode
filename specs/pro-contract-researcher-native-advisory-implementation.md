@@ -434,3 +434,41 @@ HEAD、分支及 index 保持不变，只有一个生产文件、两个相关测
 8. 交付前节点在流式响应中途拦截时，SDK 丢失这次调用的 usage：可考虑让被切断的流在有界时间内收尾以取得 usage，或把这种情况明确记为已知情形。
 
 **证据目录：**`/workspace/sbno-native-advisory-preparation-20260924T054618Z/fourth-preparation-20261005T063051Z/`，含 `RESULTS.md` 和通过核验的封存 `seal-execution-20261005T230410Z/`；本地原件在 `/var/tmp/sbno-native-advisory-local-20261005T063051Z/`，删除需 Principal 明确同意。
+
+## 2026-10-06：核实提示与 context 材料呈现实施记录
+
+本轮按已提交的[定稿设计](pro-contract-researcher-native-advisory-next-steps.md)议题一 (a) 和议题三方案 A 实施，起点为 `native-advisory` / `266e17fe97bdb6c014fe23e2595be8a0c8866e98`，领先 `origin/native-advisory` 一个提交，工作树干净。修改前在仓库外保存了全部 6,695 个 tracked 文件、0 个 non-ignored untracked 文件的归档、逐文件 SHA-256、文件模式，以及 HEAD、分支、Git 状态、index 原件和 index entries；归档逐文件回读核验通过。见[基线元数据](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/baseline/metadata.json)和[文件清单](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/baseline/manifest.json)。本节只追加，原实施记录和定稿设计文档均保持原字节。
+
+改动清单：
+
+- `packages/sdk-next/src/native-advisory.ts`：仅在完整意见原文存在时使用指定的 Researcher 核实提示，覆盖主动请求、交付前及中途三种触发；无完整意见的原有文本保持不变。reviewer 第一段后加入指定的无法运行代码、运行结论须标为未验证、精确引用代码的段落；读取范围加入 `context/`，交付前声明提示指向 `context/executor-statement.md`，其余提示保持不变。
+- `packages/sdk-next/src/native-advisory-materials.ts`：任务的 `goal`、`brief` 写入 `context/task.md`，reviewer 指令写入 `context/reviewer-instructions.md`；仅交付前材料写入 `context/executor-statement.md`，含来源标记、summary 和按原顺序逐条保留的 uncertainties。`materials.json` 中分别以 `task.text`、`reviewer.instructions`、`executorStatement` 引用这些文件，引用只含 `path`、文件字节的 SHA-256 `hash` 和 `bytes`；其余字段及规范键序、两空格分行格式保持原样。`candidate/`、`evidence/` 的捕获、写入及校验路径未改。
+- 材料规范对象和 `state.put(materials)` 保持原样。落盘呈现不进入材料身份、缓存键或 job `inputHash`；没有 Schema、Protocol、Server、Core、权限、缓存语义或评测网关改动，没有运行 generate 或修改历史实验材料。
+- `packages/sdk-next/test/native-advisory.test.ts` 增加三种触发的完整意见／不可用／无原文投递及 reviewer 提示断言、原材料身份断言、确定性和可逆折行断言、三种格式与损坏拒绝断言。进程节点测试用单段超过 2,000 字符的 brief、summary 及每条 uncertainty，以 `offset: 1, limit: 2000` 读取清单及对应 context 文件；逐一检查实际发给 provider 的工具结果，无截断标记、无后续页，恢复全文后与封存的规范材料完全一致。共享测试夹具只新增可选 `brief` 输入，原默认值保持不变。
+
+可逆呈现规则：每个字段在固定标题下用 `> ` 标记所有物理行，因此字段内的标题、空行和末尾换行不会与字段边界混淆。原文反斜线写成双反斜线，CR 写成 `\r`，其他控制字符和孤立代理项写成 `\uXXXX`；原有 LF 保留。折行在可容纳范围内优先选最后一个原文空白，否则按 Unicode 码点断开；行尾增加一个未配对反斜线表示软折行，解码时删除软折行再还原转义。按读工具使用的 UTF-16 单元计数，连同前缀和折行标记每行至多 1,000 个单元，不拆代理对或转义序列。文件均为 LF，文件末尾恰有一个换行。测试独立解码并核对带空格英文、无空格中文、emoji、边界长度、空字符串、空白、CRLF、反斜线、控制字符及孤立代理项的原文。
+
+兼容方式：`verify` 先读取并核验已存规范字节，按这些字节确定性渲染预期清单及 context 文件，再逐字节比较副本，并检查清单及 context 文件集合。缺失、多余、内容或空白变化、CRLF、末尾换行变化、重复键、符号链接替换均拒绝。旧的规范单行清单和 `d51b45c83` 分行清单仍按原渲染规则逐字节接受；旧格式不带 context 文件，新旧混合副本拒绝。未新增持久化格式版本或迁移。
+
+另外在仓库外保存了原材料模块，只调整导入路径以共享测试运行时；分别把同一个已捕获请求交给旧、新模块执行，三种触发都核对了整个返回材料对象、`materials.hash`、`key()` 和实际 job `inputHash`。对照脚本、输入、旧新清单、规范文本和身份值全部保留，见[同输入对照](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/same-input-identity.test.ts)及[身份核对结果](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/identity-evidence.json)。这些定向核对不重复计入最终回归通过数。
+
+修复前刻画在未修改的生产源码上运行：SDK 新增用例中 8 项预期失败、7 项通过，失败覆盖缺少核实提示及缺少新呈现；四个增强进程场景全部实际出现 `line truncated to 2000 chars`。见 [SDK 失败日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/before-sdk-characterization-fixed.log)、[进程失败日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/before-process-characterization.log)及保留的 provider 请求体。修复后同组断言全部通过。开发中还用失败用例发现并修正了孤立代理项被 UTF-8 替换的问题；夹具启动适配、测试时钟写法和一次测试类型收窄错误的日志也均保留。所有修复前、开发中及定向重复结果均不计入下表最终通过数。
+
+验证均从各自 package 目录启动；每次命令设置独立 `OPENCODE_DB`，测试、类型检查和格式检查依次运行。既有 SDK 内存数据库、opencode preload 及各进程夹具的临时数据库隔离机制未改。只使用本地脚本 provider，没有调用真实模型。
+
+| 验证组                                                        | 结果与日志                                                                                                                          |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| SDK：native-advisory、native-advisory-strength、contract-jobs | 80 项通过、0 失败；[日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/sdk-regression-complete.log)   |
+| opencode：native advisory 进程回归四文件                      | 41 项通过、0 失败；[日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/opencode-regression-final.log) |
+| sdk-next `bun typecheck`                                      | 通过；[日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/sdk-typecheck-final.log)                    |
+| opencode `bun typecheck`                                      | 通过；[日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/opencode-typecheck-final.log)               |
+| 五个 TypeScript 改动文件的 Prettier 检查                      | 通过；[日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/format-typescript-final.log)                |
+| 本节追加内容的 Prettier 检查                                  | 通过；[日志](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/format-addition-final.log)                  |
+
+指定回归合计 **121 项通过、0 失败**。整篇实施文档在追加前即存在 Prettier 格式差异，见[基线检查](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/before-document-format.log)和[最终全文件检查](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/logs/format-all-final.log)；为遵守保留原文字节的要求，没有重排既有段落或表格。本节单独格式化并检查，旧内容的 SHA-256 前缀核对及定稿设计文档全文核对均记录在[最终完整性报告](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/integrity.json)。
+
+已知局限：两段核实提示不能强制 Researcher 验证，也不能赋予 reviewer 执行能力，本轮没有真实模型行为证据；读工具仍有总字节及行数分页上限，大文件仍须继续分页；`candidate/`、`evidence/` 的文件内容和既有读工具限制保持原样。中途触发条件、每轮事务、测试内部数据库机制，以及交付前中断导致 usage 记为 unknown 的已知情形未在本轮改变。
+
+完整命令、退出码、独立数据库路径、日志哈希、串行时间线和前后对照见[验证汇总](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/VERIFICATION.md)及[机器可读记录](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/verification.json)。[进程读取证据](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/materials-read-evidence.json)保留材料身份、各文件的实际工具读取核对及长文本恢复结果。[增量补丁](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/baseline-delta.patch)相对已保存基线生成，在独立基线文件副本上正向应用核对，并在当前工作树作反向检查。
+
+HEAD、分支及 index 与基线一致，工作树仅保留两个生产文件、三个测试／夹具文件及本追加记录。未提交、未推送、未运行 generate、未调用真实模型；实施与验证结束，停在未提交的工作树，等待 Claude 把关。

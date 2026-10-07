@@ -4,6 +4,7 @@ import { Effect, Layer, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { RelativePath } from "@opencode-ai/core/schema"
+import { Hash } from "@opencode-ai/core/util/hash"
 import type { NativeAdvisoryStore } from "../../../sdk-next/src/native-advisory-store"
 import { nativeAdvisoryProcess } from "../fixture/native-advisory-process"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
@@ -152,16 +153,46 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
         const llm = yield* TestLLMServer
         const id = `pct_native_node_${mode}`
         const begin = Promise.withResolvers<void>()
+        const brief =
+          "Inspect the captured native material and verify every runtime claim before changing the candidate. ".repeat(
+            35,
+          )
+        const proposed = {
+          summary:
+            "The original candidate supports only the stated narrow claim, pending independent runtime verification. ".repeat(
+              30,
+            ),
+          uncertainties: [
+            "未经验证的中文声明与边界条件😀".repeat(180),
+            "No evidence establishes behavior on independent inputs. ".repeat(45),
+          ],
+        }
+        const files = [
+          "materials.json",
+          "context/task.md",
+          "context/reviewer-instructions.md",
+          ...(mode === "interrupted-check" ? [] : ["context/executor-statement.md"]),
+        ]
+        expect(brief.length).toBeGreaterThan(2000)
+        expect(brief).not.toContain("\n")
+        expect(proposed.summary.length).toBeGreaterThan(2000)
+        expect(proposed.uncertainties.every((text) => text.length > 2000)).toBe(true)
         yield* llm.push(
-          (mode === "interrupted-check" ? reply().tool("contract_check", {}) : ready()).wait(begin.promise),
-          ...review(),
-          ready(),
+          (mode === "interrupted-check"
+            ? reply().tool("contract_check", {})
+            : reply().tool("contract_report_ready", proposed)
+          ).wait(begin.promise),
+          ...files.map((path) => reply().tool("read", { path, offset: 1, limit: 2000 })),
+          reply().tool("read", { path: "candidate/answer.txt" }),
+          reply().text(opinion).stop(),
+          reply().tool("contract_report_ready", proposed),
         )
         const input = yield* fixture.issue(id, {
           blockedRouting: "escalate",
           defaultNodes: mode !== "interrupted-check",
           nodes: { version: 1, submission: false, midcourse: { afterMs: 1 } },
           materials: ["answer.txt", "missing-result.txt"],
+          brief,
           replay,
         })
         yield* llm.wait(1)
@@ -205,36 +236,104 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
         expect(yield* fixture.host.command("root-info", id)).toMatchObject({
           status: "verification",
           spec: { budget: input.spec.budget },
-          handoff: { ...statement, replay: { passed: true } },
+          handoff: { ...proposed, replay: { passed: true } },
         })
         const hits = yield* llm.hits
-        expect(hits).toHaveLength(5)
-        expect(JSON.stringify(hits[2].body)).toContain("materials.json")
-        expect(JSON.stringify(hits[3].body)).toContain("captured native material")
-        expect(JSON.stringify(hits[4].body)).toContain(opinion)
-        const material = JSON.parse((yield* fixture.host.command("native-object", request.materials!.hash)) as string)
-        const messages = Schema.decodeUnknownSync(
-          Schema.Struct({
-            messages: Schema.Array(Schema.Struct({ role: Schema.String, content: Schema.optional(Schema.Unknown) })),
-          }),
-        )(hits[2].body).messages
-        const read = Schema.decodeUnknownSync(Schema.Struct({ content: Schema.String, truncated: Schema.Boolean }))(
-          Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(
-            messages.find((message) => message.role === "tool")?.content,
+        expect(hits).toHaveLength(files.length + 4)
+        expect(JSON.stringify(hits.at(-2)!.body)).toContain("captured native material")
+        expect(JSON.stringify(hits.at(-1)!.body)).toContain(opinion)
+        const canonical = (yield* fixture.host.command("native-object", request.materials!.hash)) as string
+        const material = JSON.parse(canonical)
+        yield* fixture.archive(id, { stage: "material-reads", before, hits, material, files })
+        const reads = files.map((name, index) => {
+          const messages = Schema.decodeUnknownSync(
+            Schema.Struct({
+              messages: Schema.Array(Schema.Struct({ role: Schema.String, content: Schema.optional(Schema.Unknown) })),
+            }),
+          )(hits[index + 2].body).messages
+          const read = Schema.decodeUnknownSync(
+            Schema.Struct({ content: Schema.String, truncated: Schema.Boolean, next: Schema.optional(Schema.Number) }),
+          )(
+            Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(
+              messages.filter((message) => message.role === "tool").at(-1)?.content,
+            ),
+          )
+          expect(read.truncated, name).toBe(false)
+          expect(read.next, name).toBeUndefined()
+          expect(read.content, name).not.toMatch(/truncat(?:ed|ion)/i)
+          return read.content
+        })
+        const manifest = JSON.parse(reads[0])
+        const references = [
+          manifest.task.text,
+          manifest.reviewer.instructions,
+          ...(mode === "interrupted-check" ? [] : [manifest.executorStatement]),
+        ]
+        for (const [index, name] of files.entries()) {
+          const disk = yield* Effect.promise(() => Bun.file(path.join(request.materials!.directory, name)).text())
+          // The paginated read tool omits exactly the final file newline.
+          expect(`${reads[index]}\n`, name).toBe(disk)
+          expect(disk.endsWith("\n\n"), name).toBe(false)
+          expect(disk, name).not.toContain("\r")
+          for (const line of disk.split("\n")) expect(line.length, name).toBeLessThanOrEqual(1000)
+          if (index)
+            expect(references[index - 1]).toEqual({
+              path: name,
+              hash: Hash.sha256(disk),
+              bytes: Buffer.byteLength(disk),
+            })
+        }
+        const fields = reads.slice(1).map((content) =>
+          Object.fromEntries(
+            [...`${content}\n`.matchAll(/^## ([^\n]+)\n\n((?:> [^\n]*\n)+)/gm)].map((match) => [
+              match[1],
+              match[2]
+                .replace(/^> /gm, "")
+                .slice(0, -1)
+                .replace(/\\(\\|r|u[\da-f]{4}|\n)/g, (_, escaped: string) =>
+                  escaped === "\n"
+                    ? ""
+                    : escaped === "r"
+                      ? "\r"
+                      : escaped.startsWith("u")
+                        ? String.fromCharCode(parseInt(escaped.slice(1), 16))
+                        : "\\",
+                ),
+            ]),
           ),
         )
-        expect(read.truncated).toBe(false)
-        expect(read.content).not.toContain("line truncated")
-        expect(Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(read.content)).toEqual(material)
+        expect(fields[0]).toEqual({ goal: material.task.goal, brief })
+        expect(fields[1]).toEqual({ instructions: material.reviewer.instructions })
+        expect({
+          ...manifest,
+          task: { ...manifest.task, text: undefined, ...fields[0] },
+          reviewer: { ...manifest.reviewer, ...fields[1] },
+          ...(mode === "interrupted-check"
+            ? {}
+            : {
+                executorStatement: {
+                  trust: fields[2].source,
+                  summary: fields[2].summary,
+                  uncertainties: proposed.uncertainties.map((_, index) => fields[2][`uncertainty ${index + 1}`]),
+                },
+              }),
+        }).toEqual({ ...material, task: { ...material.task, text: undefined } })
+        expect(request.materials!.hash).toBe(Hash.sha256(canonical))
+        expect(request.job!.inputHash).toBe(request.materials!.hash)
         expect(material.files).toMatchObject([{ path: "answer.txt" }])
         expect(material.missing).toEqual(["missing-result.txt"])
-        for (const field of ["files", "missing"]) expect(read.content).toContain(`\n  "${field}":`)
+        for (const field of ["files", "missing"]) expect(reads[0]).toContain(`\n  "${field}":`)
         if (mode !== "interrupted-check") {
-          expect(material.executorStatement).toEqual({ trust: "untrusted-executor-statement", ...statement })
-          expect(read.content).toContain('\n  "executorStatement":')
-          expect(JSON.stringify(hits[2].body)).toContain("untrusted-executor-statement")
+          expect(material.executorStatement).toEqual({ trust: "untrusted-executor-statement", ...proposed })
+          expect(fields[2]).toEqual({
+            source: "untrusted-executor-statement",
+            summary: proposed.summary,
+            ...Object.fromEntries(proposed.uncertainties.map((text, index) => [`uncertainty ${index + 1}`, text])),
+          })
+          expect(reads[0]).toContain('\n  "executorStatement":')
+          expect(request.job!.prompt.text).toContain("context/executor-statement.md")
           expect(request.delivery?.input.text).toContain("Delivery has not been recorded")
-          expect(request.delivery?.input.text).toContain(statement.summary)
+          expect(request.delivery?.input.text).toContain(proposed.summary)
         }
         if (mode === "lost-return" || mode === "defect-after") {
           expect(
@@ -251,8 +350,8 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
           if (request.trigger?.type !== "check") return yield* Effect.die("Missing check provenance")
           expect(request.trigger.replay.passed).toBe(true)
           expect(request.delivery?.input.text).toContain(request.trigger.replay.evidenceHash)
-          expect(JSON.stringify(hits[4].body)).toContain("Tool execution interrupted")
-          expect(JSON.stringify(hits[4].body)).toContain("contract_check passed: true")
+          expect(JSON.stringify(hits.at(-1)!.body)).toContain("Tool execution interrupted")
+          expect(JSON.stringify(hits.at(-1)!.body)).toContain("contract_check passed: true")
           const evidence = yield* fixture.host.command("replay-report", id, {
             hash: request.trigger.replay.evidenceHash,
           })
@@ -263,7 +362,7 @@ for (const mode of ["submission", "lost-return", "defect-after", "interrupted-ch
           (event) => event.command.type === "report-ready" && event.decision.type === "accepted",
         )
         expect(deliveries).toHaveLength(1)
-        yield* fixture.archive(id, { before, hits, material })
+        yield* fixture.archive(id, { before, hits, material, files, reads })
       }),
     60_000,
   )
