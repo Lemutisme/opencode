@@ -14,7 +14,14 @@ import { ContractProgramBench } from "./programbench"
 
 const Verifier = ContractNative.Verifier
 export const Configuration = Schema.Struct({
-  runtime: Schema.Struct({ directory: Schema.String, bun: Schema.String, python: Schema.String, bwrap: Schema.String }),
+  runtime: Schema.Struct({
+    directory: Schema.String,
+    bun: Schema.String,
+    python: Schema.String,
+    bwrap: Schema.String,
+    rg: Schema.optional(Schema.String),
+    toolCgroup: Schema.optional(Schema.Boolean),
+  }),
   model: Schema.Struct({
     id: Schema.NonEmptyString,
     effort: Schema.NonEmptyString,
@@ -336,7 +343,11 @@ export async function open(root: string, configuration: Configuration) {
         if (state.tasks[task.id] && state.kernel.contracts[task.id].status !== "discharged") {
           const fenced =
             !current.execution ||
-            (await Bun.file(path.join(root, "executions", current.execution, "FENCED.json")).exists())
+            (
+              await Bun.file(path.join(root, "executions", current.execution, "FENCED.json"))
+                .json()
+                .catch(() => undefined)
+            )?.acknowledged === true
           store.interrupted(task.id, String(error), fenced)
         }
         throw error
@@ -386,11 +397,12 @@ async function releaseIdentity(runtime: ContractNative.Runtime) {
   return RSI.hash({
     manifest,
     tools: await Promise.all(
-      [runtime.bun, runtime.python, runtime.bwrap].map(async (file) => ({
+      [runtime.bun, runtime.python, runtime.bwrap, ...(runtime.rg ? [runtime.rg] : [])].map(async (file) => ({
         path: file,
         hash: Bun.SHA256.hash(await Bun.file(file).bytes(), "hex"),
       })),
     ),
+    toolCgroup: runtime.toolCgroup,
   })
 }
 

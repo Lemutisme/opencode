@@ -42,6 +42,35 @@ def birth(pid):
     return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
 
 
+def tool_admission(pid):
+    standing()
+    directory = config.get("toolCgroup")
+    if not directory or pid == config["pid"] or birth(config["pid"]) != config["birth"]:
+        raise PermissionError("No live tool resource capability")
+    peer_birth = birth(pid)
+    shell = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+    if shell <= 1 or shell == config["pid"]:
+        raise PermissionError("The runtime cannot move itself into the tool leaf")
+    shell_birth = birth(shell)
+    ancestor = shell
+    for _ in range(64):
+        ancestor = int(Path(f"/proc/{ancestor}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        if ancestor == config["pid"]:
+            break
+        if ancestor <= 1:
+            raise PermissionError("Foreign tool process")
+    else:
+        raise PermissionError("Tool ancestry exceeds the infrastructure guard")
+    if birth(pid) != peer_birth or birth(shell) != shell_birth:
+        raise PermissionError("Tool identity changed")
+    # The peer is a synchronous child of the shell and remains alive awaiting
+    # acknowledgement. No arbitrary PID, resource limit or host-leaf API exists.
+    for process in [shell, pid]:
+        (Path(directory) / "cgroup.procs").write_text(str(process))
+    record({"type": "tool-admitted", "pid": pid, "birth": peer_birth, "shell": shell,
+            "shellBirth": shell_birth, "time": time.time()})
+
+
 def record(value):
     with lock:
         with open(config["journal"], "a") as out:
@@ -65,6 +94,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             self.connection.settimeout(max(0.01, min(900, (config["deadline"] - time.time() * 1000) / 1000)))
             pid, _, _ = struct.unpack("3i", self.connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            if self.path == "/v1/tool-admission":
+                if int(self.headers.get("Content-Length", "0")) != 0:
+                    self.send_error(403, "Tool admission has no caller-selected parameters")
+                    return
+                tool_admission(pid)
+                self.send_response(200)
+                self.send_header("Content-Length", "8")
+                self.end_headers()
+                self.wfile.write(b"admitted")
+                return
             if pid != config["pid"] or birth(pid) != config["birth"]:
                 self.send_error(403, "Only the admitted native runtime may use the model channel")
                 return

@@ -1,7 +1,7 @@
 export * as ContractNative from "./native"
 
 import fs from "node:fs/promises"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { Schema } from "effect"
 import { RSI } from "@opencode/core/pro-contract/rsi"
@@ -10,7 +10,14 @@ import { ContractLedger } from "@opencode/core/pro-contract/ledger"
 import { ContractEnvironment } from "./environment"
 import { ContractProgramBench } from "./programbench"
 
-export type Runtime = { directory: string; bun: string; python: string; bwrap: string }
+export type Runtime = {
+  directory: string
+  bun: string
+  python: string
+  bwrap: string
+  rg?: string
+  toolCgroup?: boolean
+}
 export type Model = { id: string; effort: string; upstream: string; credential?: string }
 export const Handoff = RSI.Handoff
 export const Grade = Schema.Struct({
@@ -131,9 +138,12 @@ export function sandbox(
     "--ro-bind",
     runtime.directory,
     "/runtime",
+    "--tmpfs",
+    "/tools",
     "--ro-bind",
     runtime.bun,
     "/tools/bun",
+    ...(runtime.rg ? ["--ro-bind", runtime.rg, "/tools/rg"] : []),
     "--bind",
     workspace,
     "/workspace",
@@ -206,6 +216,23 @@ export async function run(input: {
   input.store.assertMethod(initial, input.parent)
   const deadline = initial.kernel.contracts[input.task].spec.budget.deadline
   const method = RSI.method(input.method)
+  const toolCgroup = input.runtime.toolCgroup ? process.env.OPENCODE_TOOL_CGROUP : undefined
+  if (input.runtime.toolCgroup) {
+    if (
+      !toolCgroup ||
+      !path.isAbsolute(toolCgroup) ||
+      !toolCgroup.startsWith("/sys/fs/cgroup/") ||
+      !(await Bun.file(path.join(toolCgroup, "memory.max")).exists())
+    )
+      throw new Error("Qualified tool memory leaf is unavailable")
+    const own = (await Bun.file("/proc/self/cgroup").text())
+      .trim()
+      .split("\n")
+      .find((line) => line.startsWith("0::"))
+      ?.slice(3)
+    if (!own || path.dirname("/sys/fs/cgroup" + own) !== path.dirname(toolCgroup) || path.basename(own) !== "control")
+      throw new Error("Tool and host leaves do not share this original allocation")
+  }
   const environment = input.environment ? await ContractEnvironment.checked(input.environment) : undefined
   await Bun.write(
     path.join(admission, "input.json"),
@@ -218,6 +245,7 @@ export async function run(input: {
       feedback: input.feedback,
       evaluation: input.evaluation,
       allowPropose: !input.evaluation && (input.allowPropose ?? true),
+      ...(toolCgroup ? { toolCgroup: true } : {}),
     }),
   )
   const worker = Bun.spawn(
@@ -251,7 +279,9 @@ export async function run(input: {
     },
   )
   const gateway: { process?: ReturnType<typeof Bun.spawn> } = {}
+  const runtime: { identity?: { pid: number; birth: string } } = {}
   const stop = () => {
+    if (runtime.identity && alive(runtime.identity)) process.kill(runtime.identity.pid, "SIGKILL")
     worker.kill("SIGKILL")
     gateway.process?.kill("SIGTERM")
   }
@@ -276,6 +306,11 @@ export async function run(input: {
     )
     const pid = identity["child-pid"]
     const birth = (await Bun.file(`/proc/${pid}/stat`).text()).split(")").at(-1)!.trim().split(/\s+/)[19]
+    runtime.identity = { pid, birth }
+    await Bun.write(
+      path.join(root, "OWNERSHIP.json"),
+      JSON.stringify({ wrapperPID: worker.pid, runtime: runtime.identity, deadline }),
+    )
     const config = {
       upstream: input.model.upstream,
       model: input.model.id,
@@ -291,6 +326,7 @@ export async function run(input: {
       cancel: path.join(input.root, "CANCEL"),
       journal: path.join(root, "requests.jsonl"),
       socket: path.join(channel, "provider.sock"),
+      ...(toolCgroup ? { toolCgroup } : {}),
     }
     await Bun.write(path.join(root, "gateway.json"), JSON.stringify(config))
     gateway.process = Bun.spawn(
@@ -347,17 +383,34 @@ export async function run(input: {
     stop()
     await worker.exited
     await gateway.process?.exited
+    const until = Date.now() + 5000
+    while (runtime.identity && alive(runtime.identity) && Date.now() < until) await Bun.sleep(20)
+    const acknowledged = runtime.identity ? !alive(runtime.identity) : worker.signalCode === null
     await fs.rm(channel, { recursive: true, force: true })
     await Bun.write(
       path.join(root, "FENCED.json"),
       JSON.stringify({
         pid: worker.pid,
         exitCode: worker.exitCode,
+        signal: worker.signalCode,
+        runtime: runtime.identity,
+        acknowledged,
         gatewayExitCode: gateway.process?.exitCode,
         deadline,
         time: Date.now(),
       }),
     )
+    if (!acknowledged) throw new Error("Native runtime exit is unacknowledged")
+  }
+}
+
+function alive(identity: { pid: number; birth: string }) {
+  try {
+    const fields = readFileSync(`/proc/${identity.pid}/stat`, "utf8").split(")").at(-1)!.trim().split(/\s+/)
+    return fields[19] === identity.birth && fields[0] !== "Z"
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ESRCH")) return false
+    throw error
   }
 }
 

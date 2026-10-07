@@ -16,6 +16,7 @@ const Input = Schema.Struct({
   feedback: Schema.Array(Schema.String),
   evaluation: Schema.Boolean,
   allowPropose: Schema.Boolean,
+  toolCgroup: Schema.optional(Schema.Boolean),
 })
 const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(await Bun.file("/admission/input.json").text())
 const active = () => {
@@ -58,6 +59,10 @@ const plugin = Plugin.define({
                 tool.name === "shell"
                   ? {
                       ...value,
+                      command: input.toolCgroup
+                        ? "/usr/bin/python3 -I -S /runtime/packages/sdk/src/pro-contract/tool-admission.py || exit 125\n" +
+                          value.command
+                        : value.command,
                       background: false,
                       timeout: Math.max(1, Math.min(value.timeout || 600000, 600000, input.deadline - Date.now())),
                     }
