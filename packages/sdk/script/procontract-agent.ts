@@ -63,12 +63,16 @@ const Config = Schema.Struct({
 })
 type Config = typeof Config.Type
 
-const Action = Schema.Union([
-  Schema.Struct({ action: Schema.Literal("status") }),
-  Schema.Struct({ action: Schema.Literal("check") }),
-  Schema.Struct({ action: Schema.Literal("handoff"), summary: Schema.String }),
-  Schema.Struct({ action: Schema.Literal("blocked"), reason: Schema.String }),
-])
+// One flat object: Anthropic refuses a tool input schema with a top-level oneOf/anyOf, which a union would produce.
+const Action = Schema.Struct({
+  action: Schema.Literals(["status", "check", "handoff", "blocked"]),
+  summary: Schema.optional(Schema.String).annotate({
+    description: "handoff: what was done and what remains uncertain",
+  }),
+  reason: Schema.optional(Schema.String).annotate({
+    description: "blocked: the concrete reason the work cannot finish",
+  }),
+})
 
 type Delivery = { state: "open" | "delivered" | "finished" | "blocked"; reason?: string }
 type CheckResult = { title: string; passed: boolean; detail?: string }
@@ -275,7 +279,7 @@ function profile() {
                 if (action.action === "status")
                   return { content: JSON.stringify({ ...delivery, checks: checks.map((check) => check.title) }) }
                 if (action.action === "blocked") {
-                  if (!action.reason.trim()) return yield* new Tool.Error({ message: "A concrete reason is required" })
+                  if (!action.reason?.trim()) return yield* new Tool.Error({ message: "A concrete reason is required" })
                   settle({ state: "blocked", reason: action.reason })
                   return { content: JSON.stringify(delivery) }
                 }
@@ -285,7 +289,7 @@ function profile() {
                 if (action.action === "check") return { content: JSON.stringify({ state: "open", checks: results }) }
                 if (submit.size)
                   return yield* new Tool.Error({ message: `Deliver by calling ${[...submit].join(" or ")}` })
-                if (!action.summary.trim()) return yield* new Tool.Error({ message: "A handoff summary is required" })
+                if (!action.summary?.trim()) return yield* new Tool.Error({ message: "A handoff summary is required" })
                 if (results.some((result) => !result.passed))
                   return {
                     content: JSON.stringify({ state: "open", reason: "Preflight checks failed", checks: results }),

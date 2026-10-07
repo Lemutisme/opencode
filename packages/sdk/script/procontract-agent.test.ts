@@ -205,6 +205,8 @@ test("failing preflight checks reject a submission before it reaches the orchest
   expect(result?.usage).toMatchObject({ tokens: { input: 40, output: 20 }, cost_usd: null })
   // the session saw one model, its effort, the admitted tools and the orchestrator's tools; nothing else
   expect(bodies[0]).toMatchObject({ model: "test-model", reasoning: { effort: "high" } })
+  // providers refuse tool schemas that are not a top-level object (Anthropic rejects oneOf/anyOf outright)
+  for (const tool of bodies[0].tools ?? []) expect(tool).toMatchObject({ parameters: { type: "object" } })
   expect(bodies[0].tools?.map((tool) => tool.name).sort()).toEqual([
     "contract_delivery",
     "dune_finish",
@@ -282,6 +284,12 @@ test("Anthropic Messages endpoints get the key as a bearer token and the model's
   expect(result).toMatchObject({ final_text: "Hello from Claude.", delivery: { state: "open" } })
   expect(headers[0]).toBe("Bearer model-secret")
   expect(bodies[0]).toMatchObject({ model: "test-model", thinking: { type: "adaptive" } })
+  const tools = (bodies[0] as { tools?: Array<{ name: string; input_schema: Record<string, unknown> }> }).tools ?? []
+  expect(tools.map((tool) => tool.name)).toContain("contract_delivery")
+  for (const tool of tools) {
+    expect(tool.input_schema.type).toBe("object")
+    expect(["oneOf", "anyOf", "allOf"].filter((key) => key in tool.input_schema)).toEqual([])
+  }
 }, 60_000)
 
 test("an invalid config is rejected with exit status 2", async () => {
