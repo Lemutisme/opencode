@@ -176,3 +176,61 @@ bun typecheck
 Full `bun run check` also requires a Node version that can load upstream's
 TypeScript lint plugins (qualification uses Node 22.22.0, not the host's Node 20).
 Qualification results and artifact coordinates are appended only after execution.
+
+## Delivered qualification — 2026-10-07
+
+Implementation: `e89a559d9f85532f055ad02e9c6a3ae239183d81` on `essential-rsi`.
+Later documentation/test-only changes do not alter this runtime. Frozen release:
+`/home/duozhou/run-artifacts/essential-rsi-20261007/release-2`.
+
+Built CLI: `/home/duozhou/opencode-essential-rsi/packages/cli/dist/cli-linux-x64/bin/opencode`.
+Version: `0.0.0-essential-rsi-e89a559`; SHA-256:
+`63b2880cac079e119437ef002a4606f6fc4aa96b4b03677e2e43d363f8c9bc71`.
+This CLI/TUI artifact was built with `--single --skip-install --skip-web-ui`;
+embedded Web UI assets are outside this artifact's qualification. It was not
+installed globally and did not replace the existing OpenCode service.
+
+The host's default `bun` is older. An independent copy of the qualified Bun 1.4.2
+is included at `/home/duozhou/run-artifacts/essential-rsi-20261007/toolchain/bun`.
+Use that executable explicitly, or prepend its directory to `PATH`; no global
+toolchain or historical qualification binary was overwritten. Historical run
+profiles retain their original tool paths rather than being rewritten to this copy.
+
+| Check                                                            | Recorded result                                                                                                                                            |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core responsibility, evidence gate, persistence and constitution | 12 pass, 0 fail                                                                                                                                            |
+| SDK checkpoint and filesystem boundary                           | 2 pass, 0 fail                                                                                                                                             |
+| Built CLI help and scoped cancellation                           | 2 pass, 0 fail                                                                                                                                             |
+| `bun run check`, including 36 package typecheck tasks            | exit 0; existing upstream lint warnings retained                                                                                                           |
+| `succession-2`                                                   | 2 selections, actual policies 0 → 1 → 2, original task discharged; 1,048 requests, 1,004 in a single native execution                                      |
+| `rejection-2`                                                    | confirmation regression rejected, policy 0 resumed and discharged original task; 24 requests                                                               |
+| `compiled-2`                                                     | the built `opencode contract run` command completed the full 0 → 1 → 2 chain and discharge; 46 requests                                                    |
+| `faults-2`                                                       | explicit cancellation, original-deadline expiry and live grant withdrawal fenced execution; all original tasks remained escalated with unchanged deadlines |
+
+The native runs use real V2 Session databases, tools, workspaces, namespaces,
+gateway and verifiers. Only model responses and qualification scoring are
+scripted. All admitted requests in the three complete runs were audited against
+the **exact policy text on the actual provider wire** and original deadline;
+none was late, and none had missing usage. The fault audit checked retained PID
+birth identities and found no surviving worker. It does not turn interrupted
+usage into zero or claim model capability gains.
+
+Evidence root: `/home/duozhou/run-artifacts/essential-rsi-20261007/`.
+Each named run has `RESULT.json`, native executions, private ledger and retained
+receipts. `WIRE_AUDIT.json` contains the independent post-run wire/deadline audit.
+Initial failed qualifications (`e2e-1`–`e2e-3`) and their logs remain present;
+`e2e-4` is an earlier successful source qualification, not pooled with the final
+frozen-release checks. No historical cohort was patched or re-scored.
+
+The complete SDK suite is **not wholly green**: 34 pass, 1 optional integration
+test skipped, 4 fail. A separate unmodified checkout of the exact upstream commit
+reproduced the same four failures (32 pass, 4 fail): the two ambient-Fetch transport
+cases, Promise event cancellation, and embedded plugin-backed web search.
+`sdk-tests.log` and `upstream-sdk-tests.log` retain both results. The skipped
+integration wrapper is not counted as passed; the retained native qualification
+and compiled-binary runs above separately exercise the full path.
+
+For the compiled-binary qualification, set `OPENCODE_TEST_BINARY` when running
+`pro-contract-qualify.ts` from the development checkout; `CLI.json` records the
+actual binary invocation, stdout and stderr. These additions are qualification
+code only, not a different solver or admission policy.

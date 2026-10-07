@@ -54,7 +54,32 @@ await Bun.write(path.join(root, "PROFILE.json"), JSON.stringify(config, null, 2)
 await Bun.write(path.join(root, "TASK.json"), JSON.stringify(task, null, 2))
 const host = await ProContractRSI.open(path.join(root, "campaign"), config)
 try {
-  const result = await host.run(task)
+  const binary = process.env.OPENCODE_TEST_BINARY
+  const result = await (async () => {
+    if (!binary) return host.run(task)
+    const child = Bun.spawn(
+      [
+        binary,
+        "contract",
+        "run",
+        path.join(root, "campaign"),
+        "--profile",
+        path.join(root, "PROFILE.json"),
+        "--task",
+        path.join(root, "TASK.json"),
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    )
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    await Bun.write(path.join(root, "CLI.json"), JSON.stringify({ binary, code, stdout, stderr }))
+    if (code !== 0) throw new Error(`Compiled CLI execution failed: ${stderr}`)
+    // This is output from the operator-selected compiled host, not candidate input.
+    return JSON.parse(stdout) as Awaited<ReturnType<typeof host.run>>
+  })()
   const original = wire.records.filter((record) => record.original)
   const stages = [...new Set(original.map((record) => record.stage))]
   if (result.contract.status !== "discharged" || JSON.stringify(stages) !== (regression ? "[0]" : "[0,1,2]"))
@@ -85,6 +110,7 @@ try {
     realModel: false,
     performanceClaim: false,
     mode: regression ? "rejection-with-incumbent-continuation" : "recursive-succession",
+    ...(binary ? { binary, binarySHA256: Bun.SHA256.hash(await Bun.file(binary).bytes(), "hex") } : {}),
     stages,
     result,
     comparisons: state.compared.length,
