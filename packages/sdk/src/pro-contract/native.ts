@@ -320,7 +320,8 @@ export async function run(input: {
       await Bun.file(path.join(state, "result.json")).text(),
     )
     if ((handoff.action === "propose") !== (handoff.method !== undefined)) throw new Error("Malformed native handoff")
-    if (input.evaluation && handoff.action === "propose") throw new Error("Nested evaluation proposal")
+    if ((input.evaluation || input.allowPropose === false) && handoff.action === "propose")
+      throw new Error("Method proposal is outside this execution's admission")
     const sealed = await snapshot(workspace, path.join(input.root, "checkpoints"))
     const receipt = {
       id: input.id,

@@ -5,6 +5,7 @@ import path from "node:path"
 
 const source = path.resolve(process.argv[2] ?? path.join(import.meta.dir, "../../.."))
 const target = process.argv[3]
+const worker = process.argv.includes("--worker")
 if (!target || !path.isAbsolute(target) || target === source || target.startsWith(source + path.sep))
   throw new Error("Usage: bun script/pro-contract-freeze.ts SOURCE ABSOLUTE_NEW_RELEASE")
 await fs.mkdir(target, { mode: 0o700 })
@@ -12,7 +13,15 @@ const list = Bun.spawn(["git", "ls-files", "--cached", "--others", "--exclude-st
   cwd: source,
   stdout: "pipe",
 })
-const names = (await new Response(list.stdout).text()).split("\0").filter(Boolean)
+const names = (await new Response(list.stdout).text())
+  .split("\0")
+  .filter(Boolean)
+  .filter(
+    (name) =>
+      !worker ||
+      (!/^(specs|docs|research|script|\.github|\.opencode)\//.test(name) &&
+        !/(^|\/)(test|tests|script|scripts|e2e|fixtures)\//.test(name)),
+  )
 if ((await list.exited) !== 0) throw new Error("Cannot enumerate runtime source")
 const files = await Promise.all(
   names.map(async (name) => {
@@ -55,4 +64,4 @@ await Bun.write(
   path.join(target, "RELEASE.json"),
   JSON.stringify({ upstream, sourceCommit, files: files.sort((a, b) => a.path.localeCompare(b.path)) }),
 )
-console.log(JSON.stringify({ directory: target, upstream, sourceCommit, files: files.length }))
+console.log(JSON.stringify({ directory: target, upstream, sourceCommit, files: files.length, worker }))

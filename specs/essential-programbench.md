@@ -35,6 +35,11 @@ not changed. The normative Kernel and public Contract Schema are unchanged.
   assignment and original deadline. No continuation resets the allocation.
 - The declared disk reserve is checked before new work. It is an infrastructure
   guard, never a substitute for an unlimited provider/action allowance.
+- Model-visible runtime releases use `pro-contract-freeze.ts --worker`, excluding
+  experiment specifications, scripts, tests and fixtures. This prevents the
+  operator's calibration notes or confirmation assignments from entering the
+  model-visible source/docs closure. Full operator sources remain separately
+  retained. Fixed-schedule handoffs are also checked at the host admission boundary.
 
 ## Proposed small study
 
