@@ -90,14 +90,16 @@ The agent also gets one tool, `contract_delivery`, with actions `status`, `check
 | `reasoning`    | `text`: one finished reasoning block                                                                                                                                                                                                                            |
 | `tool_call`    | `id`, `name`, `input`                                                                                                                                                                                                                                           |
 | `tool_result`  | `id`, `name`, `ok`, `output` (text, at most 64 KiB)                                                                                                                                                                                                             |
-| `usage`        | `source` (`step`, `title`, `compaction`), `tokens` {`input`, `output`, `reasoning`, `cache_read`, `cache_write`}, `cost_usd`                                                                                                                                    |
+| `usage`        | `source` (`step`, `title`, `compaction`), `tokens` {`input`, `output`, `reasoning`, `cache_read`, `cache_write`}, `cost_usd` (always `null`: no prices are configured; the orchestrator's model proxy knows the spend)                                          |
 | `delivery`     | `state` (`open`, `delivered`, `finished`, `blocked`), optional `reason`, `checks` [{`title`, `passed`, `detail`}]                                                                                                                                               |
 | `continuation` | `count`: the agent was prompted to continue                                                                                                                                                                                                                     |
 | `error`        | `message`                                                                                                                                                                                                                                                       |
 | `result`       | Last line. `session_id`, `delivery` {`state`, `reason`?}, `final_text`, `usage` {`tokens` (totals, same keys as a `usage` line), `cost_usd`}, `exit`, and `ended` (`terminated`, `interrupted`, `deadline reached`) when a signal or the deadline ended the run |
 
 `<state>/usage-<session_id>.json` holds the same totals as `result.usage`, rewritten after every `usage` line, so
-an orchestrator that kills the process still finds them.
+an orchestrator that kills the process still finds them. Totals cover this process (one `run` or `resume`), not the
+session's earlier history. A step reports its usage when it ends, after its tool calls settle: an orchestrator that
+kills the process the moment a submit tool answers may miss that last step's tokens.
 
 ## Exit status
 
@@ -110,11 +112,21 @@ an orchestrator that kills the process still finds them.
 | 143  | SIGTERM or SIGINT: the session was interrupted cleanly, the `result` line written.      |
 
 On SIGTERM the session is interrupted (which releases its execution claim, so `resume` never replays the
-interrupted turn) before the process exits.
+interrupted turn) before the process exits. After a hard kill the claim survives; on start the agent interrupts every
+session the host's startup recovery resumed before it prompts, which is best effort rather than a guarantee.
+
+## Known limitations
+
+- A submit tool's successful result is taken at face value. If the orchestrator answers that a submission is still
+  running (Dune's `still_running` after `call_timeout_seconds`), the run counts it as delivered.
+- Subagents are not admitted, and only one model is configured per run.
+- `model.context` and `model.output` default to 200000 and 32000 tokens unless the orchestrator sets them.
 
 ## Network
 
-Only the model endpoint and the configured MCP servers are contacted. Model catalog fetches, local model
+The variables named by `model.api_key_env` and `mcp.*.bearer_token_env` are removed from the environment before
+any command runs, so neither the `shell` tool nor the checks can read them. Only the model endpoint and the
+configured MCP servers are contacted. Model catalog fetches, local model
 discovery, auto-update, LSP downloads and file watching are off. `rg` must be on `PATH`. HTTP(S) proxies follow
 `HTTPS_PROXY`/`NO_PROXY`. Before the first prompt the agent connects every configured MCP server and waits (up to
 60 s) for its tools; a server that fails or exposes no tools ends the run with exit status 1. OpenCode keeps its

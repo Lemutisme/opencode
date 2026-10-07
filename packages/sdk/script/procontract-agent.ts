@@ -93,9 +93,17 @@ const submit = new Set(config.delivery?.submit_tools ?? [])
 const finish = new Set(config.delivery?.finish_tools ?? [])
 const checks = config.delivery?.checks ?? []
 await fs.mkdir(`${config.state}/config`, { recursive: true })
+// The host config carries the model key and MCP tokens; neither the shell tool nor the checks may inherit them.
+const content = JSON.stringify(settings())
+for (const name of [
+  config.model.api_key_env,
+  ...Object.values(config.mcp ?? {}).flatMap((server) => server.bearer_token_env ?? []),
+])
+  delete process.env[name]
 
 const delivery: Delivery = { state: "open" }
-const totals = { tokens: { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0 }, cost_usd: 0 }
+// No prices are configured, so cost is unknown here; the orchestrator's model proxy knows the spend.
+const totals = { tokens: { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0 }, cost_usd: null }
 const names = new Map<string, string>()
 let sessionID: Session.ID | undefined
 let lastSeq = -1
@@ -121,7 +129,7 @@ const program = Effect.gen(function* () {
     models: { fetch: false },
     fs: { filewatcher: false, fff: false },
     log: { level: "warn", emit: (entry) => process.stderr.write(`[${entry.level}] ${entry.message}\n`) },
-    config: { directory: `${config.state}/config`, project: false, content: JSON.stringify(settings()) },
+    config: { directory: `${config.state}/config`, project: false, content },
   })
   const agent = profile()
   yield* host.plugin(agent.plugin)
@@ -356,8 +364,8 @@ function project(event: LogEvent) {
       ok: false,
       output: [event.data.error.message, text(event.data.content ?? [])].filter(Boolean).join("\n"),
     })
-  if (event.type === "session.step.ended") return usage("step", event.data.tokens, event.data.cost)
-  if (event.type === "session.usage.recorded") return usage(event.data.source, event.data.tokens, event.data.cost)
+  if (event.type === "session.step.ended") return usage("step", event.data.tokens)
+  if (event.type === "session.usage.recorded") return usage(event.data.source, event.data.tokens)
   if (event.type === "session.step.failed") return emit({ type: "error", message: event.data.error.message })
   if (event.type === "session.execution.failed") {
     failed = true
@@ -386,7 +394,6 @@ function text(content: ReadonlyArray<{ type: string; text?: string; mime?: strin
 function usage(
   source: string,
   tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } },
-  cost: number,
 ) {
   const step: Tokens = {
     input: tokens.input,
@@ -396,8 +403,7 @@ function usage(
     cache_write: tokens.cache.write,
   }
   for (const key of Object.keys(step) as Array<keyof Tokens>) totals.tokens[key] += step[key]
-  totals.cost_usd += cost
-  emit({ type: "usage", source, tokens: step, cost_usd: cost })
+  emit({ type: "usage", source, tokens: step, cost_usd: null })
   // An orchestrator that kills this process still finds the totals.
   if (sessionID) void Bun.write(`${config.state}/usage-${sessionID}.json`, JSON.stringify(totals))
 }

@@ -191,7 +191,7 @@ test("failing preflight checks reject a submission before it reaches the orchest
   const run = await setup({ checks: [{ title: "ready marker", argv: ["test", "-f", "READY"] }] })
   reset(
     { tool: "dune_submit_candidate", input: { candidate: "cand" } },
-    { tool: "shell", input: { command: "touch READY", workdir: run.workspace } },
+    { tool: "shell", input: { command: "touch READY && env > environment", workdir: run.workspace } },
     { tool: "dune_submit_candidate", input: { candidate: "cand" } },
     { text: "Submitted." },
   )
@@ -202,7 +202,7 @@ test("failing preflight checks reject a submission before it reaches the orchest
   expect(submits.map((line) => line.ok)).toEqual([false, true])
   expect(String(submits[0].output)).toContain("ready marker")
   expect(result).toMatchObject({ type: "result", delivery: { state: "delivered" }, final_text: "Submitted.", exit: 0 })
-  expect(result?.usage).toMatchObject({ tokens: { input: 40, output: 20 } })
+  expect(result?.usage).toMatchObject({ tokens: { input: 40, output: 20 }, cost_usd: null })
   // the session saw one model, its effort, the admitted tools and the orchestrator's tools; nothing else
   expect(bodies[0]).toMatchObject({ model: "test-model", reasoning: { effort: "high" } })
   expect(bodies[0].tools?.map((tool) => tool.name).sort()).toEqual([
@@ -217,6 +217,10 @@ test("failing preflight checks reject a submission before it reaches the orchest
     "shell",
     "write",
   ])
+  // the model key and the MCP token never reach the agent's commands
+  const environment = await Bun.file(path.join(run.workspace, "environment")).text()
+  expect(environment).not.toContain("model-secret")
+  expect(environment).not.toContain("mcp-secret")
   const usage = await Bun.file(path.join(run.root, "state", `usage-${output[0].session_id}.json`)).json()
   expect(usage).toEqual(result?.usage)
 }, 60_000)
