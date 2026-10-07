@@ -472,3 +472,38 @@ HEAD、分支及 index 保持不变，只有一个生产文件、两个相关测
 完整命令、退出码、独立数据库路径、日志哈希、串行时间线和前后对照见[验证汇总](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/VERIFICATION.md)及[机器可读记录](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/verification.json)。[进程读取证据](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/materials-read-evidence.json)保留材料身份、各文件的实际工具读取核对及长文本恢复结果。[增量补丁](/workspace/native-advisory-next-steps-implementation-20261006T172229Z/baseline-delta.patch)相对已保存基线生成，在独立基线文件副本上正向应用核对，并在当前工作树作反向检查。
 
 HEAD、分支及 index 与基线一致，工作树仅保留两个生产文件、三个测试／夹具文件及本追加记录。未提交、未推送、未运行 generate、未调用真实模型；实施与验证结束，停在未提交的工作树，等待 Claude 把关。
+
+## 2026-10-07：第五轮核实提示观察
+
+本轮观察 `c4c1140aa` 的 advisory 修订：投递给 Researcher 的意见前加核实提示，reviewer 提示要求把依赖运行行为的结论标为未验证，三段长文本改为 `context/` 下的独立文件（见[定稿设计](pro-contract-researcher-native-advisory-next-steps.md)）。两个开启组 on-a、on-b 条件完全相同，依次运行，其余条件与第四轮开启组一致：Researcher 与 reviewer 均为 `gpt-5.6-luna` high，只开交付前节点，6 小时 deadline-only，本地盘运行写入。正式运行于 2026-10-07 07:02–07:28 UTC。
+
+| 项目 | on-a | on-b |
+| --- | --- | --- |
+| 签发到交付 | 14 分 3 秒 | 10 分 4 秒 |
+| Researcher／reviewer 请求 | 110／9 | 79／10 |
+| Researcher／reviewer tokens（网关口径） | 9,834,182／363,647 | 5,885,922／364,662 |
+| 原生 replay | 4 次，均通过 | 3 次，均通过 |
+| 交付前审阅 | 1 次 | 1 次 |
+
+两组都以 `native_handoff` 结束，清理 `confirmed`，gate 通过；on-b 在 on-a 的 gate 通过后才签发。没有 blocked、escalation 或 issuer resume。正式合计 208 次请求，网关口径 16,448,413 tokens；预检 4 次另计。费用未知。受保护输入在每次 replay 前后和运行结束时哈希都不变，所以没有需要恢复的情况；操作者没有重建全部代码版本，`gitRecoveryOccurred` 如实记为 `unknown`。
+
+**材料读取：**两组材料目录都有 `materials.json` 和三个 context 文件，所有读取都没有截断，读到的内容可还原为规范材料。on-a 读了清单和三个 context 文件；on-b 只读了清单和执行者声明，没有读 `context/task.md` 和 `context/reviewer-instructions.md`，这两段全文本来就在它的提示里。
+
+**事后定性审查（Claude，每组一个样本，只是观察，不打分）：**
+
+- reviewer：两份意见都说明自己没有运行代码，并把执行者声明中的测试通过、smoke 结果等标为未经独立验证；on-b 单列了"Runtime uncertainty"一节，并说明其主要问题是代数问题、不依赖运行行为。没有发现错误断言，前两轮排在第 1 条的那种运行行为错误这一轮没有出现。两个样本不足以确定是提示起的作用。
+- 两组的主要问题都核实成立。on-a 指出 Fock 范数采用印刷版分块展开，缺少零频与非零频之间的交叉项，所引代码行逐字准确；Researcher 的直接计算（完整范数 63.42，印刷版 22.95，只含非零频部分 41.06）证实了这一点。on-b 指出核函数展开的权重缺少 `exp(±i·a·p_i·y_j)` 相位因子（tex 第 583 行有、代码没有），且测试照抄了同样的遗漏。on-b 有几处 tex 行号偏了几十行，内容无误。
+- Researcher：on-a 按提示先写小脚本做直接计算（第一次写到 `/tmp` 被隔离拒绝，改写在工作区），确认后才改代码；保留印刷版作为主实现，新增完整范数 `full_fock_squared_norm` 作对照，并加了奇异分母诊断。on-b 没有先核实，直接补上两处相位因子并修正测试，之后运行单元测试（8 项通过）和 smoke；它的主要问题已被 reviewer 标为代数问题、读文档即可核对，不完全在核实提示的范围内，修改是正确的。两组都没有照错误意见改代码，但本轮也没有错误意见来考验这一点。
+- on-a 的 reviewer 还指出密度损失的目标使用了重建图像而不是原图，on-a 没有修改。这是 Researcher 的决定，符合"只提建议"。
+- 两组初稿的主要缺陷不同，reviewer 各自抓住了本组最主要的问题，同条件下 Researcher 产出的差异仍然不小。
+
+**结论：**核实提示和"标为未验证"的要求与预期方向一致：reviewer 区分了已读证据和未验证判断，没有出现错误断言；两个 Researcher 中一个先核实再修改。效果仍是小样本观察，不作因果结论。
+
+**后续事项更新：**
+
+- 第 8 项（交付前节点在流式响应中途拦截时，SDK 丢失 usage）在第四、五轮的 3 个开启组中每组都恰好出现一次（本轮 on-a、on-b 各 1 次，网关都有对应 usage）。在 high 档 Researcher 下这是常态，不是偶发；没有网关的部署会少计。优先级上调为下一项工作，先写小设计，涉及 Core 执行路径。
+- 第 7 项方向 (b)（reviewer 在隔离副本中运行检查）、按时间触发的中途节点、reviewer 升到 xhigh 保持原状。
+
+**合同状态：**两个合同都在独立的试运行数据库中，交付停在 `verification`，宿主已退出，没有作 Principal 认可，也不需要进一步处理。
+
+**证据目录：**`/workspace/sbno-native-advisory-preparation-20260924T054618Z/fifth-preparation-20261007T052407Z/`，正式运行记录在 `execution-20261007T065954Z/`（含 `RESULTS.md`、逐组审阅证据与后续工具序列），封存在 `seal-execution-20261007T065954Z/`；本地原件在 `/var/tmp/sbno-native-advisory-local-20261007T052407Z/`，删除需 Principal 明确同意。
