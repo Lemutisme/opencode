@@ -57,6 +57,17 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
     prompt: Flag.string("prompt").pipe(Flag.withDescription("Prompt to use"), Flag.optional),
   },
   commands: [
+    Spec.make("contract", {
+      description: "Run an isolated ProContract task with evidence-gated policy succession (Linux/Bun)",
+      params: {
+        action: Argument.choice("action", ["run", "resume", "inspect", "cancel"]),
+        root: Argument.string("root").pipe(
+          Argument.withDescription("Private scope directory; never a candidate workspace"),
+        ),
+        profile: Flag.string("profile").pipe(Flag.withDescription("Frozen host configuration JSON"), Flag.optional),
+        task: Flag.string("task").pipe(Flag.withDescription("Task JSON for run or explicit resume"), Flag.optional),
+      },
+    }),
     Spec.make("upgrade", {
       description: "Upgrade OpenCode to the latest or a specific version",
       aliases: ["update"],
@@ -142,7 +153,9 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
               "log",
               "repos",
             ]).pipe(
-              Argument.withDescription("Print only one path: db, home, data, config, cache, state, tmp, bin, log, repos"),
+              Argument.withDescription(
+                "Print only one path: db, home, data, config, cache, state, tmp, bin, log, repos",
+              ),
               Argument.optional,
             ),
           },

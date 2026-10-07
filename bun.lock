@@ -126,6 +126,7 @@
         "@opencode/client": "workspace:*",
         "@opencode/plugin": "workspace:*",
         "@opencode/schema": "workspace:*",
+        "@opencode/sdk": "workspace:*",
         "@opencode/server": "workspace:*",
         "@opencode/tui": "workspace:*",
         "@opencode/util": "workspace:*",

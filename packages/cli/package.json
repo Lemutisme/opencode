@@ -32,6 +32,7 @@
     "@opencode/plugin": "workspace:*",
     "@opencode-ai/pty": "0.2.0",
     "@opencode/schema": "workspace:*",
+    "@opencode/sdk": "workspace:*",
     "@opencode/server": "workspace:*",
     "@opencode/tui": "workspace:*",
     "@opencode/util": "workspace:*",
