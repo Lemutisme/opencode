@@ -370,7 +370,9 @@ function project(event: LogEvent) {
     })
   if (event.type === "session.step.ended") return usage("step", event.data.tokens)
   if (event.type === "session.usage.recorded") return usage(event.data.source, event.data.tokens)
-  if (event.type === "session.step.failed") return emit({ type: "error", message: event.data.error.message })
+  // A step the orchestrator's own SIGTERM interrupted is how a delivered run normally ends, not an error.
+  if (event.type === "session.step.failed")
+    return ending ? undefined : emit({ type: "error", message: event.data.error.message })
   if (event.type === "session.execution.failed") {
     failed = true
     return emit({ type: "error", message: event.data.error.message })
