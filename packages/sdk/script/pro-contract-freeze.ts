@@ -20,7 +20,8 @@ const names = (await new Response(list.stdout).text())
     (name) =>
       !worker ||
       (!/^(specs|docs|research|script|\.github|\.opencode)\//.test(name) &&
-        !/(^|\/)(test|tests|script|scripts|e2e|fixtures)\//.test(name)),
+        !/^packages\/[^/]+\/(test|tests|script|scripts|e2e|fixtures)\//.test(name) &&
+        !/^packages\/[^/]+\/src\/.*\/(test|tests|fixtures)\//.test(name)),
   )
 if ((await list.exited) !== 0) throw new Error("Cannot enumerate runtime source")
 const files = await Promise.all(
@@ -48,6 +49,7 @@ const dependencies = [
 ]
 for (const directory of dependencies) {
   if (!(await fs.stat(path.join(source, directory)).catch(() => undefined))) continue
+  await fs.mkdir(path.dirname(path.join(target, directory)), { recursive: true })
   const process = Bun.spawn(
     ["cp", "-a", "--reflink=auto", path.join(source, directory), path.join(target, directory)],
     { stdout: "inherit", stderr: "inherit" },
