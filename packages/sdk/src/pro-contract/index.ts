@@ -9,8 +9,10 @@ import { ProContract } from "@opencode/schema/pro-contract"
 import { ContractLedger } from "@opencode/core/pro-contract/ledger"
 import { RSI } from "@opencode/core/pro-contract/rsi"
 import { ContractNative } from "./native"
+import { ContractEnvironment } from "./environment"
+import { ContractProgramBench } from "./programbench"
 
-const Verifier = Schema.Struct({ directory: Schema.String, command: Schema.Array(Schema.String) })
+const Verifier = ContractNative.Verifier
 export const Configuration = Schema.Struct({
   runtime: Schema.Struct({ directory: Schema.String, bun: Schema.String, python: Schema.String, bwrap: Schema.String }),
   model: Schema.Struct({
@@ -20,6 +22,8 @@ export const Configuration = Schema.Struct({
     credential: Schema.optional(Schema.NonEmptyString),
   }),
   seed: RSI.Method,
+  proposals: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  reserveBytes: Schema.optional(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))),
   tests: Schema.Array(
     Schema.Struct({
       id: Schema.NonEmptyString,
@@ -29,6 +33,7 @@ export const Configuration = Schema.Struct({
       goal: Schema.NonEmptyString,
       directory: Schema.String,
       verifier: Verifier,
+      environment: Schema.optional(ContractEnvironment.Input),
     }),
   ),
 })
@@ -40,6 +45,8 @@ export const Task = Schema.Struct({
   total: Schema.Int.check(Schema.isGreaterThan(0)),
   verifier: Verifier,
   deadline: Schema.optional(Schema.Number),
+  environment: Schema.optional(ContractEnvironment.Input),
+  verification: Schema.optional(Schema.Literals(["feedback", "terminal"])),
 })
 export type Task = typeof Task.Type
 
@@ -58,6 +65,7 @@ export const initialMethod: RSI.Method = {
 export async function open(root: string, configuration: Configuration) {
   if (!path.isAbsolute(root)) throw new Error("An absolute private ledger directory is required")
   const config = Schema.decodeUnknownSync(Configuration)(configuration, { onExcessProperty: "error" })
+  nonoverlapping(root, config.runtime.directory)
   RSI.method(config.seed)
   await fs.mkdir(root, { recursive: true, mode: 0o700 })
   const checkpoints = path.join(root, "checkpoints")
@@ -66,14 +74,21 @@ export async function open(root: string, configuration: Configuration) {
   const tests = await Promise.all(
     config.tests.map(async (test) => {
       nonoverlapping(root, test.directory)
-      nonoverlapping(root, test.verifier.directory)
-      if (!test.verifier.command.length) throw new Error("Explicit verifier command required")
       const initial = await ContractNative.snapshot(test.directory, checkpoints)
-      const verifier = await ContractNative.snapshot(test.verifier.directory, checkpoints)
+      const verifier = await prepareVerifier(root, checkpoints, test.verifier)
+      if (test.environment) {
+        nonoverlapping(root, test.environment.directory)
+        const environment = await ContractEnvironment.checked(test.environment)
+        if (
+          "programbench" in test.verifier &&
+          (await ContractProgramBench.checked(test.verifier.programbench)).image !== environment.manifest.image
+        )
+          throw new Error("Solver and official evaluator task images differ")
+      }
       return {
         ...test,
         checkpoint: initial.hash,
-        verifier: { directory: verifier.directory, command: test.verifier.command },
+        verifier: verifier.value,
         verifierHash: verifier.hash,
       }
     }),
@@ -81,18 +96,32 @@ export async function open(root: string, configuration: Configuration) {
   const protocol = RSI.protocol({
     version: 1,
     performanceRule: "task-pareto",
-    environment: RSI.hash({ release, model: config.model, tests }),
+    environment: RSI.hash({
+      release,
+      model: config.model,
+      tests,
+      proposals: config.proposals,
+      reserveBytes: config.reserveBytes,
+    }),
     tests: tests.map((test) => ({
       id: test.id,
       panel: test.panel,
       repeats: test.repeats,
       total: test.total,
       checkpoint: test.checkpoint,
-      verifier: RSI.hash({ source: test.verifierHash, command: test.verifier.command }),
+      verifier: test.verifierHash,
     })),
   })
   const store = new ContractLedger.Store(path.join(root, "ledger.sqlite"), protocol, config.seed)
-  const frozen = { release, protocol, seed: config.seed, tests, model: config.model }
+  const frozen = {
+    release,
+    protocol,
+    seed: config.seed,
+    tests,
+    model: config.model,
+    proposals: config.proposals,
+    reserveBytes: config.reserveBytes,
+  }
   const manifest = path.join(root, "FROZEN.json")
   if (await Bun.file(manifest).exists()) {
     if (RSI.hash(await Bun.file(manifest).json()) !== RSI.hash(frozen)) throw new Error("Frozen configuration differs")
@@ -123,14 +152,26 @@ export async function open(root: string, configuration: Configuration) {
         controller.signal.throwIfAborted()
         if (existsSync(path.join(root, "CANCEL"))) throw new Error("Explicit cancellation")
         store.assertTask(store.read(), task.id)
+        if (config.reserveBytes !== undefined) {
+          const disk = await fs.statfs(root)
+          if (disk.bavail * disk.bsize < config.reserveBytes) throw new Error("Disk reserve infrastructure guard")
+        }
         if ((await releaseIdentity(config.runtime)) !== release) throw new Error("Runtime release changed")
       }
       const current: { execution?: string } = {}
       try {
         nonoverlapping(root, task.directory)
-        nonoverlapping(root, task.verifier.directory)
         const initial = await ContractNative.snapshot(task.directory, checkpoints)
-        const verifier = await ContractNative.snapshot(task.verifier.directory, checkpoints)
+        const verifier = await prepareVerifier(root, checkpoints, task.verifier)
+        if (task.environment) {
+          nonoverlapping(root, task.environment.directory)
+          const environment = await ContractEnvironment.checked(task.environment)
+          if (
+            "programbench" in task.verifier &&
+            (await ContractProgramBench.checked(task.verifier.programbench)).image !== environment.manifest.image
+          )
+            throw new Error("Original task and evaluator environments differ")
+        }
         const before = store.read()
         const deadline =
           task.deadline ?? before.kernel.contracts[task.id]?.spec.budget.deadline ?? Date.now() + 6 * 60 * 60 * 1000
@@ -163,11 +204,30 @@ export async function open(root: string, configuration: Configuration) {
             feedback: binding.feedback,
             evaluation: false,
             signal: controller.signal,
+            environment: task.environment,
+            allowPropose:
+              config.proposals === undefined ||
+              Object.values(state.proposals).filter((proposal) => proposal.task === task.id).length < config.proposals,
           })
           store.checkpoint(task.id, current.execution, result.checkpoint, result.handoff.summary)
           delete current.execution
           await check()
           if (result.handoff.action === "blocked") {
+            if (task.verification === "terminal") {
+              const grade = await ContractNative.grade({
+                root,
+                runtime: config.runtime,
+                verifier: verifier.value,
+                checkpoint: result.checkpoint,
+                deadline,
+                signal: controller.signal,
+              })
+              if (grade.result.total !== task.total) throw new Error("Blocked task verifier denominator changed")
+              await Bun.write(
+                path.join(root, "FINAL_SCORE.json"),
+                JSON.stringify({ task: task.id, checkpoint: result.checkpoint, disposition: "blocked", ...grade }),
+              )
+            }
             store.interrupted(task.id, result.handoff.summary, true)
             break
           }
@@ -176,13 +236,17 @@ export async function open(root: string, configuration: Configuration) {
             const grade = await ContractNative.grade({
               root,
               runtime: config.runtime,
-              verifier: { directory: verifier.directory, command: task.verifier.command },
+              verifier: verifier.value,
               checkpoint: result.checkpoint,
               deadline,
               signal: controller.signal,
             })
             if (grade.result.total !== task.total) throw new Error("Original task verifier denominator changed")
-            store.settleTask(task.id, grade.result)
+            await Bun.write(
+              path.join(root, "FINAL_SCORE.json"),
+              JSON.stringify({ task: task.id, checkpoint: result.checkpoint, disposition: "submitted", ...grade }),
+            )
+            store.settleTask(task.id, grade.result, task.verification)
             continue
           }
           const method = RSI.method(result.handoff.method)
@@ -200,7 +264,7 @@ export async function open(root: string, configuration: Configuration) {
             for (let repeat = 0; repeat < test.repeats; repeat++) {
               for (const side of ["baseline", "candidate"] as const) {
                 await check()
-                const observation = await ContractNative.run({
+                const observation = await ContractNative.evaluate({
                   root,
                   id: crypto.randomUUID(),
                   runtime: config.runtime,
@@ -215,6 +279,7 @@ export async function open(root: string, configuration: Configuration) {
                   evaluation: true,
                   signal: controller.signal,
                   assignment: { side, test: test.id, repeat },
+                  environment: test.environment,
                 })
                 const grade = await ContractNative.grade({
                   root,
@@ -235,7 +300,7 @@ export async function open(root: string, configuration: Configuration) {
                   execution: observation.receipt,
                   verification: store.object({
                     artifact: observation.checkpoint,
-                    verifier: RSI.hash({ source: test.verifierHash, command: test.verifier.command }),
+                    verifier: test.verifierHash,
                     ...grade.result,
                   }),
                 }
@@ -283,6 +348,20 @@ export async function open(root: string, configuration: Configuration) {
         owner.busy = false
       }
     },
+  }
+}
+
+async function prepareVerifier(root: string, checkpoints: string, verifier: ContractNative.Verifier) {
+  if ("programbench" in verifier) {
+    await ContractProgramBench.checked(verifier.programbench)
+    return { value: verifier, hash: RSI.hash(verifier) }
+  }
+  nonoverlapping(root, verifier.directory)
+  if (!verifier.command.length) throw new Error("Explicit verifier command required")
+  const frozen = await ContractNative.snapshot(verifier.directory, checkpoints)
+  return {
+    value: { directory: frozen.directory, command: verifier.command },
+    hash: RSI.hash({ source: frozen.hash, command: verifier.command }),
   }
 }
 

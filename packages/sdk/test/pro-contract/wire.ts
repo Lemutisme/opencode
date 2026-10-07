@@ -8,7 +8,9 @@ const Request = Schema.Struct({
 })
 
 /** Scripted Responses provider, not a learned policy or performance claim. */
-export function fixture(options: { regression?: boolean; warmup?: number; block?: boolean } = {}) {
+export function fixture(
+  options: { regression?: boolean; warmup?: number; block?: boolean; checkpoint?: boolean } = {},
+) {
   const records: { stage: number; original: boolean; safety: boolean; request: unknown }[] = []
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -20,6 +22,7 @@ export function fixture(options: { regression?: boolean; warmup?: number; block?
       const original = text.includes("MECHANICS_ORIGINAL")
       const safety = text.includes("MECHANICS_SAFETY")
       const confirmation = text.includes("MECHANICS_CONFIRMATION")
+      const continued = text.includes("MECHANICS_EVALUATION_CHECKPOINT")
       const outputs = body.input.filter((item) => item.type === "function_call_output")
       records.push({ stage, original, safety, request: body })
       if (stage < 0) return new Response("Selected policy is absent from actual native request", { status: 400 })
@@ -49,20 +52,28 @@ PY
           : containment +
             (original
               ? `${stage > 0 || resumed ? "test -f public-observation.txt && cat public-observation.txt\n" : ""}printf 'Public counterexample retained across sessions\\n' > public-observation.txt\nprintf '${stage}\\n' >> successors.txt\nprintf '${resumed ? 2 : stage}' > answer.txt`
-              : `printf '${score}' > answer.txt`)
+              : `${continued ? "test -f checkpoint.txt\n" : "printf retained > checkpoint.txt\n"}printf '${score}' > answer.txt`)
       if (step > 0 && !JSON.stringify(outputs.at(-1)).includes("CONTAINMENT_OK"))
         return new Response("Real containment probe failed", { status: 400 })
       const propose = original && stage < 2 && !resumed
       const arguments_ =
         step <= 0
           ? { command, workdir: "/workspace", timeout: 30000 }
-          : propose
+          : options.checkpoint && !original && !continued
             ? {
-                action: "propose",
-                summary: "Retained public experience suggests a different investigation and checkpoint policy.",
-                instructions: `METHOD_STAGE=${stage + 1}\nRetain public counterexamples, probe their causes, and carry useful observations through a fresh context. Apply this method to tasks and future method proposals.`,
+                action: "checkpoint",
+                summary: "MECHANICS_EVALUATION_CHECKPOINT: retain this public work and continue the unchanged method.",
               }
-            : { action: "submit", summary: "Artifact submitted for independent host verification, not self-certified." }
+            : propose
+              ? {
+                  action: "propose",
+                  summary: "Retained public experience suggests a different investigation and checkpoint policy.",
+                  instructions: `METHOD_STAGE=${stage + 1}\nRetain public counterexamples, probe their causes, and carry useful observations through a fresh context. Apply this method to tasks and future method proposals.`,
+                }
+              : {
+                  action: "submit",
+                  summary: "Artifact submitted for independent host verification, not self-certified.",
+                }
       const item = {
         type: "function_call",
         id: `fc_${records.length}`,

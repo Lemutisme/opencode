@@ -15,6 +15,7 @@ const Input = Schema.Struct({
   instructions: Schema.String,
   feedback: Schema.Array(Schema.String),
   evaluation: Schema.Boolean,
+  allowPropose: Schema.Boolean,
 })
 const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(await Bun.file("/admission/input.json").text())
 const active = () => {
@@ -71,7 +72,9 @@ const plugin = Plugin.define({
         description:
           "Hand off this execution. submit requests independent acceptance; checkpoint retains work and refreshes context; propose requests independent evaluation of a new method; blocked retains unresolved responsibility. None grants acceptance or deployment. The original deadline does not change.",
         input: Schema.Struct({
-          action: Schema.Literals(["submit", "checkpoint", "propose", "blocked"]),
+          action: input.allowPropose
+            ? Schema.Literals(["submit", "checkpoint", "propose", "blocked"])
+            : Schema.Literals(["submit", "checkpoint", "blocked"]),
           summary: Schema.NonEmptyString,
           instructions: Schema.optional(Schema.NonEmptyString),
         }),
@@ -81,8 +84,8 @@ const plugin = Plugin.define({
             active()
             call.signal.throwIfAborted()
             if (result.value) throw new Error("Execution was already handed off")
-            if (input.evaluation && value.action === "propose")
-              throw new Error("Fixed-pair measurement cannot nest RSI")
+            if (!input.allowPropose && value.action === "propose")
+              throw new Error("Method proposals are not admitted in this allocation")
             if ((value.action === "propose") !== (value.instructions !== undefined))
               throw new Error("Only a proposal contains replacement instructions")
             result.value = {
@@ -171,9 +174,10 @@ try {
       sessionID: session.id,
       text: [
         input.goal,
+        `Original absolute deadline: ${new Date(input.deadline).toISOString()}. Task execution, adaptation and final verification share this allowance; leave time for verification.`,
         "Your workspace and retained public observations are the task's continuing work. Use contract_handoff explicitly. A final answer is not task acceptance. Do not modify the goal, verifier or original deadline. Public self-checks are observations, not independent acceptance. A new method may change how you investigate, test, checkpoint and learn; it will apply to successors, including their future proposals.",
-        input.evaluation
-          ? "This is a fixed-method evaluation; do not propose another method."
+        !input.allowPropose
+          ? "This is a fixed-method allocation; do not propose another method. You may retain public observations, checkpoint, submit, or report blocked."
           : "You may propose a reusable improvement grounded in public experience, or checkpoint to refresh context without changing methods.",
         "The most recent public observations follow. The complete, unmodified observation list remains readable in /admission/input.json; excerpts do not resolve older obligations.",
         ...input.feedback

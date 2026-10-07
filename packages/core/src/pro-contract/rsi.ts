@@ -25,6 +25,7 @@ export const Execution = Schema.Struct({
   evaluation: Schema.Boolean,
   fenced: Schema.Literal(true),
   handoff: Handoff,
+  segments: Schema.optional(Schema.Array(Digest)),
   assignment: Schema.optional(
     Schema.Struct({ test: Schema.String, repeat: Schema.Int, side: Schema.Literals(["baseline", "candidate"]) }),
   ),

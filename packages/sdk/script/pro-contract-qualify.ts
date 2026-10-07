@@ -9,7 +9,7 @@ const [root, release, bun = process.execPath] = process.argv.slice(2)
 if (!root || !release) throw new Error("Usage: bun script/pro-contract-qualify.ts NEW_ROOT FROZEN_RELEASE [BUN]")
 await fs.mkdir(root, { mode: 0o700 })
 const regression = process.env.PROCONTRACT_QUALIFY_MODE === "rejected"
-const wire = fixture({ regression, warmup: Number(process.env.PROCONTRACT_QUALIFY_WARMUP ?? 0) })
+const wire = fixture({ regression, warmup: Number(process.env.PROCONTRACT_QUALIFY_WARMUP ?? 0), checkpoint: process.env.PROCONTRACT_QUALIFY_CHECKPOINT === "1" })
 const initial = path.join(root, "input")
 const privateRoot = path.join(root, "private")
 await fs.mkdir(initial)

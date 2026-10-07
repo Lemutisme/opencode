@@ -162,8 +162,12 @@ export class Store {
     })
   }
 
-  settleTask(id: ProContract.ID, evidence: { passed: number; total: number; valid: boolean; feedback?: string }) {
-    this.change({ type: "task-verification", task: id, evidence }, (state, apply) => {
+  settleTask(
+    id: ProContract.ID,
+    evidence: { passed: number; total: number; valid: boolean; feedback?: string },
+    mode: "feedback" | "terminal" = "feedback",
+  ) {
+    this.change({ type: "task-verification", task: id, evidence, mode }, (state, apply) => {
       this.assertTask(state, id)
       const task = state.tasks[id]
       if (task.execution) throw new Error("Verify only fenced work")
@@ -199,11 +203,16 @@ export class Store {
           revision: 1,
           subjectHash: task.checkpoint,
           evidenceHash: hash,
-          disclosure: "executor",
-          summary: evidence.feedback || "Independent verification did not accept the task",
+          ...(mode === "terminal"
+            ? { disclosure: "sealed" as const }
+            : {
+                disclosure: "executor" as const,
+                summary: evidence.feedback || "Independent verification did not accept the task",
+              }),
           time: Date.now(),
         },
       })
+      if (mode === "terminal") return
       task.feedback.push(evidence.feedback || "Independent verification did not accept the task")
       apply({ type: "activate", actor: "institution", contractID: id, revision: 1, time: Date.now() })
     })
@@ -256,6 +265,30 @@ export class Store {
         const execution = Schema.decodeUnknownSync(RSI.Execution)(this.inspect(row.execution))
         if (executions.has(execution.id)) throw new Error("A physical execution cannot fill two measurement slots")
         executions.add(execution.id)
+        if (execution.segments) {
+          if (!execution.segments.length) throw new Error("Empty evaluation continuation chain")
+          const segments = execution.segments.map((hash) => Schema.decodeUnknownSync(RSI.Execution)(this.inspect(hash)))
+          segments.forEach((segment, index) => {
+            if (segment.segments || executions.has(segment.id)) throw new Error("Reused or nested evaluation execution")
+            executions.add(segment.id)
+            if (
+              segment.task !== execution.task ||
+              !segment.evaluation ||
+              segment.method !== execution.method ||
+              RSI.hash(segment.parent) !== RSI.hash(execution.parent) ||
+              segment.deadline !== execution.deadline ||
+              RSI.hash(segment.assignment) !== RSI.hash(execution.assignment) ||
+              segment.input !== (index ? segments[index - 1].output : execution.input) ||
+              (index < segments.length - 1 && segment.handoff.action !== "checkpoint")
+            )
+              throw new Error("Evaluation continuation changed its admitted method, input or allowance")
+          })
+          if (
+            segments.at(-1)!.output !== execution.output ||
+            RSI.hash(segments.at(-1)!.handoff) !== RSI.hash(execution.handoff)
+          )
+            throw new Error("Evaluation handoff does not match its final segment")
+        }
         const verification = Schema.decodeUnknownSync(RSI.Verification)(this.inspect(row.verification))
         const test = state.protocol.tests.find((test) => test.id === row.test)
         if (

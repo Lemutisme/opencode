@@ -7,6 +7,8 @@ import { Schema } from "effect"
 import { RSI } from "@opencode/core/pro-contract/rsi"
 import { ProContract } from "@opencode/schema/pro-contract"
 import { ContractLedger } from "@opencode/core/pro-contract/ledger"
+import { ContractEnvironment } from "./environment"
+import { ContractProgramBench } from "./programbench"
 
 export type Runtime = { directory: string; bun: string; python: string; bwrap: string }
 export type Model = { id: string; effort: string; upstream: string; credential?: string }
@@ -18,7 +20,11 @@ export const Grade = Schema.Struct({
   feedback: Schema.optional(Schema.String),
 })
 export type Grade = typeof Grade.Type
-export type Verifier = { directory: string; command: readonly string[] }
+export const Verifier = Schema.Union([
+  Schema.Struct({ directory: Schema.String, command: Schema.Array(Schema.String) }),
+  Schema.Struct({ programbench: ContractProgramBench.Input }),
+])
+export type Verifier = typeof Verifier.Type
 type Entry = { path: string; directory: true } | { path: string; hash: string; executable: boolean; directory?: false }
 
 export async function snapshot(source: string, objects: string) {
@@ -78,36 +84,50 @@ export async function restore(objects: string, hash: string, destination: string
   }
 }
 
-export function sandbox(runtime: Runtime, workspace: string, state: string) {
+export function sandbox(
+  runtime: Runtime,
+  workspace: string,
+  state: string,
+  environment?: {
+    directory: string
+    reference: string
+    values: Readonly<Record<string, string>>
+  },
+) {
   return [
     runtime.bwrap,
     "--unshare-all",
     "--die-with-parent",
     "--new-session",
     "--as-pid-1",
+    ...(environment ? ["--ro-bind", environment.directory, "/"] : []),
     "--proc",
     "/proc",
     "--dev",
     "/dev",
     "--tmpfs",
     "/tmp",
-    "--dir",
-    "/etc",
-    "--ro-bind",
-    "/usr",
-    "/usr",
-    "--ro-bind",
-    "/lib",
-    "/lib",
-    "--ro-bind",
-    "/lib64",
-    "/lib64",
-    "--symlink",
-    "/usr/bin",
-    "/bin",
-    "--symlink",
-    "/usr/sbin",
-    "/sbin",
+    ...(environment
+      ? ["--ro-bind", environment.reference, "/reference/executable"]
+      : [
+          "--dir",
+          "/etc",
+          "--ro-bind",
+          "/usr",
+          "/usr",
+          "--ro-bind",
+          "/lib",
+          "/lib",
+          "--ro-bind",
+          "/lib64",
+          "/lib64",
+          "--symlink",
+          "/usr/bin",
+          "/bin",
+          "--symlink",
+          "/usr/sbin",
+          "/sbin",
+        ]),
     "--ro-bind",
     runtime.directory,
     "/runtime",
@@ -125,7 +145,10 @@ export function sandbox(runtime: Runtime, workspace: string, state: string) {
     "--clearenv",
     "--setenv",
     "PATH",
-    "/tools:/usr/bin:/bin",
+    "/tools:" + (environment?.values.PATH ?? "/usr/bin:/bin"),
+    ...Object.entries(environment?.values ?? {})
+      .filter(([key]) => key !== "PATH")
+      .flatMap(([key, value]) => ["--setenv", key, value]),
     "--setenv",
     "HOME",
     "/state/home",
@@ -165,6 +188,8 @@ export async function run(input: {
   evaluation: boolean
   signal: AbortSignal
   assignment?: { test: string; repeat: number; side: "baseline" | "candidate" }
+  environment?: ContractEnvironment.Input
+  allowPropose?: boolean
 }) {
   const root = path.join(input.root, "executions", input.id)
   const workspace = path.join(root, "workspace")
@@ -181,6 +206,7 @@ export async function run(input: {
   input.store.assertMethod(initial, input.parent)
   const deadline = initial.kernel.contracts[input.task].spec.budget.deadline
   const method = RSI.method(input.method)
+  const environment = input.environment ? await ContractEnvironment.checked(input.environment) : undefined
   await Bun.write(
     path.join(admission, "input.json"),
     JSON.stringify({
@@ -191,11 +217,23 @@ export async function run(input: {
       instructions: method.instructions,
       feedback: input.feedback,
       evaluation: input.evaluation,
+      allowPropose: !input.evaluation && (input.allowPropose ?? true),
     }),
   )
   const worker = Bun.spawn(
     [
-      ...sandbox(input.runtime, workspace, state),
+      ...sandbox(
+        input.runtime,
+        workspace,
+        state,
+        input.environment && environment
+          ? {
+              directory: input.environment.directory,
+              reference: environment.reference,
+              values: environment.manifest.environment,
+            }
+          : undefined,
+      ),
       "--info-fd",
       "3",
       "--ro-bind",
@@ -294,6 +332,7 @@ export async function run(input: {
       deadline,
       evaluation: input.evaluation,
       ...(input.assignment ? { assignment: input.assignment } : {}),
+      ...(environment ? { environment: environment.identity } : {}),
       session: await Bun.file(path.join(state, "identity.json")).json(),
       handoff,
       fenced: true,
@@ -321,6 +360,33 @@ export async function run(input: {
   }
 }
 
+/** A fixed-pair allocation may refresh context without truncating the policy's
+ * workflow at its first checkpoint. Every segment shares the original allowance. */
+export async function evaluate(input: Parameters<typeof run>[0]) {
+  if (!input.evaluation) throw new Error("Only fixed-pair allocations use evaluation continuation")
+  const segments: Awaited<ReturnType<typeof run>>[] = []
+  while (true) {
+    const observed = await run({
+      ...input,
+      id: `${input.id}-${segments.length + 1}`,
+      checkpoint: segments.at(-1)?.checkpoint ?? input.checkpoint,
+      feedback: segments.map((segment) => segment.handoff.summary),
+    })
+    segments.push(observed)
+    if (observed.handoff.action === "checkpoint") continue
+    const last = Schema.decodeUnknownSync(RSI.Execution)(input.store.inspect(observed.receipt))
+    return {
+      ...observed,
+      receipt: input.store.object({
+        ...last,
+        id: input.id,
+        input: input.checkpoint,
+        segments: segments.map((segment) => segment.receipt),
+      }),
+    }
+  }
+}
+
 export async function grade(input: {
   root: string
   runtime: Runtime
@@ -334,6 +400,14 @@ export async function grade(input: {
   const state = path.join(root, "state")
   await fs.mkdir(state, { recursive: true, mode: 0o700 })
   await restore(path.join(input.root, "checkpoints"), input.checkpoint, workspace)
+  if ("programbench" in input.verifier)
+    return ContractProgramBench.grade({
+      root,
+      workspace,
+      deadline: input.deadline,
+      signal: input.signal,
+      verifier: input.verifier.programbench,
+    })
   const process = Bun.spawn(
     [
       ...sandbox(input.runtime, workspace, state),

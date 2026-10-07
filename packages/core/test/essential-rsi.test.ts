@@ -138,6 +138,19 @@ describe("minimal RSI evidence gate", () => {
 })
 
 describe("responsibility survives method evolution", () => {
+  test("terminal benchmark verification retains a partial score without another solve admission", async () => {
+    await using directory = await tmpdir("essential-terminal-")
+    const store = new ContractLedger.Store(directory.path + "/ledger.sqlite", protocol, seed)
+    const admission = input()
+    store.issue(admission)
+    store.settleTask(id, { passed: 4, total: 10, valid: true, feedback: "PRIVATE_DIAGNOSTIC" }, "terminal")
+    expect(store.read().kernel.contracts[id].status).toBe("escalated")
+    expect(store.read().kernel.contracts[id].challenge?.disclosure).toBe("sealed")
+    expect(store.read().tasks[id].feedback).not.toContain("PRIVATE_DIAGNOSTIC")
+    expect(store.read().kernel.contracts[id].spec.budget.deadline).toBe(admission.deadline)
+    expect(() => store.begin(id, "extra-solve")).toThrow("not active")
+    store.close()
+  })
   test("selection requires admitted, producer-bound execution and verifier receipts", async () => {
     await using directory = await tmpdir("essential-binding-")
     const store = new ContractLedger.Store(directory.path + "/ledger.sqlite", protocol, seed)
