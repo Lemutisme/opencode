@@ -1,13 +1,13 @@
 # V2 原生 advisory：supervisor 交接说明
 
-日期：2026-10-08。写给接手 planner 与 code review 角色的 fresh Claude session。上一任 supervisor（Claude）从 2026-09-23 起主持 `native-advisory` 工作线，并起草了本分支的 [V2 advisory 设计稿](pro-contract-v2-advisory.md)。本文只交接继续工作所需的信息；细节以所引文件和源码为准，不确定时先核实再下结论。
+日期：2026-10-08；同日更新：设计第 5 版获批，进入实施。写给接手 planner 与 code review 角色的 fresh Claude session。上一任 supervisor（Claude）从 2026-09-23 起主持 `native-advisory` 工作线，并起草了本分支设计稿第 1 版；第 2 至第 5 版由接任的 supervisor 修订。本文只交接继续工作所需的信息；细节以所引文件和源码为准，不确定时先核实再下结论。
 
 ## 1. 角色与工作方式
 
 - **Principal 是用户本人**，负责所有决定：方案取舍、实施授权、提交、推送、启动实验、删除任何数据。用户用中文交流。
 - **planner 与 code review：**fresh Claude（你）。负责写设计和方案、给其他 session 写 prompt、审查实施结果、核对运行记录，并把需要 Principal 决定的事项清楚列出。
 - **implementer：**fresh Codex session，按你写的 prompt 实施，完成后停在未提交的工作树，等你把关。
-- **独立审查：**设计稿以及任何涉及停止、隔离、计量边界的改动，在实施前额外请一个 fresh Codex 只读独立审查。上一轮正是这一步找出了上一任 supervisor 漏掉的阻断问题（见第 5 节）。对审查结论同样要逐条对照源码核实，不盲从。
+- **独立审查：**设计稿以及任何涉及停止、隔离、计量边界的改动，在实施前额外请一个 fresh Codex 只读独立审查。本轮第 2 版的审查和随后两轮复核都找出了真实问题（见第 3 节）。对审查结论同样要逐条对照源码核实，不盲从。
 - **沟通要求：**
   - 用平实的中文解释，先说结论和影响，少用内部术语；用户多次需要追问才理解过于技术化的说明。
   - 每次把需要用户决定的事项编号列出，并给出建议。
@@ -17,7 +17,7 @@
 
 ## 2. 目标与原则
 
-**目标：**在 Researcher（V2 原生 worker）执行长任务的整个过程中，在每个关键节点提供独立的第二意见，降低低级错误和方向性错误的概率；ProContract 负责任务责任、进度判断和长任务完整性，reviewer 负责提高正确性的概率，两者互补。
+**目标：**在 Researcher（V2 原生 worker）执行长任务的过程中，在关键节点提供独立的第二意见，降低相对低级的错误和方向性错误的概率；ProContract 负责任务责任、进度判断和长任务完整性，reviewer 负责提高正确性的概率，两者互补。
 
 **Principal 已定的原则：**
 
@@ -27,37 +27,52 @@
 4. 尽量不改基础设施，只做 reviewer 必需的部分。
 5. 吸取上一轮 `native-advisory` 的经验教训。
 6. **ProgramBench 必须能直接跑：**advisory 默认关闭，不开启时行为与 `procontract-closure` 完全一致，不需要 intern 额外处理分支。分支推送后，用户会让 intern 在 ProgramBench 上做系统评估（`procontract-closure` 之前已在 ProgramBench 上测过）。
-7. 只设六小时原始 deadline，不设累计请求、轮数、动作或费用上限，见仓库 `AGENTS.md`。
+7. 只设六小时原始 deadline，不延长，不设累计请求、轮数、动作或费用上限，见本分支 `AGENTS.md` 的"ProContract and RSI Migration"。
+8. **reviewer 只在关键节点提个醒**，不在程序和门槛上引入更复杂的机制（2026-10-08）。保留的保护只用于"开启 advisory 不会让结果变坏、记录如实"。
 
-**关于第一版范围：**用户"勉强同意"第一版可以只做交付前审阅，但明确表示最终版本必须覆盖长任务过程中的关键节点。设计稿因此按多节点搭建，第一版启用哪些节点待用户决定。
+**关于第一版范围：**用户"勉强同意"第一版可以只做交付前审阅，但明确表示最终版本必须覆盖长任务过程中的关键节点。第一版实现交付前、报告 blocked 前、Session 空闲三个节点；中途节点待第一次 ProgramBench 评估的轨迹再定（设计稿第 2 节）。注意 blocked 和空闲节点只在 Researcher 放弃或提前停下时出现，顺利的运行只经过交付前节点。
 
 ## 3. 当前状态
 
 **分支与工作目录：**
 
-| 工作目录                               | 分支                                                                    | 状态                                                                                                                                                        |
-| -------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/workspace/opencode-closure-advisory` | `closure-advisory`，从 `origin/procontract-closure`（`66128706b2`）建出 | 本交接说明和设计稿所在；**已取消对 `procontract-closure` 的跟踪**，以免误推到 Duo 的分支；将来推送时显式推到同名远端分支 `closure-advisory`。依赖尚未安装。 |
-| `/workspace/opencode`                  | `native-advisory`                                                       | 上一轮工作线，HEAD `0d35d8da4`，比 `origin/native-advisory`（`906c507dc`）多 1 个未推送的文档提交。用户暂不推送。不再在这条分支上继续开发。                 |
+| 工作目录                               | 分支                                                                    | 状态                                                                                                                                                                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/workspace/opencode-closure-advisory` | `closure-advisory`，从 `origin/procontract-closure`（`66128706b2`）建出 | 设计稿第 5 版和本交接说明已提交，未推送。**已取消对 `procontract-closure` 的跟踪**，以免误推到 Duo 的分支；将来推送时显式推到同名远端分支 `closure-advisory`。2026-10-08 查询时远端 `procontract-closure` 仍为 `66128706b2`。依赖已安装（第 4 节）。 |
+| `/workspace/opencode`                  | `native-advisory`                                                       | 上一轮工作线，HEAD `0d35d8da4`，比 `origin/native-advisory`（`906c507dc`）多 1 个未推送的文档提交。用户决定暂不处理。不再在这条分支上继续开发；它与 `closure-advisory` 只共用 git 仓库，互不影响。                                                   |
 
-**设计稿：**[pro-contract-v2-advisory.md](pro-contract-v2-advisory.md)。核心思路：V2 的运行器先把模型回复读完，再等待工具完成（`packages/core/src/session/runner/step.ts`），所以在 Researcher 自己发起的工具调用（`handoff`、`blocked`）内同步审阅，或者在 Session 自然空闲时审阅，都不会中断任何回复或工具，用量也完整。改动只在 `packages/sdk/script/` 的 worker 脚本，Core、Server、网关核对逻辑都不改。
+**设计稿：**[pro-contract-v2-advisory.md](pro-contract-v2-advisory.md) 第 5 版，Principal 已于 2026-10-08 批准（含第 11 节的全部取舍）。要点：
 
-**待用户决定的事项**（设计稿第 9 节）：
+- 三个节点：交付前（交付照常记录，意见附在结果之后）、报告 blocked 前（第一次先审阅、不记录）、Session 空闲（满 `afterMs` 才审阅，意见附在既有继续提示之后）。
+- 审阅在 Researcher 自己的 `handoff`、`blocked` 调用内或 Session 空闲时进行，期间占住 `delivery.exclusive`。reviewer 是同一进程内的只读 Session，直接读候选目录，按 Session ID 绕过工具队列。
+- 开启时初始提示说明 advisory；每条提醒告诉 Researcher 剩余时间，交付前提醒写明超时后果；deadline 不延长。
+- 停止：审阅结束后先做有效性检查，父级停止优先；独立来源的中断（Location 闲置检查）按基线行为处理；reviewer 在停止触发后 2 分钟内无法确认停下时，worker 按基础设施故障退出，该实例没有成绩。
+- 用量按网关逐请求记录（`ACCOUNTING.json`）和审阅时间窗划分。
+- 改动只在 `packages/sdk/script/`，`contract-delivery.ts` 只加一个只读的 probe 列表访问函数；Core、Server、网关核对逻辑都不改。
 
-1. 节点设计和"合适的暂停节点"标准是否认可。
-2. 第一版启用哪些节点。上一任建议：交付前、报告 blocked 前、Session 空闲三个；中途节点设计好但默认关闭，待看过 ProgramBench 轨迹中 `probe` 的调用分布再定。另一选择是第一版只做交付前。
-3. 默认参数：`reviewMs` 建议 30 分钟；空闲和中途节点的 `afterMs` 建议 45 分钟。
-4. 审阅出错、超时或时间不足时放行（按原逻辑继续并如实记录"审阅未发生"）是否认可。
+**审查记录：**第 2 版经 fresh Codex 只读审查（12 项），第 3、4 版各经一轮复核，处理见设计稿第 11 节。每轮都找出了真实问题，例如：停止信号的传递、迟到的提示准入、插件 Promise 不随工具中断结束、工具输出截断、`host.close()` 的等待。planner 自己的事实断言也被纠正过几处：工具在回复尾部就开始执行、中断时 usage 不一定丢失、`ACCOUNTING.json` 有逐请求记录、新的 probe 也会重新打开交付。
 
-**接下来的顺序：**用户决定上述事项 → 修订设计稿 → fresh Codex 只读独立审查 → 核实审查结论、修订 → 用户批准 → fresh Codex 实施 → 你审查并亲自重跑关键测试 → 用户授权提交 → 准备 ProgramBench 交接（推送需授权）。
+**接下来的顺序：**
+
+1. fresh Codex 按实施 prompt 实施，停在未提交的工作树；
+2. 你审查代码，并亲自重跑关键测试；
+3. 用户授权提交；
+4. Duo 或 intern 在容器环境跑带 `--advisory` 的 fixture 资格检查，以及到期和取消检查（本机无法运行）；
+5. 准备 ProgramBench 交接，推送需授权。
 
 ## 4. 环境与约定
 
-- **Bun 版本：**本分支要求 Bun 1.4.2（根 `package.json` 的 `packageManager`），本机**尚未安装**。`/tmp/opencode-research-toolchain/bun-linux-x64/bun` 是 1.3.14，只用于 `native-advisory`。实施前需要先安装 1.4.2 并安装依赖，相关操作先征得用户同意。
+- **Bun：**本分支要求 1.4.2（根 `package.json` 的 `packageManager`）。2026-10-08 下载了官方 `bun-linux-x64.zip`，SHA-256 为 `36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913`，与官方 `SHASUMS256.txt` 一致；解压到 `/var/tmp/opencode-closure-toolchain/bun-linux-x64/bun`，下载件保留在 `/var/tmp/bun-1.4.2-download/`。不修改系统 PATH，使用时按命令临时加，例如 `PATH=/var/tmp/opencode-closure-toolchain/bun-linux-x64:$PATH bun test ...`。`/tmp/opencode-research-toolchain/bun-linux-x64/bun` 是 1.3.14，只用于 `native-advisory`。Node 为 v24.21.0，与回归记录一致。
+- **依赖：**2026-10-08 在 `closure-advisory` 根目录执行 `HUSKY=0 bun install --frozen-lockfile`（Bun 1.4.2），安装 2,410 个包，`postinstall` 正常执行，锁文件未变。设置 `HUSKY=0` 是为了避免 husky 在两个工作目录共用的 git 配置中写入 `core.hooksPath`；安装后确认仍未设置。日志在 `/var/tmp/closure-advisory-bun-install.log`。
+- **实施前的基线（2026-10-08，Bun 1.4.2）：**
+  - `packages/sdk` 下 `bun test script/contract-delivery.test.ts script/contract-profile.test.ts`：15 个全部通过；
+  - `bun typecheck`：通过；
+  - `python3 -m unittest script/native_programbench_test.py`：4 个交付准入测试通过；4 个官方评分聚合测试因缺 `programbench` 模块无法运行，需要 ProgramBench runner 环境，记为未运行，不算通过。
+- **`AGENTS.md`：**本分支的 `AGENTS.md` 与 `/workspace/opencode` 的版本不同（默认分支为 `v2`；仓库根目录 `bun run check` 为全量检查；V2 Session Core 条款不同），以本分支为准。
 - **测试：**只在 package 目录下运行，不在仓库根目录运行；涉及数据库时为每次调用设置独立的 `OPENCODE_DB`，依次运行，不并行。V2 默认使用内存数据库，详见 [pro-contract-v2.md](pro-contract-v2.md) 的"Authority and deployment boundaries"。本分支已有的验证命令见 [pro-contract-v2.md](pro-contract-v2.md) 的 Validation 和 [pro-contract-v2-delivery.md](pro-contract-v2-delivery.md) 的 Qualification。
-- **本机缺少的东西：**ProgramBench runner 源码（Python 测试需要 `PYTHONPATH="$RUNNER/src"`）和容器镜像（`OPENCODE_OTA_IMAGE`）都在 Duo 的环境（`/home/duozhou/...`），不在本机。因此 Python 测试和容器资格检查（`--fixture` 等）可能无法在本机运行，需要与用户或 intern 协调，不要把跳过的检查说成通过。
+- **本机缺少的东西：**ProgramBench runner 源码（Python 测试需要 `PYTHONPATH="$RUNNER/src"`，网关基类 `scripts.campaign_provider_gateway` 也在其中）和容器镜像（`OPENCODE_OTA_IMAGE`）都在 Duo 的环境（`/home/duozhou/...`），不在本机。因此部分 Python 测试和容器资格检查（`--fixture` 等）无法在本机运行，需要与用户或 intern 协调，不要把跳过的检查说成通过。
 - **文件系统：**`/workspace` 是网络文件系统（MooseFS），2026-10-05 一天内出现过三次长达 16–50 秒的 I/O 卡顿，导致长时运行中断。长时运行的写入放在本地盘（如 `/var/tmp`），结束后回存并核验。
-- **推送：**远端为 `git@github.com:Lemutisme/opencode.git`。用户的 GitHub 账号 `runjerry` 已获写权限。推送依赖用户从 Mac 终端用 `ssh -A` 连入本机转发的 agent；容器的 fish 配置会把 `~/.ssh/agent_sock` 指向最新的转发 socket。推送前用 `SSH_AUTH_SOCK=$HOME/.ssh/agent_sock ssh-add -l` 确认能看到密钥；看不到时请用户重新 `ssh -A` 连接。
+- **推送：**远端为 `git@github.com:Lemutisme/opencode.git`。用户的 GitHub 账号 `runjerry` 已获写权限。推送依赖用户从 Mac 终端用 `ssh -A` 连入本机转发的 agent；容器的 fish 配置会把 `~/.ssh/agent_sock` 指向最新的转发 socket。推送前用 `SSH_AUTH_SOCK=$HOME/.ssh/agent_sock ssh-add -l` 确认能看到密钥；看不到时请用户重新 `ssh -A` 连接。只读查询（如 `git ls-remote`）同样需要设置该变量。
 - **真实模型实验：**只在用户批准后启动；运行前先做无真实模型的确定性演练；停止规则是遇到基础设施故障或方案未覆盖的情况就停止并保全现场，不重试、不自动恢复。
 
 ## 5. 上一轮（`native-advisory`）的概要与教训
@@ -85,6 +100,7 @@
 4. **独立审查有用。**fresh Codex 的只读审查多次找出真实问题。对它的建议同样要核实：例如它指出"每个合同约一次、约 1%"只是样本观察，不能推广，这一条成立并已修改。
 5. **基础设施：**文件系统卡顿会中断长时运行，见第 4 节。
 6. **兼容性：**曾把 blocked 路由的默认值改成"连续两次后转交 issuer"，这会改变 ProgramBench 的默认行为。新分支的原则是一切新功能默认关闭。
+7. **V1 的受保护输入恢复（A0）不适用于 V2。**V1 的 `TASK.md` 是交付时核对哈希的受保护输入，被误写后无法交付；A0 在仓库外的准备脚本里把它提交进工作区 git 以便恢复。V2 原生交付没有受保护输入核对，原始任务文件保留在只读镜像的 `/workspace` 中。用户已决定本轮不做。
 
 ## 6. 待用户授权的清理事项
 
@@ -102,6 +118,10 @@
 - worker：`packages/sdk/script/contract-worker.ts`
 - 工具配置与空闲重新提示：`packages/sdk/script/contract-profile.ts`
 - 交付证据与 `exclusive` 串行队列：`packages/sdk/script/contract-delivery.ts`
+- 审阅服务（待实施）：`packages/sdk/script/contract-advisory.ts`
 - ProgramBench 宿主、网关与评测：`packages/sdk/script/native-programbench.py`
-- V2 单步执行（先读完回复再等工具）：`packages/core/src/session/runner/step.ts`
+- V2 单步执行（工具在收到调用事件时开始执行，读完回复后等待工具）：`packages/core/src/session/runner/step.ts`
 - 工具列表按会话权限过滤：`packages/core/src/tool.ts`（`whollyDisabled`）
+- 插件工具执行（`Effect.promise`，中断不会结束插件中的 Promise）：`packages/plugin/src/promise/adapter.ts`
+- Location 闲置中断：`packages/core/src/location-activity.ts`
+- 嵌入式 SDK 请求与关闭：`packages/sdk/src/internal/fetch.ts`
