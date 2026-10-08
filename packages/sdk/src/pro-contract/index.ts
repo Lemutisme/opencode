@@ -230,6 +230,7 @@ export async function open(root: string, configuration: Configuration) {
                 checkpoint: result.checkpoint,
                 deadline,
                 signal: controller.signal,
+                terminal: { task: task.id, execution: path.basename(result.root), action: "blocked" },
               })
               if (grade.result.total !== task.total) throw new Error("Blocked task verifier denominator changed")
               await Bun.write(
@@ -249,6 +250,9 @@ export async function open(root: string, configuration: Configuration) {
               checkpoint: result.checkpoint,
               deadline,
               signal: controller.signal,
+              terminal: task.verification === "terminal"
+                ? { task: task.id, execution: path.basename(result.root), action: "submit" }
+                : undefined,
             })
             if (grade.result.total !== task.total) throw new Error("Original task verifier denominator changed")
             await Bun.write(

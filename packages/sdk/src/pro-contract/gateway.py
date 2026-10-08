@@ -22,7 +22,6 @@ endpoint = urllib.parse.urlsplit(config["upstream"])
 if endpoint.scheme not in ("http", "https") or endpoint.username or endpoint.password:
     raise ValueError("HTTP(S) upstream without URL credentials required")
 parent = os.getppid()
-connections = set()
 lock = threading.Lock()
 
 
@@ -217,8 +216,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             remaining = max(0.01, min(900, (config["deadline"] - time.time() * 1000) / 1000))
             cls = http.client.HTTPSConnection if endpoint.scheme == "https" else http.client.HTTPConnection
             upstream = cls(endpoint.hostname, endpoint.port, timeout=remaining)
-            with lock:
-                connections.add(upstream)
             headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
             key = os.environ.get("OPENAI_API_KEY")
             if key:
@@ -262,8 +259,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 record({"type": "finished", "id": identifier, "complete": complete, "usage": usage,
                         "usageIncomplete": usage is None, "cost": None})
             if upstream:
-                with lock:
-                    connections.discard(upstream)
                 upstream.close()
             self.close_connection = True
 
@@ -273,13 +268,8 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 
 def stop(*_):
-    with lock:
-        for connection in connections:
-            if connection.sock:
-                try:
-                    connection.sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
+    # Signal handlers may reenter this path while a journal lock is held. Let
+    # process exit close sockets; unmatched admissions retain unknown usage.
     os._exit(0)
 
 

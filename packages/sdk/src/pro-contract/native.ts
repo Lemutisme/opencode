@@ -1,7 +1,7 @@
 export * as ContractNative from "./native"
 
 import fs from "node:fs/promises"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { Schema } from "effect"
 import { RSI } from "@opencode/core/pro-contract/rsi"
@@ -9,6 +9,7 @@ import { ProContract } from "@opencode/schema/pro-contract"
 import { ContractLedger } from "@opencode/core/pro-contract/ledger"
 import { ContractEnvironment } from "./environment"
 import { ContractProgramBench } from "./programbench"
+import { ContractFence } from "./fence"
 
 export type Runtime = {
   directory: string
@@ -295,39 +296,32 @@ export async function run(input: {
       stdio: ["ignore", Bun.file(path.join(root, "stdout.log")), Bun.file(path.join(root, "stderr.log")), "pipe"],
     },
   )
-  const gateway: { process?: ReturnType<typeof Bun.spawn> } = {}
-  const runtime: { identity?: { pid: number; birth: string } } = {}
-  const stop = () => {
-    if (runtime.identity && alive(runtime.identity)) process.kill(runtime.identity.pid, "SIGKILL")
-    worker.kill("SIGKILL")
-    gateway.process?.kill("SIGTERM")
-  }
-  const timer = setTimeout(stop, Math.max(1, deadline - Date.now()))
-  const startupTimer = setTimeout(stop, Math.max(1, Math.min(30000, deadline - Date.now())))
-  input.signal.addEventListener("abort", stop, { once: true })
+  const fence = ContractFence.own({ worker, deadline, signal: input.signal })
   const monitor = setInterval(() => {
-    const state = input.store.read()
-    if (
-      state.kernel.contracts[input.task]?.status !== "active" ||
-      state.kernel.contracts[input.parent.grant]?.status !== "discharged"
-    )
-      stop()
-    if (input.signal.aborted || existsSync(path.join(input.root, "CANCEL"))) stop()
+    try {
+      const state = input.store.read()
+      if (
+        state.kernel.contracts[input.task]?.status !== "active" ||
+        state.kernel.contracts[input.parent.grant]?.status !== "discharged"
+      )
+        fence.stop("Native execution authority is no longer active")
+      if (existsSync(path.join(input.root, "CANCEL"))) fence.stop("Native execution cancelled")
+    } catch {
+      fence.stop("Native execution authority could not be checked")
+    }
   }, 100)
   try {
     input.signal.throwIfAborted()
     const descriptor = worker.stdio[3]
     if (descriptor === undefined || descriptor === null) throw new Error("Missing sandbox identity pipe")
     const identity: { "child-pid": number } = JSON.parse(
-      typeof descriptor === "number" ? await Bun.file(descriptor).text() : await new Response(descriptor).text(),
+      await fence.wait(typeof descriptor === "number" ? Bun.file(descriptor).text() : new Response(descriptor).text()),
     )
     const pid = identity["child-pid"]
-    const birth = (await Bun.file(`/proc/${pid}/stat`).text()).split(")").at(-1)!.trim().split(/\s+/)[19]
-    runtime.identity = { pid, birth }
-    await Bun.write(
-      path.join(root, "OWNERSHIP.json"),
-      JSON.stringify({ wrapperPID: worker.pid, runtime: runtime.identity, deadline }),
-    )
+    const runtime = ContractFence.identity(pid)
+    const birth = runtime.birth
+    fence.runtime(runtime)
+    await Bun.write(path.join(root, "OWNERSHIP.json"), JSON.stringify(fence.ownership()))
     const config = {
       upstream: input.model.upstream,
       model: input.model.id,
@@ -350,7 +344,7 @@ export async function run(input: {
       ...(toolCgroup ? { toolCgroup } : {}),
     }
     await Bun.write(path.join(root, "gateway.json"), JSON.stringify(config))
-    gateway.process = Bun.spawn(
+    const gateway = Bun.spawn(
       [
         input.runtime.python,
         path.join(input.runtime.directory, "packages/sdk/src/pro-contract/gateway.py"),
@@ -362,16 +356,18 @@ export async function run(input: {
         stderr: Bun.file(path.join(root, "gateway-error.log")),
       },
     )
+    fence.gateway(gateway)
+    await Bun.write(path.join(root, "OWNERSHIP.json"), JSON.stringify(fence.ownership()))
     const startup = Math.min(deadline, Date.now() + 30000)
     while (!(await fs.stat(config.socket).catch(() => undefined))) {
       input.signal.throwIfAborted()
-      if (Date.now() >= startup || gateway.process.exitCode !== null || worker.exitCode !== null)
+      if (Date.now() >= startup || gateway.exitCode !== null || worker.exitCode !== null)
         throw new Error(`Model channel startup failed; inspect ${root}`)
-      await Bun.sleep(20)
+      await fence.wait(Bun.sleep(20))
     }
     await Bun.write(path.join(admission, "ready"), "ready")
-    clearTimeout(startupTimer)
-    if ((await worker.exited) !== 0) throw new Error(`Native worker failed; inspect ${root}`)
+    fence.ready()
+    if ((await fence.wait(worker.exited)) !== 0) throw new Error(`Native worker failed; inspect ${root}`)
     input.signal.throwIfAborted()
     const handoff = Schema.decodeUnknownSync(Schema.fromJsonString(Handoff))(
       await Bun.file(path.join(state, "result.json")).text(),
@@ -395,44 +391,25 @@ export async function run(input: {
       handoff,
       fenced: true,
     }
+    await fence.wait(Promise.resolve())
+    if (existsSync(path.join(input.root, "CANCEL"))) throw new Error("Native execution cancelled")
+    const current = input.store.read()
+    input.store.assertTask(current, input.task)
+    input.store.assertMethod(current, input.parent)
     return { handoff, checkpoint: sealed.hash, receipt: input.store.object(receipt), root }
   } finally {
-    clearTimeout(timer)
-    clearTimeout(startupTimer)
     clearInterval(monitor)
-    input.signal.removeEventListener("abort", stop)
-    stop()
-    await worker.exited
-    await gateway.process?.exited
+    const fenced = await fence.finish(path.join(root, "FENCED.json"))
+    if (!fenced.acknowledged) throw new Error("Native ownership exit is unacknowledged")
     await fs.rm(path.join(root, "observation-staging"), { recursive: true, force: true })
-    const until = Date.now() + 5000
-    while (runtime.identity && alive(runtime.identity) && Date.now() < until) await Bun.sleep(20)
-    const acknowledged = runtime.identity ? !alive(runtime.identity) : worker.signalCode === null
     await fs.rm(channel, { recursive: true, force: true })
-    await Bun.write(
-      path.join(root, "FENCED.json"),
-      JSON.stringify({
-        pid: worker.pid,
-        exitCode: worker.exitCode,
-        signal: worker.signalCode,
-        runtime: runtime.identity,
-        acknowledged,
-        gatewayExitCode: gateway.process?.exitCode,
-        deadline,
-        time: Date.now(),
-      }),
-    )
-    if (!acknowledged) throw new Error("Native runtime exit is unacknowledged")
-  }
-}
-
-function alive(identity: { pid: number; birth: string }) {
-  try {
-    const fields = readFileSync(`/proc/${identity.pid}/stat`, "utf8").split(")").at(-1)!.trim().split(/\s+/)
-    return fields[19] === identity.birth && fields[0] !== "Z"
-  } catch (error) {
-    if (error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ESRCH")) return false
-    throw error
+    // Fencing is cleanup only: cancellation, expiry or withdrawal during it
+    // cannot turn into a successful native result or a continuation allowance.
+    input.signal.throwIfAborted()
+    if (existsSync(path.join(input.root, "CANCEL"))) throw new Error("Native execution cancelled")
+    const current = input.store.read()
+    input.store.assertTask(current, input.task)
+    input.store.assertMethod(current, input.parent)
   }
 }
 
@@ -471,11 +448,24 @@ export async function grade(input: {
   checkpoint: string
   deadline: number
   signal: AbortSignal
+  terminal?: { task: string; execution: string; action: "submit" | "blocked" }
 }) {
   const root = path.join(input.root, "verifications", crypto.randomUUID())
   const workspace = path.join(root, "workspace")
   const state = path.join(root, "state")
   await fs.mkdir(state, { recursive: true, mode: 0o700 })
+  await Bun.write(
+    path.join(root, "VERIFICATION.json"),
+    JSON.stringify({
+      version: 1,
+      kind: "programbench" in input.verifier ? "programbench" : "local",
+      verifier: input.verifier,
+      checkpoint: input.checkpoint,
+      deadline: input.deadline,
+      terminal: input.terminal ?? null,
+      started: Date.now(),
+    }),
+  )
   await restore(path.join(input.root, "checkpoints"), input.checkpoint, workspace)
   if ("programbench" in input.verifier)
     return ContractProgramBench.grade({
@@ -499,6 +489,15 @@ export async function grade(input: {
       stderr: Bun.file(path.join(root, "stderr.log")),
     },
   )
+  const wrapper = (() => {
+    try {
+      return ContractFence.identity(process.pid)
+    } catch {
+      // A fast failed verifier may already be gone. Its real exit is still
+      // awaited below, but missing birth provenance must not be invented.
+      return undefined
+    }
+  })()
   const stop = () => process.kill("SIGKILL")
   input.signal.addEventListener("abort", stop, { once: true })
   const timer = setTimeout(stop, Math.max(1, Math.min(600000, input.deadline - Date.now())))
@@ -520,7 +519,15 @@ export async function grade(input: {
     await process.exited
     await Bun.write(
       path.join(root, "FENCED.json"),
-      JSON.stringify({ exitCode: process.exitCode, deadline: input.deadline }),
+      JSON.stringify({
+        wrapper,
+        wrapperExited: true,
+        acknowledged: true,
+        exitCode: process.exitCode,
+        signal: process.signalCode,
+        deadline: input.deadline,
+        time: Date.now(),
+      }),
     )
   }
 }
