@@ -1,6 +1,6 @@
 # V2 原生 advisory：supervisor 交接说明
 
-日期：2026-10-08；同日更新：设计第 5 版获批，进入实施。写给接手 planner 与 code review 角色的 fresh Claude session。上一任 supervisor（Claude）从 2026-09-23 起主持 `native-advisory` 工作线，并起草了本分支设计稿第 1 版；第 2 至第 5 版由接任的 supervisor 修订。本文只交接继续工作所需的信息；细节以所引文件和源码为准，不确定时先核实再下结论。
+日期：2026-10-08；同日更新：设计第 5 版获批，实施完成并经审查提交。写给接手 planner 与 code review 角色的 fresh Claude session。上一任 supervisor（Claude）从 2026-09-23 起主持 `native-advisory` 工作线，并起草了本分支设计稿第 1 版；第 2 至第 5 版由接任的 supervisor 修订。本文只交接继续工作所需的信息；细节以所引文件和源码为准，不确定时先核实再下结论。
 
 ## 1. 角色与工作方式
 
@@ -36,10 +36,10 @@
 
 **分支与工作目录：**
 
-| 工作目录                               | 分支                                                                    | 状态                                                                                                                                                                                                                                                 |
-| -------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/workspace/opencode-closure-advisory` | `closure-advisory`，从 `origin/procontract-closure`（`66128706b2`）建出 | 设计稿第 5 版和本交接说明已提交，未推送。**已取消对 `procontract-closure` 的跟踪**，以免误推到 Duo 的分支；将来推送时显式推到同名远端分支 `closure-advisory`。2026-10-08 查询时远端 `procontract-closure` 仍为 `66128706b2`。依赖已安装（第 4 节）。 |
-| `/workspace/opencode`                  | `native-advisory`                                                       | 上一轮工作线，HEAD `0d35d8da4`，比 `origin/native-advisory`（`906c507dc`）多 1 个未推送的文档提交。用户决定暂不处理。不再在这条分支上继续开发；它与 `closure-advisory` 只共用 git 仓库，互不影响。                                                   |
+| 工作目录                               | 分支                                                                    | 状态                                                                                                                                                                                                                                                           |
+| -------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/workspace/opencode-closure-advisory` | `closure-advisory`，从 `origin/procontract-closure`（`66128706b2`）建出 | 设计稿第 5 版、本交接说明和实施代码已提交，未推送。**已取消对 `procontract-closure` 的跟踪**，以免误推到 Duo 的分支；将来推送时显式推到同名远端分支 `closure-advisory`。2026-10-08 查询时远端 `procontract-closure` 仍为 `66128706b2`。依赖已安装（第 4 节）。 |
+| `/workspace/opencode`                  | `native-advisory`                                                       | 上一轮工作线，HEAD `0d35d8da4`，比 `origin/native-advisory`（`906c507dc`）多 1 个未推送的文档提交。用户决定暂不处理。不再在这条分支上继续开发；它与 `closure-advisory` 只共用 git 仓库，互不影响。                                                             |
 
 **设计稿：**[pro-contract-v2-advisory.md](pro-contract-v2-advisory.md) 第 5 版，Principal 已于 2026-10-08 批准（含第 11 节的全部取舍）。要点：
 
@@ -52,13 +52,19 @@
 
 **审查记录：**第 2 版经 fresh Codex 只读审查（12 项），第 3、4 版各经一轮复核，处理见设计稿第 11 节。每轮都找出了真实问题，例如：停止信号的传递、迟到的提示准入、插件 Promise 不随工具中断结束、工具输出截断、`host.close()` 的等待。planner 自己的事实断言也被纠正过几处：工具在回复尾部就开始执行、中断时 usage 不一定丢失、`ACCOUNTING.json` 有逐请求记录、新的 probe 也会重新打开交付。
 
+**实施：**fresh Codex 按实施 prompt 完成，planner 审查后又做了一轮 6 项修复，然后提交。
+
+- 改动集中在 `packages/sdk/script/`：新增 `contract-advisory.ts`；修改 `contract-profile.ts`、`contract-worker.ts`、`native-programbench.py`；`contract-delivery.ts` 只加了只读的 `probes()`。
+- 新增的测试包括四个 `contract-advisory*.test.ts`、两个测试夹具和 `native_programbench_advisory_test.py`。
+- unsettled 的专用退出码为 86。
+- 实施审查中发现，把"观察到请求重叠"和"用量归属交叉核对"作为资格通过条件会造成误判失败。Principal 决定改为只记录，只有已可靠核实而归属确实错误时才判失败（设计稿第 7 节 fixture 第 5、6 项）。
+- 已知的小风险：如果网关的请求开始时间只精确到整秒，紧贴审阅开始时刻的 reviewer 请求可能被误判为归属错误；诊断文件会先写入。
+
 **接下来的顺序：**
 
-1. fresh Codex 按实施 prompt 实施，停在未提交的工作树；
-2. 你审查代码，并亲自重跑关键测试；
-3. 用户授权提交；
-4. Duo 或 intern 在容器环境跑带 `--advisory` 的 fixture 资格检查，以及到期和取消检查（本机无法运行）；
-5. 准备 ProgramBench 交接，推送需授权。
+1. 推送到远端同名分支 `closure-advisory`，需用户另行授权，并从 Mac 用 `ssh -A` 连入；
+2. planner 给 intern 写说明；Duo 或 intern 在容器环境跑带 `--advisory` 的 fixture 资格检查（`afterMs: 0`，三个节点开启），以及到期和取消检查（本机无法运行）；
+3. ProgramBench 评估，首次评估的建议配置见设计稿第 4 节，启动前由 Principal 冻结。
 
 ## 4. 环境与约定
 
@@ -68,6 +74,11 @@
   - `packages/sdk` 下 `bun test script/contract-delivery.test.ts script/contract-profile.test.ts`：15 个全部通过；
   - `bun typecheck`：通过；
   - `python3 -m unittest script/native_programbench_test.py`：4 个交付准入测试通过；4 个官方评分聚合测试因缺 `programbench` 模块无法运行，需要 ProgramBench runner 环境，记为未运行，不算通过。
+- **实施后（planner 复现，2026-10-08）：**
+  - `packages/sdk` 下 `bun test script/contract-delivery.test.ts script/contract-profile.test.ts script/contract-advisory.test.ts script/contract-advisory-stop.test.ts script/contract-advisory-evidence.test.ts script/contract-advisory-exit.test.ts --timeout 30000`：65 个全部通过；
+  - `bun typecheck`：通过；
+  - 仓库根目录 `bun run check --force`：35 项全部通过；
+  - `python3 -m unittest script/native_programbench_test.py script/native_programbench_advisory_test.py`：18 个通过，4 个官方评分聚合测试同样因缺 `programbench` 模块无法运行。
 - **`AGENTS.md`：**本分支的 `AGENTS.md` 与 `/workspace/opencode` 的版本不同（默认分支为 `v2`；仓库根目录 `bun run check` 为全量检查；V2 Session Core 条款不同），以本分支为准。
 - **测试：**只在 package 目录下运行，不在仓库根目录运行；涉及数据库时为每次调用设置独立的 `OPENCODE_DB`，依次运行，不并行。V2 默认使用内存数据库，详见 [pro-contract-v2.md](pro-contract-v2.md) 的"Authority and deployment boundaries"。本分支已有的验证命令见 [pro-contract-v2.md](pro-contract-v2.md) 的 Validation 和 [pro-contract-v2-delivery.md](pro-contract-v2-delivery.md) 的 Qualification。
 - **本机缺少的东西：**ProgramBench runner 源码（Python 测试需要 `PYTHONPATH="$RUNNER/src"`，网关基类 `scripts.campaign_provider_gateway` 也在其中）和容器镜像（`OPENCODE_OTA_IMAGE`）都在 Duo 的环境（`/home/duozhou/...`），不在本机。因此部分 Python 测试和容器资格检查（`--fixture` 等）无法在本机运行，需要与用户或 intern 协调，不要把跳过的检查说成通过。
@@ -118,7 +129,7 @@
 - worker：`packages/sdk/script/contract-worker.ts`
 - 工具配置与空闲重新提示：`packages/sdk/script/contract-profile.ts`
 - 交付证据与 `exclusive` 串行队列：`packages/sdk/script/contract-delivery.ts`
-- 审阅服务（待实施）：`packages/sdk/script/contract-advisory.ts`
+- 审阅服务：`packages/sdk/script/contract-advisory.ts`；测试：`packages/sdk/script/contract-advisory*.test.ts`、`native_programbench_advisory_test.py`
 - ProgramBench 宿主、网关与评测：`packages/sdk/script/native-programbench.py`
 - V2 单步执行（工具在收到调用事件时开始执行，读完回复后等待工具）：`packages/core/src/session/runner/step.ts`
 - 工具列表按会话权限过滤：`packages/core/src/tool.ts`（`whollyDisabled`）
