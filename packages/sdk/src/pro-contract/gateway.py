@@ -1,6 +1,8 @@
 """Host-only, peer-bound model channel. No worker receives a provider credential."""
 import http.client
 import http.server
+import base64
+import hashlib
 import json
 import os
 import signal
@@ -12,6 +14,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import uuid
 from pathlib import Path
 
 config = json.loads(Path(sys.argv[1]).read_text())
@@ -79,6 +82,89 @@ def record(value):
             os.fsync(out.fileno())
 
 
+def observation(handler):
+    """The native peer supplies bytes, never host filenames or allocation IDs."""
+    encoded = handler.headers.get("X-Observation", "")
+    if len(encoded) > 16384:
+        raise ValueError("Observation metadata exceeds the individual operation bound")
+    metadata = json.loads(base64.b64decode(encoded, validate=True))
+    if not isinstance(metadata, dict) or set(metadata) - {
+        "kind", "sessionID", "messageID", "callID", "tool", "capture"
+    }:
+        raise ValueError("Invalid observation metadata")
+    if metadata.get("kind") not in ("native-result", "model-visible", "shell-capture"):
+        raise ValueError("Unknown observation representation")
+    for key in ("sessionID", "messageID", "callID", "tool"):
+        if not isinstance(metadata.get(key), str) or not 0 < len(metadata[key]) <= 1024:
+            raise ValueError("Invalid native observation identity")
+    size = int(handler.headers.get("Content-Length", "-1"))
+    if not 0 <= size <= 64 * 1024 * 1024:
+        raise ValueError("Observation exceeds the individual capture bound")
+    capture = metadata.get("capture")
+    if metadata["kind"] == "shell-capture":
+        if (not isinstance(capture, dict) or set(capture) - {
+                "stream", "encoding", "totalBytes", "complete", "timeout", "status", "exit", "signal"
+            } or capture.get("stream") != "combined" or capture.get("encoding") != "bytes"
+            or type(capture.get("totalBytes")) is not int or capture["totalBytes"] < size
+            or type(capture.get("complete")) is not bool or type(capture.get("timeout")) is not bool
+            or capture.get("status") not in ("exited", "timeout", "killed")
+            or capture["timeout"] != (capture["status"] == "timeout")
+            or (capture["complete"] and (capture["totalBytes"] != size or capture["status"] != "exited"
+                                        or "exit" not in capture or "signal" in capture))
+            or ("exit" in capture and type(capture["exit"]) is not int)
+            or ("signal" in capture and not isinstance(capture["signal"], str))):
+            raise ValueError("Invalid shell capture disposition")
+    elif capture is not None:
+        raise ValueError("Only shell captures have byte-stream dispositions")
+    directory = Path(config["observations"])
+    temporary = Path(config["observationStaging"]) / (".pending-" + str(uuid.uuid4()))
+    digest = hashlib.sha256()
+    remaining = size
+    try:
+        with temporary.open("xb") as output:
+            while remaining:
+                standing()
+                disk = os.statvfs(directory)
+                if disk.f_bavail * disk.f_frsize < config.get("reserveBytes", 0) + min(65536, remaining):
+                    raise OSError("Observation disk reserve infrastructure guard")
+                chunk = handler.rfile.read(min(65536, remaining))
+                if not chunk:
+                    raise EOFError("Incomplete observation upload")
+                remaining -= len(chunk)
+                digest.update(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+        standing()
+        hash_ = digest.hexdigest()
+        os.chmod(temporary, 0o400)
+        target = directory / "blobs" / hash_
+        try:
+            os.link(temporary, target)
+        except FileExistsError:
+            if target.stat().st_size != size or hashlib.sha256(target.read_bytes()).hexdigest() != hash_:
+                raise ValueError("Existing public observation failed integrity validation")
+        descriptor = os.open(directory / "blobs", os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        entry = {
+            "version": 1, **metadata, "execution": config["execution"], "deadline": config["deadline"],
+            "hash": hash_, "bytes": size, "time": time.time() * 1000,
+        }
+        with lock:
+            with (directory / "index.jsonl").open("a") as index:
+                index.write(json.dumps(entry, separators=(",", ":")) + "\n")
+                index.flush()
+                os.fsync(index.fileno())
+        handler.send_response(201)
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
 
@@ -108,6 +194,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(403, "Only the admitted native runtime may use the model channel")
                 return
             standing()
+            if self.path == "/v1/observations":
+                observation(self)
+                return
             if self.path != "/v1/responses":
                 self.send_error(403, "Model endpoint only")
                 return
@@ -164,7 +253,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if len(pending) > 32 * 1024 * 1024:
                     raise ValueError("Unbounded provider event")
         except Exception as error:
-            record({"type": "failure", "id": identifier, "admitted": admitted, "error": str(error)})
+            record({"type": "observation-failure" if self.path == "/v1/observations" else "failure",
+                    "id": identifier, "admitted": admitted, "error": str(error)})
             if not admitted:
                 self.send_error(403, "Admission denied")
         finally:

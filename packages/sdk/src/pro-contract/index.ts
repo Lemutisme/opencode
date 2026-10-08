@@ -212,6 +212,7 @@ export async function open(root: string, configuration: Configuration) {
             evaluation: false,
             signal: controller.signal,
             environment: task.environment,
+            reserveBytes: config.reserveBytes,
             allowPropose:
               config.proposals === undefined ||
               Object.values(state.proposals).filter((proposal) => proposal.task === task.id).length < config.proposals,
@@ -287,6 +288,7 @@ export async function open(root: string, configuration: Configuration) {
                   signal: controller.signal,
                   assignment: { side, test: test.id, repeat },
                   environment: test.environment,
+                  reserveBytes: config.reserveBytes,
                 })
                 const grade = await ContractNative.grade({
                   root,

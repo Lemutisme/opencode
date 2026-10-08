@@ -200,14 +200,28 @@ export async function run(input: {
   assignment?: { test: string; repeat: number; side: "baseline" | "candidate" }
   environment?: ContractEnvironment.Input
   allowPropose?: boolean
+  /** One original execution lineage, or one fixed evaluation allocation. */
+  observationScope?: string
+  reserveBytes?: number
 }) {
   const root = path.join(input.root, "executions", input.id)
   const workspace = path.join(root, "workspace")
   const state = path.join(root, "state")
   const channel = await fs.mkdtemp("/tmp/pc-channel-")
   const admission = path.join(root, "admission")
+  const observations = path.join(
+    input.root,
+    "observations",
+    RSI.hash({ task: input.task, allocation: input.evaluation ? (input.observationScope ?? input.id) : "original" }),
+  )
+  await fs.mkdir(path.join(observations, "blobs"), { recursive: true, mode: 0o700 })
+  await (await fs.open(path.join(observations, "index.jsonl"), "a", 0o600)).close()
   await fs.mkdir(root, { recursive: true, mode: 0o700 })
   for (const directory of [state, admission]) await fs.mkdir(directory, { mode: 0o700 })
+  // Existing read-only task images already have /admission, but need not have
+  // another top-level mount point. Keep unpublished uploads outside this mount.
+  await fs.mkdir(path.join(admission, "observations"), { mode: 0o700 })
+  await fs.mkdir(path.join(root, "observation-staging"), { mode: 0o700 })
   await restore(path.join(input.root, "checkpoints"), input.checkpoint, workspace)
   const initial = input.store.read()
   const credential = input.model.credential ? process.env[input.model.credential] : undefined
@@ -270,6 +284,9 @@ export async function run(input: {
       "--ro-bind",
       channel,
       "/channel",
+      "--ro-bind",
+      observations,
+      "/admission/observations",
       "/tools/bun",
       "/runtime/packages/sdk/src/pro-contract/worker.ts",
     ],
@@ -326,6 +343,10 @@ export async function run(input: {
       cancel: path.join(input.root, "CANCEL"),
       journal: path.join(root, "requests.jsonl"),
       socket: path.join(channel, "provider.sock"),
+      execution: input.id,
+      observations,
+      observationStaging: path.join(root, "observation-staging"),
+      reserveBytes: input.reserveBytes ?? 0,
       ...(toolCgroup ? { toolCgroup } : {}),
     }
     await Bun.write(path.join(root, "gateway.json"), JSON.stringify(config))
@@ -383,6 +404,7 @@ export async function run(input: {
     stop()
     await worker.exited
     await gateway.process?.exited
+    await fs.rm(path.join(root, "observation-staging"), { recursive: true, force: true })
     const until = Date.now() + 5000
     while (runtime.identity && alive(runtime.identity) && Date.now() < until) await Bun.sleep(20)
     const acknowledged = runtime.identity ? !alive(runtime.identity) : worker.signalCode === null
@@ -423,6 +445,7 @@ export async function evaluate(input: Parameters<typeof run>[0]) {
     const observed = await run({
       ...input,
       id: `${input.id}-${segments.length + 1}`,
+      observationScope: input.id,
       checkpoint: segments.at(-1)?.checkpoint ?? input.checkpoint,
       feedback: segments.map((segment) => segment.handoff.summary),
     })
