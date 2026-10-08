@@ -1,5 +1,6 @@
 export * as ProContractRSI from "./index"
 export { ProContract } from "@opencode/schema/pro-contract"
+export { investigationMethod, researchGoal } from "./method"
 
 import fs from "node:fs/promises"
 import { existsSync } from "node:fs"
