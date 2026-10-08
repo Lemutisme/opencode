@@ -1,0 +1,9 @@
+{
+  "name": "programbench-cohort-qualification",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test endpoint.test.ts",
+    "typecheck": "../../node_modules/.bin/tsgo -p tsconfig.json"
+  }
+}
