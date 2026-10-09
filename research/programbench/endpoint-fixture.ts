@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import { Endpoint } from "./endpoint"
 
-export async function fixture(valid = false, directoryRoot?: string) {
+export async function fixture(valid = false, directoryRoot?: string, started = Date.now() - 10000) {
   const root = directoryRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), "pb-endpoint-"))
   const child = Bun.spawn(["/bin/sleep", "60"])
   const fields = (await fs.readFile(`/proc/${child.pid}/stat`, "utf8")).split(")").at(-1)!.trim().split(/\s+/)
@@ -20,7 +20,6 @@ export async function fixture(valid = false, directoryRoot?: string) {
   await fs.mkdir(path.join(verification, "workspace"), { recursive: true })
   await fs.mkdir(path.join(official, "operations"), { recursive: true })
   await fs.mkdir(path.join(official, "submission", "fixture__task.123"), { recursive: true })
-  const started = Date.now() - 10000
   const admission = {
     version: 1, id: "0-rsi-r1", admissionID: "a".repeat(32), cohortToken: "b".repeat(32), cohortRoot: root,
     started, deadline: started + 21600000,
@@ -69,9 +68,21 @@ export async function fixture(valid = false, directoryRoot?: string) {
   await Bun.write(archive, "scripted subject, not a real grader invocation")
   const subjectHash = Bun.SHA256.hash(await Bun.file(archive).bytes(), "hex")
   await write(path.join(official, "SUBJECT.json"), { archive, sha256: subjectHash })
-  await write(path.join(official, "operations", "operation.json"), {
-    phase: "finished", returncode: 1, started: (started + 1100) / 1000, finished: (started + 1900) / 1000,
+  const operation = path.join(official, "operations", "2".repeat(32) + ".json")
+  const detached = path.join(official, "operations", "3".repeat(32) + ".json")
+  const stdout = path.join(official, "operations", "3".repeat(32) + ".stdout")
+  const exported = path.join(official, "operations", "4".repeat(32) + ".json")
+  for (const [file, argv, returncode] of [
+    [operation, ["exec", "5".repeat(64), "false"], 1],
+    [detached, ["run", "-d", "fixture-image", "sleep", "60"], 0],
+    [exported, ["cp", "5".repeat(64) + ":/results.xml", path.join(official, "tmp", "results.xml")], 0],
+  ] as const) await write(file, {
+    pid: identity.pid, identity: { pid: identity.pid, start: identity.birth }, argv,
+    phase: "finished", returncode, started: (started + 1100) / 1000, finished: (started + 1900) / 1000,
   })
+  // The real frozen bridge retains run/create stdout, but removes cp tar files
+  // before writing a finished receipt. Fixture layout follows that producer.
+  await Bun.write(stdout, "5".repeat(64) + "\n")
   const artifacts = Object.fromEntries(await Promise.all(["FENCE.json", "SUBJECT.json"].map(async (name) => [
     name, { path: path.join(official, name), sha256: Bun.SHA256.hash(await Bun.file(path.join(official, name)).bytes(), "hex") },
   ])))
@@ -91,7 +102,7 @@ export async function fixture(valid = false, directoryRoot?: string) {
     hostError: valid ? undefined : `Error: Unavailable or mismatched official evidence: ${official}`,
     summary: { contract: "escalated", proposals: 0, comparisons: 0, selectedMethod: "seed", seedMethod: "seed" },
   }
-  return { input, root, execution, verification, official, identity }
+  return { input, root, execution, verification, official, identity, operation, detached, stdout, exported }
 }
 
 export async function change(file: string, values: Record<string, unknown>) {
@@ -115,7 +126,8 @@ export async function addEvaluations(value: Awaited<ReturnType<typeof fixture>>)
   await change(path.join(verification, "FENCED.json"), { exitCode: 0 })
   await change(path.join(verification, "official", "RESULT.json"), { valid: true, passed: 2, total: 3, failure: null })
   await change(path.join(verification, "official", "FENCE.json"), { time: (started + 450) / 1000 })
-  await change(path.join(verification, "official", "operations", "operation.json"), { started: (started + 375) / 1000, finished: (started + 425) / 1000 })
+  for (const name of [value.operation, value.detached, value.exported])
+    await change(path.join(verification, "official", "operations", path.basename(name)), { started: (started + 375) / 1000, finished: (started + 425) / 1000 })
   const local = path.join(value.input.directory, "campaign", "verifications", "local-safety")
   const verifier = { directory: path.join(value.input.directory, "campaign", "checkpoints", "local-checker"), command: ["/usr/bin/python3", "/verifier/judge.py"] }
   await change(path.join(value.input.directory, "campaign", "FROZEN.json"), { tests: [{ verifier: value.input.task.verifier }, { verifier }] })

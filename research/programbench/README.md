@@ -72,3 +72,35 @@ and proves an unrelated live control scope was untouched. A separate scope
 expires solely through systemd, without controller signals. The schema test runs
 the actual TypeScript classifier and Python consumer, with and without candidate
 executions and local safety verification. These are execution qualifications, **not model or benchmark results**.
+
+## Receipt layout and read-only diagnosis
+
+The frozen ProgramBench bridge records operations as UUID-named JSON receipts.
+For `run -d` it also retains the matching `.stdout` file containing the created
+container ID. A directory-wide JSON-only assumption is incorrect. The endpoint
+parser validates receipt/companion pairs, ownership, timestamps, content hashes,
+completion and return codes; it rejects unknown entries, orphan companions and
+the `.tar` files that the bridge removes before a successful copy completes.
+
+`Endpoint.finish` is the live publisher. It always uses the current cancellation
+markers and clock. `Endpoint.inspect` never writes an endpoint; an explicit
+historical observation is diagnostic only and has no admission envelope.
+
+From this package directory, a stopped cohort can be diagnosed without copying,
+retiming or rewriting its artifacts:
+
+```sh
+bun replay.ts /absolute/stopped-cohort /absolute/new-audit-directory
+```
+
+The output must be new and outside the cohort. Replay hashes the entire original
+tree before and after, checks frozen sources and recorded receipt hashes, and
+retains the original classification separately from the diagnostic result.
+Reading may update access times; bytes, inode identities and other recorded
+metadata must remain unchanged. A diagnostic score is not a repaired result,
+new grading, task resumption, or preregistered benchmark evidence.
+
+`bun test` runs endpoint and replay unit tests. The actual-cohort regression is
+opt-in with `PROCONTRACT_RECEIPT_REPLAY_ROOT` and
+`PROCONTRACT_RECEIPT_REPLAY_OUTPUT` (a new directory). A passing offline replay
+does not mean a new live model/grader cohort has been run or admitted.

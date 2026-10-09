@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun test endpoint.test.ts",
+    "test": "bun test endpoint.test.ts replay.test.ts",
     "typecheck": "../../node_modules/.bin/tsgo -p tsconfig.json"
   }
 }

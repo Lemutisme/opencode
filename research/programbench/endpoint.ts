@@ -18,7 +18,7 @@ export type Admission = {
   deadline: number
 }
 export type Assignment = { id: string; instance: string; profile: Reference; task: Reference }
-type Input = {
+export type Input = {
   directory: string
   admission: Admission
   assignment: Assignment
@@ -34,10 +34,65 @@ type Input = {
     seedMethod: string
   }
 }
+type Observation = { diagnostic: true; observedAt: number; cancelled: boolean }
 
 /** An endpoint is an operator receipt, not an RSI verifier result. Invalid
  * grading never becomes a zero, a discharge, a retry, or learning feedback. */
 export async function finish(input: Input) {
+  const inspected = await classify(input)
+  const identity = {
+    version: 1,
+    id: input.admission.id,
+    admissionID: input.admission.admissionID,
+    cohortToken: input.admission.cohortToken,
+    instance: input.assignment.instance,
+    deadline: input.admission.deadline,
+    profileSha256: input.assignment.profile.sha256,
+    taskSha256: input.assignment.task.sha256,
+    outcome: inspected.outcome,
+    finished: Date.now(),
+  }
+  const result = {
+    ...identity,
+    valid: inspected.outcome === "scored",
+    score: inspected.score,
+    verification: inspected.verification,
+    ...input.summary,
+    delivered: inspected.outcome === "scored" && input.summary.contract === "discharged",
+    adopted: input.summary.selectedMethod !== input.summary.seedMethod,
+  }
+  await write(path.join(input.directory, "RESULT.json"), result)
+  inspected.artifacts.push(await owned(input.directory, path.join(input.directory, "RESULT.json"), "result", input.admission.started))
+  const classification = { ...identity, eligible: inspected.eligible, predicates: inspected.predicates, errors: inspected.errors }
+  await write(path.join(input.directory, "CLASSIFICATION.json"), classification)
+  inspected.artifacts.push(await owned(input.directory, path.join(input.directory, "CLASSIFICATION.json"), "classification", input.admission.started))
+  const endpoint = { ...identity, cleanup: inspected.cleanup, artifacts: inspected.artifacts }
+  await write(path.join(input.directory, "ENDPOINT.json"), endpoint)
+  return { endpoint, classification, result }
+}
+
+/** Read-only diagnostics, never a publishable endpoint or retroactive admission.
+ * A recorded observation can explain historical receipts after their deadline
+ * or cancellation, without changing the live publisher's clock or fence gates. */
+export async function inspect(input: Input, observation?: Observation) {
+  const inspected = await classify(input, observation)
+  return {
+    diagnostic: true as const,
+    observation: observation ?? null,
+    classification: {
+      outcome: inspected.outcome,
+      eligible: inspected.eligible,
+      predicates: inspected.predicates,
+      errors: inspected.errors,
+    },
+    cleanup: inspected.cleanup,
+    artifacts: inspected.artifacts,
+    score: inspected.score,
+    verification: inspected.verification,
+  }
+}
+
+async function classify(input: Input, observation?: Observation) {
   const artifacts: Artifact[] = []
   const predicates: Record<string, boolean> = {}
   const errors: string[] = []
@@ -53,6 +108,9 @@ export async function finish(input: Input) {
     return object(JSON.parse(await Bun.file(reference.path).text()))
   }
   try {
+    check("observation.valid", observation === undefined || observation.diagnostic === true
+      && Number.isSafeInteger(observation.observedAt) && observation.observedAt >= input.admission.started
+      && typeof observation.cancelled === "boolean")
     check("allocation.identity", input.directory === path.join(input.admission.cohortRoot, "runs", input.admission.id)
       && input.assignment.id === input.admission.id && input.admission.version === 1)
     check("admission.interval", Number.isSafeInteger(input.admission.started) && Number.isSafeInteger(input.admission.deadline)
@@ -182,17 +240,33 @@ export async function finish(input: Input) {
       const file = artifacts.find((item) => item.path === path.join(official, name))!
       check(`official.artifact.${name}`, reference.path === file.path && reference.sha256 === file.sha256)
     }
-    const operations = await fs.readdir(path.join(official, "operations"))
-    check("official.operations-present", operations.length > 0 && operations.every((name) => name.endsWith(".json")))
-    for (const name of operations) {
+    const operations = await fs.readdir(path.join(official, "operations"), { withFileTypes: true })
+    check("official.operations-present", operations.some((entry) => entry.name.endsWith(".json")))
+    check("official.operations-inventory", operations.every((entry) => entry.isFile()
+      && /^[a-f0-9]{32}\.(json|stdout)$/.test(entry.name)))
+    const receipts = operations.filter((entry) => entry.name.endsWith(".json")).map((entry) => entry.name).sort()
+    const companions = new Set(operations.filter((entry) => entry.name.endsWith(".stdout")).map((entry) => entry.name))
+    check("official.operations-companions", [...companions].every((name) => receipts.includes(name.replace(/\.stdout$/, ".json"))))
+    for (const name of receipts) {
       const operation = await read(path.join(official, "operations", name), "official-operation")
       check(`official.operation.${name}`, operation.phase === "finished" && Number.isSafeInteger(operation.returncode) && Number(operation.returncode) >= 0
         && time(Number(operation.started) * 1000, Number(grade.link.started), input.admission.deadline)
         && time(Number(operation.finished) * 1000, Number(operation.started) * 1000, input.admission.deadline))
+      check(`official.operation.${name}.argv`, Array.isArray(operation.argv) && operation.argv.length > 0
+        && operation.argv.every((argument) => typeof argument === "string"))
+      const argv = operation.argv as string[]
+      const companion = name.replace(/\.json$/, ".stdout")
+      // The frozen producer retains create output only for `run -d`. Its cp
+      // archive is removed before a receipt can reach the finished phase.
+      check(`official.operation.${name}.companion`, argv[0] === "run"
+        ? argv[1] === "-d" && companions.has(companion)
+        : !companions.has(companion))
+      if (argv[0] === "run") {
+        const stdout = await owned(input.directory, path.join(official, "operations", companion), "official-operation-stdout", Number(operation.started) * 1000)
+        artifacts.push(stdout)
+        check(`official.operation.${name}.container`, /^[a-f0-9]{12,64}$/.test((await Bun.file(stdout.path).text()).trim()))
+      }
     }
-    check("terminal.not-cancelled", !input.aborted && !await Bun.file(path.join(input.admission.cohortRoot, "CANCEL")).exists()
-      && !await Bun.file(path.join(input.directory, "campaign", "CANCEL")).exists())
-    check("terminal.before-deadline", Date.now() <= input.admission.deadline)
     if (grade.score.valid === true) {
       check("score.bounds", Number.isSafeInteger(grade.score.passed) && grade.score.total === input.task.total
         && Number(grade.score.passed) >= 0 && Number(grade.score.passed) <= input.task.total && grade.wrapper.exitCode === 0)
@@ -212,41 +286,27 @@ export async function finish(input: Input) {
       state.invalid = true
     }
     state.verification = grade.verification
+    // Keep live gates after all receipt reads and immediately before returning
+    // to the publisher. Only read-only inspection accepts a historical context.
+    check("terminal.not-cancelled", !input.aborted && (observation ? !observation.cancelled
+      : !await Bun.file(path.join(input.admission.cohortRoot, "CANCEL")).exists()
+        && !await Bun.file(path.join(input.directory, "campaign", "CANCEL")).exists()))
+    check("terminal.before-deadline", (observation?.observedAt ?? Date.now()) <= input.admission.deadline)
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error))
   }
   const outcome = errors.length ? (input.aborted ? "cancelled" : "execution-fault")
     : state.score ? "scored" : state.invalid ? "invalid-official-score" : "execution-fault"
-  const finished = Date.now()
-  const identity = {
-    version: 1,
-    id: input.admission.id,
-    admissionID: input.admission.admissionID,
-    cohortToken: input.admission.cohortToken,
-    instance: input.assignment.instance,
-    deadline: input.admission.deadline,
-    profileSha256: input.assignment.profile.sha256,
-    taskSha256: input.assignment.task.sha256,
+  return {
     outcome,
-    finished,
-  }
-  const result = {
-    ...identity,
-    valid: outcome === "scored",
+    eligible: outcome === "scored" || outcome === "invalid-official-score",
+    predicates,
+    errors,
+    cleanup,
+    artifacts,
     score: outcome === "scored" ? state.score : { passed: null, total: null, valid: false },
     verification: state.verification ?? null,
-    ...input.summary,
-    delivered: outcome === "scored" && input.summary.contract === "discharged",
-    adopted: input.summary.selectedMethod !== input.summary.seedMethod,
   }
-  await write(path.join(input.directory, "RESULT.json"), result)
-  artifacts.push(await owned(input.directory, path.join(input.directory, "RESULT.json"), "result", input.admission.started))
-  const classification = { ...identity, eligible: outcome === "scored" || outcome === "invalid-official-score", predicates, errors }
-  await write(path.join(input.directory, "CLASSIFICATION.json"), classification)
-  artifacts.push(await owned(input.directory, path.join(input.directory, "CLASSIFICATION.json"), "classification", input.admission.started))
-  const endpoint = { ...identity, cleanup, artifacts }
-  await write(path.join(input.directory, "ENDPOINT.json"), endpoint)
-  return { endpoint, classification, result }
 }
 
 function object(value: unknown): ObjectValue {
