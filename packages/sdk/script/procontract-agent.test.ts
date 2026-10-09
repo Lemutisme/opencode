@@ -10,6 +10,8 @@ const script: Step[] = []
 const bodies: Array<{ model?: string; reasoning?: { effort?: string }; tools?: Array<{ name: string }> }> = []
 const calls: Array<{ name: string; arguments: unknown }> = []
 const headers: string[] = []
+// what the orchestrator answers each tool with, in order; a tool with nothing queued answers "<name> done"
+const answers: Record<string, Array<{ text: string; error?: boolean } | "hang">> = {}
 let model: ReturnType<typeof Bun.serve>
 let mcp: ReturnType<typeof Bun.serve>
 
@@ -100,15 +102,17 @@ beforeAll(() => {
         })
       if (message.method === "tools/list")
         return reply({
-          tools: ["submit_candidate", "finish", "run_train"].map((name) => ({
+          tools: ["submit_candidate", "finish", "run_train", "run_eval", "wait_job"].map((name) => ({
             name,
             description: name,
-            inputSchema: { type: "object", properties: { candidate: { type: "string" } } },
+            inputSchema: { type: "object", properties: { candidate: { type: "string" }, job_id: { type: "string" } } },
           })),
         })
       if (message.method === "tools/call") {
         calls.push({ name: message.params.name, arguments: message.params.arguments })
-        return reply({ content: [{ type: "text", text: `${message.params.name} done` }], isError: false })
+        const answer = answers[message.params.name]?.shift() ?? { text: `${message.params.name} done` }
+        if (answer === "hang") return new Promise<Response>(() => undefined)
+        return reply({ content: [{ type: "text", text: answer.text }], isError: answer.error === true })
       }
       if (message.method === "ping") return reply({})
       return Response.json({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not found" } })
@@ -159,13 +163,13 @@ async function setup(delivery: Record<string, unknown>, api = { api: "openai-res
   return { root, workspace, config }
 }
 
-function start(args: string[]) {
+function start(args: string[], home = os.tmpdir()) {
   // PROCONTRACT_AGENT_BIN qualifies a compiled release binary against the same cases.
   const agent = process.env.PROCONTRACT_AGENT_BIN
     ? [process.env.PROCONTRACT_AGENT_BIN]
     : ["bun", path.join(import.meta.dir, "procontract-agent.ts")]
   return Bun.spawn([...agent, ...args], {
-    env: { PATH: process.env.PATH, HOME: os.tmpdir(), TEST_MODEL_KEY: "model-secret", TEST_MCP_TOKEN: "mcp-secret" },
+    env: { PATH: process.env.PATH, HOME: home, TEST_MODEL_KEY: "model-secret", TEST_MCP_TOKEN: "mcp-secret" },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -185,6 +189,7 @@ function reset(...steps: Step[]) {
   bodies.splice(0)
   headers.splice(0)
   calls.splice(0)
+  for (const name of Object.keys(answers)) delete answers[name]
 }
 
 test("failing preflight checks reject a submission before it reaches the orchestrator; a passing one delivers", async () => {
@@ -210,8 +215,10 @@ test("failing preflight checks reject a submission before it reaches the orchest
   expect(bodies[0].tools?.map((tool) => tool.name).sort()).toEqual([
     "contract_delivery",
     "dune_finish",
+    "dune_run_eval",
     "dune_run_train",
     "dune_submit_candidate",
+    "dune_wait_job",
     "edit",
     "glob",
     "grep",
@@ -290,6 +297,109 @@ test("Anthropic Messages endpoints get the key as a bearer token and the model's
     expect(tool.input_schema.type).toBe("object")
     expect(["oneOf", "anyOf", "allOf"].filter((key) => key in tool.input_schema)).toEqual([])
   }
+}, 60_000)
+
+const PENDING = { status: "still_running", id: "job_id", wait_tools: ["dune_wait_job"] }
+const RUNNING = { text: JSON.stringify({ status: "still_running", job_id: "job-1", next: "call wait_job" }) }
+const SUBMITTED = { text: JSON.stringify({ status: "submitted", path: "cand" }) }
+const states = (output: Array<{ type: string; state?: unknown }>) =>
+  output.filter((line) => line.type === "delivery").map((line) => line.state)
+
+test("a still-running submission stays pending until a wait on its own id returns it", async () => {
+  const run = await setup({ pending: PENDING })
+  reset(
+    { tool: "dune_submit_candidate", input: { candidate: "cand" } },
+    { text: "Submitted; it is still running." },
+    { tool: "dune_wait_job", input: { job_id: "other" } },
+    { tool: "dune_submit_candidate", input: { candidate: "cand" } },
+    { tool: "dune_wait_job", input: { job_id: "job-1" } },
+    { tool: "dune_wait_job", input: { job_id: "job-1" } },
+    { text: "Delivered." },
+  )
+  answers.submit_candidate = [RUNNING]
+  answers.wait_job = [{ text: "the training run's scores" }, RUNNING, SUBMITTED]
+  const { output, code, result } = await lines(start(["run", "--config", run.config, "--", "Improve the solver."]))
+  expect(code).toBe(0)
+  // a wait on another call, and a second "still running", leave it pending; only its own result delivers
+  expect(states(output)).toEqual(["open", "pending", "delivered"])
+  expect(output.find((line) => line.type === "delivery" && line.state === "pending")).toMatchObject({ job: "job-1" })
+  // stopping while pending is answered with the wait tool and the id, and a resubmission never reaches the orchestrator
+  expect(output.filter((line) => line.type === "continuation")).toHaveLength(1)
+  expect(JSON.stringify(bodies)).toContain('Call dune_wait_job with {\\"job_id\\": \\"job-1\\"}')
+  expect(calls.filter((call) => call.name === "submit_candidate")).toHaveLength(1)
+  const resubmitted = output.filter((line) => line.type === "tool_result" && line.name === "dune_submit_candidate")[1]
+  expect(resubmitted).toMatchObject({ ok: false })
+  expect(String(resubmitted.output)).toContain("still running")
+  expect(result).toMatchObject({ delivery: { state: "delivered" }, exit: 0 })
+}, 60_000)
+
+test("a failed wait reopens delivery, and a later wait on the same id still delivers", async () => {
+  const run = await setup({ pending: PENDING })
+  reset(
+    { tool: "dune_submit_candidate", input: { candidate: "cand" } },
+    { tool: "dune_wait_job", input: { job_id: "job-1" } },
+    { tool: "dune_wait_job", input: { job_id: "job-1" } },
+    { text: "Delivered." },
+  )
+  answers.submit_candidate = [RUNNING]
+  answers.wait_job = [{ text: "the scheduler is unreachable", error: true }, SUBMITTED]
+  const { output, result } = await lines(start(["run", "--config", run.config, "--", "Improve the solver."]))
+  expect(states(output)).toEqual(["open", "pending", "open", "delivered"])
+  expect(result).toMatchObject({ delivery: { state: "delivered" } })
+}, 60_000)
+
+test("finish ends a pending run; a run that stops while pending reports it", async () => {
+  const finished = await setup({ pending: PENDING })
+  reset(
+    { tool: "dune_submit_candidate", input: { candidate: "cand" } },
+    { tool: "dune_finish", input: {} },
+    { text: "Done." },
+  )
+  answers.submit_candidate = [RUNNING]
+  expect((await lines(start(["run", "--config", finished.config, "--", "Improve."]))).result).toMatchObject({
+    delivery: { state: "finished" },
+  })
+  const stopped = await setup({ pending: PENDING, max_continuations: 0 })
+  reset({ tool: "dune_submit_candidate", input: { candidate: "cand" } }, { text: "Waiting." })
+  answers.submit_candidate = [RUNNING]
+  expect((await lines(start(["run", "--config", stopped.config, "--", "Improve."]))).result).toMatchObject({
+    delivery: { state: "pending", job: "job-1" },
+    exit: 0,
+  })
+}, 60_000)
+
+test("a session interrupted mid tool call resumes from its session database alone, in a fresh home", async () => {
+  // what an orchestrator's yield does: SIGTERM while a tool call is open, keep session.sqlite, resume elsewhere
+  const run = await setup({ max_continuations: 0 })
+  reset({ tool: "dune_run_eval", input: { candidate: "cand" } })
+  answers.run_eval = ["hang"]
+  const child = start(["run", "--config", run.config, "--", "Improve the solver."])
+  while (!calls.some((call) => call.name === "run_eval")) await Bun.sleep(25)
+  child.kill("SIGTERM")
+  const first = await lines(child)
+  expect(first.code).toBe(143)
+  const fresh = await fs.mkdtemp(path.join(os.tmpdir(), "procontract-resume-"))
+  await fs.mkdir(path.join(fresh, "state"))
+  await fs.mkdir(path.join(fresh, "home"))
+  await fs.copyFile(path.join(run.root, "state", "session.sqlite"), path.join(fresh, "state", "session.sqlite"))
+  const config = path.join(fresh, "config.json")
+  await Bun.write(config, JSON.stringify({ ...(await Bun.file(run.config).json()), state: path.join(fresh, "state") }))
+  reset({ text: "Resumed with the eval result." })
+  const second = await lines(
+    start(
+      ["resume", "--config", config, "--session", String(first.output[0].session_id), "--", "run_eval: fine."],
+      path.join(fresh, "home"),
+    ),
+  )
+  expect(second.code).toBe(0)
+  expect(second.output[0]).toMatchObject({ type: "session", session_id: first.output[0].session_id, resumed: true })
+  expect(second.output.filter((line) => line.type === "text").map((line) => line.text)).toEqual([
+    "Resumed with the eval result.",
+  ])
+  // the interrupted call reaches the model closed with a result; no restart turn replays it
+  const sent = JSON.stringify(bodies[0])
+  expect(sent).toContain("function_call_output")
+  expect(sent).not.toContain("restarted")
 }, 60_000)
 
 test("an invalid config is rejected with exit status 2", async () => {

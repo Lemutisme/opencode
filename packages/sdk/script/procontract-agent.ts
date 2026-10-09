@@ -3,7 +3,7 @@
 // a delivery is permission to submit, never proof of correctness: the orchestrator's own verifier stays the judge.
 import fs from "node:fs/promises"
 import { spawn } from "node:child_process"
-import { Deferred, Effect, Fiber, Schema, Semaphore, Stream } from "effect"
+import { Deferred, Effect, Fiber, Option, Schema, Semaphore, Stream } from "effect"
 import type { Plugin } from "@opencode/plugin/effect/plugin"
 import { Model } from "@opencode/schema/model"
 import { Provider } from "@opencode/schema/provider"
@@ -58,6 +58,11 @@ const Config = Schema.Struct({
       finish_tools: Schema.optional(Schema.Array(Schema.String)),
       checks: Schema.optional(Schema.Array(Check)),
       max_continuations: Schema.optional(Schema.Int),
+      // An orchestrator whose long calls answer "still running": such a submission stays pending until one of the
+      // wait tools returns its result for the same id.
+      pending: Schema.optional(
+        Schema.Struct({ status: Schema.String, id: Schema.String, wait_tools: Schema.Array(Schema.String) }),
+      ),
     }),
   ),
 })
@@ -74,7 +79,7 @@ const Action = Schema.Struct({
   }),
 })
 
-type Delivery = { state: "open" | "delivered" | "finished" | "blocked"; reason?: string }
+type Delivery = { state: "open" | "pending" | "delivered" | "finished" | "blocked"; reason?: string; job?: string }
 type CheckResult = { title: string; passed: boolean; detail?: string }
 type Tokens = { input: number; output: number; reasoning: number; cache_read: number; cache_write: number }
 
@@ -96,6 +101,12 @@ const model = provider(config.model)
 const submit = new Set(config.delivery?.submit_tools ?? [])
 const finish = new Set(config.delivery?.finish_tools ?? [])
 const checks = config.delivery?.checks ?? []
+const pending = config.delivery?.pending
+const waits = new Set(pending?.wait_tools ?? [])
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+// the id of the submission the orchestrator answered as still running; kept after a failed wait, so a later
+// successful wait on it still completes the delivery
+let pendingJob: string | undefined
 await fs.mkdir(`${config.state}/config`, { recursive: true })
 // The host config carries the model key and MCP tokens; neither the shell tool nor the checks may inherit them.
 const content = JSON.stringify(settings())
@@ -183,10 +194,10 @@ const program = Effect.gen(function* () {
   })
   for (let count = 1; ; count++) {
     yield* host.sessions.wait({ sessionID: id })
-    if (ending || failed || delivery.state !== "open") break
+    if (ending || failed || (delivery.state !== "open" && delivery.state !== "pending")) break
     if (count > (config.delivery?.max_continuations ?? 10)) break
     emit({ type: "continuation", count })
-    yield* host.sessions.prompt({ sessionID: id, text: CONTINUE })
+    yield* host.sessions.prompt({ sessionID: id, text: delivery.state === "pending" ? waitPrompt() : CONTINUE })
   }
   // The follower may trail the durable log; project whatever it has not reached yet.
   yield* Fiber.interrupt(follower)
@@ -203,7 +214,11 @@ const code = ending?.code ?? (failed ? 1 : 0)
 emit({
   type: "result",
   session_id: sessionID ?? null,
-  delivery: { state: delivery.state, ...(delivery.reason ? { reason: delivery.reason } : {}) },
+  delivery: {
+    state: delivery.state,
+    ...(delivery.reason ? { reason: delivery.reason } : {}),
+    ...(delivery.job ? { job: delivery.job } : {}),
+  },
   final_text: finalText,
   usage: totals,
   exit: code,
@@ -302,6 +317,7 @@ function profile() {
         yield* context.tool.hook("execute.before", (event) =>
           Effect.gen(function* () {
             if (!submit.has(event.tool)) return
+            if (delivery.state === "pending") return yield* new Tool.Error({ message: waitPrompt() })
             if (delivery.state !== "open")
               return yield* new Tool.Error({ message: `Delivery is already ${delivery.state} in this run` })
             const results = yield* preflight(event.input)
@@ -317,9 +333,28 @@ function profile() {
         )
         yield* context.tool.hook("execute.after", (event) =>
           Effect.sync(() => {
-            if (event.status !== "completed" || delivery.state !== "open") return
-            if (submit.has(event.tool)) settle({ state: "delivered" })
-            if (finish.has(event.tool)) settle({ state: "finished" })
+            if (delivery.state !== "open" && delivery.state !== "pending") return
+            const completed = event.status === "completed" ? event.result.output : undefined
+            if (finish.has(event.tool) && event.status === "completed") return settle({ state: "finished" })
+            if (submit.has(event.tool) && event.status === "completed" && delivery.state === "open") {
+              const answer = still(completed)
+              if (answer === undefined) return settle({ state: "delivered" })
+              pendingJob = answer
+              return settle({ state: "pending", job: answer })
+            }
+            // only a wait on the pending submission's own id settles it; waits on other calls (e.g. a training run) do not
+            if (!waits.has(event.tool) || !pending || !pendingJob || record(event.input)?.[pending.id] !== pendingJob)
+              return
+            if (event.status !== "completed") {
+              if (delivery.state === "pending")
+                settle({
+                  state: "open",
+                  reason: "The wait for the submission failed; wait again, or fix and resubmit.",
+                })
+              return
+            }
+            if (still(completed) === undefined) return settle({ state: "delivered" })
+            if (delivery.state === "open") settle({ state: "pending", job: pendingJob })
           }),
         )
       }),
@@ -330,7 +365,28 @@ function profile() {
 function settle(next: Delivery) {
   delivery.state = next.state
   delivery.reason = next.reason
+  delivery.job = next.job
   emit({ type: "delivery", ...delivery })
+}
+
+// The id a "still running" answer carries, or undefined for a finished result. OpenCode passes an MCP tool's JSON
+// result on as an object, other tools' results as text.
+function still(output: unknown) {
+  const answer = pending ? record(output) : undefined
+  if (!pending || answer?.status !== pending.status) return undefined
+  return String(answer[pending.id] ?? "")
+}
+
+function record(value: unknown) {
+  const parsed = typeof value === "string" ? Option.getOrUndefined(decodeJson(value)) : value
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : undefined
+}
+
+function waitPrompt() {
+  const id = pending?.id ?? "id"
+  return `Your submission is still running (${id} ${pendingJob}). Call ${[...waits].join(" or ")} with {"${id}": "${pendingJob}"} until it returns the result. Do not submit again; it is not delivered until then.`
 }
 
 function instructions() {
@@ -342,6 +398,9 @@ function instructions() {
       : 'When the work is ready, call contract_delivery(action="handoff", summary=...). The preflight checks run first; if one fails the handoff is refused.',
     titles ? `Preflight checks: ${titles}. Run them at any time with contract_delivery(action="check").` : "",
     finish.size ? `Calling ${[...finish].join(" or ")} ends this run without a delivery.` : "",
+    pending
+      ? `If a submission is answered as still running, call ${[...waits].join(" or ")} with its ${pending.id} until it returns the result: it is not delivered before that.`
+      : "",
     'If you cannot finish, call contract_delivery(action="blocked", reason=...) with a concrete reason instead of claiming completion. Stopping without a delivery does not end the run: you will be asked to continue. A delivery is permission to submit for independent evaluation, never proof of correctness.',
   ]
     .filter(Boolean)
