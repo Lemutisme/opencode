@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import http.server
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -68,6 +69,121 @@ def validate_native_tools(body):
         raise ValueError("unqualified_native_tool")
 
 
+def validate_advisory(value):
+    if not isinstance(value, dict) or not isinstance(value.get("nodes"), dict):
+        raise ValueError("advisory requires nodes, reviewMs and afterMs")
+    nodes = value["nodes"]
+    if any(type(nodes.get(node)) is not bool for node in ["submission", "blocked", "idle"]):
+        raise ValueError("all advisory nodes must be explicit booleans")
+    if not any(nodes[node] for node in ["submission", "blocked", "idle"]):
+        raise ValueError("enable at least one advisory node")
+    for key, positive in [("reviewMs", True), ("afterMs", False)]:
+        number = value.get(key)
+        if (
+            type(number) not in (int, float)
+            or abs(number) > sys.float_info.max
+            or not math.isfinite(number)
+            or number < 0
+            or (positive and number == 0)
+        ):
+            raise ValueError(f"advisory {key} must be finite and {'positive' if positive else 'nonnegative'}")
+    return value
+
+
+def write_result(root, report, advisory=None):
+    write(root / "RESULT.json", {
+        **report,
+        **({"advisory": sha(root / "advisory.json")} if advisory is not None else {}),
+    })
+
+
+def advisory_role(started_ms, journal):
+    ends = {row["sequence"]: row for row in journal if row["type"] == "ended"}
+    if any(row.get("outcome") == "unsettled" for row in ends.values()):
+        return "unknown"
+    starts = [row for row in journal if row["type"] == "started"]
+    if any(row["sequence"] not in ends and started_ms >= row["time"] for row in starts):
+        return "unknown"
+    if any(row["time"] <= started_ms < ends[row["sequence"]]["time"] for row in starts if row["sequence"] in ends):
+        return "reviewer"
+    return "researcher"
+
+
+def qualify_advisory(root, config, database, arrived, overlap):
+    evidence = root / "state/advisory.jsonl"
+    journal = [json.loads(line) for line in evidence.read_text().splitlines()] if evidence.exists() else []
+    ends = {row["sequence"]: row for row in journal if row["type"] == "ended"}
+    for node in ["idle", "blocked"]:
+        if not config["nodes"][node]:
+            continue
+        starts = [row for row in journal if row["type"] == "started" and row["node"] == node]
+        if not starts or any(ends.get(row["sequence"], {}).get("outcome") != "completed" for row in starts):
+            raise RuntimeError(f"Advisory {node} qualification did not complete")
+    for row in journal:
+        if row["type"] != "started":
+            continue
+        events = json.loads((root / f"state/advisory/{row['sequence']}/events.json").read_text())
+        if any(event["type"] == "session.tool.failed" for event in events) or not any(
+            event["type"] == "session.tool.success"
+            and event["data"]["id"] == "call_review_read"
+            and "native-v2-ok" in json.dumps(event["data"].get("content", []))
+            for event in events
+        ):
+            raise RuntimeError("Advisory read qualification failed")
+    known = [json.loads(line) for line in (root / "fixture-identities.jsonl").read_text().splitlines()]
+    rows = database.execute(
+        "SELECT id,started,finished,status,body_sha256 FROM request WHERE peer_pid > 0 ORDER BY started,id"
+    ).fetchall()
+    available = list(rows)
+    paired = []
+    reasons = []
+    for request in sorted(known, key=lambda row: row["time"]):
+        index = next((index for index, row in enumerate(available) if row[4] == request["bodyHash"]), None)
+        if index is None:
+            reasons.append({"reason": "missing_gateway_record", "bodyHash": request["bodyHash"]})
+            continue
+        row = available.pop(index)
+        if type(row[3]) is not int or not 200 <= row[3] < 300:
+            reasons.append({"reason": "gateway_status_not_2xx_integer", "id": row[0]})
+        paired.append((request, row))
+    scales = [scale for scale in [1, 1000] if paired and all(
+        all(type(stamp) in (int, float) and math.isfinite(stamp) for stamp in row[1:3])
+        and row[1] * scale <= request["time"] + 1000
+        and row[2] * scale >= request["time"] - 1000
+        and abs(row[1] * scale - request["time"]) < 60_000
+        for request, row in paired
+    )]
+    if len(scales) != 1:
+        reasons.append({"reason": "gateway_time_unit_unverified", "candidateScales": scales})
+    report = {
+        "arrived": arrived,
+        "overlap": overlap,
+        "attributionVerified": not reasons,
+        "attribution": "unknown" if reasons else "verified",
+        "diagnostics": {
+            "reasons": reasons,
+            "fixture": known,
+            "gateway": [dict(zip(["id", "started", "finished", "status", "body_sha256"], row)) for row in rows],
+        },
+    }
+    if reasons:
+        write(root / "advisory-qualification.json", report)
+        return
+    scale = scales[0]
+    mismatch = any(advisory_role(row[1] * scale, journal) != request["role"] for request, row in paired)
+    report.update({
+        "attribution": "mismatch" if mismatch else "verified",
+        "gatewayTimeUnit": "seconds" if scale == 1000 else "milliseconds",
+        "requests": [{
+            "id": row[0], "startedMs": row[1] * scale,
+            "role": advisory_role(row[1] * scale, journal), "fixtureRole": request["role"],
+        } for request, row in paired],
+    })
+    write(root / "advisory-qualification.json", report)
+    if mismatch:
+        raise RuntimeError("Advisory windows disagree with known fixture request identities")
+
+
 def delivery_handoff(path):
     value = json.loads(path.read_text())
     delivery = value.get("delivery", {})
@@ -108,6 +224,245 @@ def official_result(path, instance):
     return result.for_branches(branches).without_ignored(ignored)
 
 
+def fixture_handler(root, model, steps, advisory=None, barrier_seconds=60):
+    actions = [
+        ("glob", {"pattern": "native-v2-marker.txt"}),
+        (
+            "grep",
+            {"pattern": "native-v2-ok", "path": "native-v2-marker.txt"},
+        ),
+        (
+            "patch",
+            {
+                "patchText": "*** Begin Patch\n*** Add File: /candidate/native-tools.txt\n+qualified\n*** End Patch"
+            },
+        ),
+        ("read", {"path": "/candidate/native-tools.txt"}),
+        (
+            "contract_delivery",
+            {
+                "action": "blocked",
+                "reason": "Scripted qualification finished, not a task submission",
+            },
+        ),
+    ]
+    if advisory is not None and advisory["nodes"]["blocked"]:
+        actions.append(actions[-1])
+
+    class Fixture(http.server.BaseHTTPRequestHandler):
+        calls = 0
+        tools = 0
+        qualification = 0
+        stopped = False
+        reviewer_arrived = threading.Event()
+        blocked_inflight = False
+        overlap = False
+        arrived = False
+
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            body = json.loads(raw)
+            reviewer = advisory is not None and {
+                tool.get("name") for tool in body.get("tools", [])
+            } == {"glob", "grep", "read"}
+            if advisory is not None:
+                with (root / "fixture-identities.jsonl").open("a") as log:
+                    log.write(json.dumps({
+                        "time": time.time() * 1000,
+                        "role": "reviewer" if reviewer else "researcher",
+                        "bodyHash": hashlib.sha256(raw).hexdigest(),
+                    }) + "\n")
+            if reviewer and Fixture.blocked_inflight:
+                Fixture.overlap = True
+                Fixture.reviewer_arrived.set()
+            Fixture.calls += 1
+            index = Fixture.calls
+            with (root / "fixture-requests.jsonl").open("a") as log:
+                log.write(
+                    json.dumps(
+                        body
+                        if index <= 2
+                        else {
+                            "fixtureRequest": index,
+                            "model": body["model"],
+                            "reasoning": body.get("reasoning"),
+                        }
+                    )
+                    + "\n"
+                )
+            tool = next(
+                (
+                    t["name"]
+                    for t in body.get("tools", [])
+                    if t.get("name", "").endswith("shell")
+                ),
+                None,
+            )
+            # Recognize reviewers before any Researcher script state is advanced.
+            barrier = False
+            if reviewer:
+                item = {
+                    "type": "function_call", "id": "fc_review_read", "call_id": "call_review_read",
+                    "name": "read", "arguments": json.dumps({"path": "/candidate/native-v2-marker.txt"}),
+                    "status": "completed",
+                } if not any(item.get("type") == "function_call_output" for item in body.get("input", [])) else {
+                    "type": "message", "id": "msg_review", "role": "assistant", "status": "completed",
+                    "content": [{"type": "output_text", "text": "Scripted advisory: inspect the documented behavior before stopping.", "annotations": []}],
+                }
+            elif tool and Fixture.tools < steps:
+                Fixture.tools += 1
+                probe = "import socket,os; assert os.listdir('/sys/class/net') == ['lo']; assert not os.path.exists('/var/run/docker.sock'); s=socket.socket(socket.AF_UNIX); s.connect('/channel/provider.sock'); s.sendall(b'POST /v1/responses HTTP/1.1\\r\\nHost: programbench-provider.invalid\\r\\nContent-Length: 2\\r\\n\\r\\n{}'); assert b'403' in s.recv(4096); print('native-v2-ok')"
+                item = {
+                    "type": "function_call",
+                    "id": "fc_fixture",
+                    "call_id": "call_fixture",
+                    "name": tool,
+                    "arguments": json.dumps(
+                        {
+                            "command": (
+                                "python3 -c "
+                                + shlex.quote(probe)
+                                + " > /candidate/native-v2-marker.txt"
+                            )
+                            if Fixture.tools == 1
+                            else "true",
+                            "timeout": 10000,
+                        }
+                    ),
+                    "status": "completed",
+                }
+            elif not Fixture.stopped:
+                Fixture.stopped = True
+                item = {
+                    "type": "message",
+                    "id": "msg_premature_stop",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Finished.",
+                            "annotations": [],
+                        }
+                    ],
+                }
+            elif Fixture.qualification < len(actions):
+                name, arguments = actions[Fixture.qualification]
+                barrier = (
+                    advisory is not None and advisory["nodes"]["blocked"]
+                    and Fixture.qualification == 4
+                )
+                selected = next(
+                    t["name"] for t in body["tools"] if t["name"].endswith(name)
+                )
+                Fixture.qualification += 1
+                item = {
+                    "type": "function_call",
+                    "id": f"fc_qualification_{Fixture.qualification}",
+                    "call_id": f"call_qualification_{Fixture.qualification}",
+                    "name": selected,
+                    "arguments": json.dumps(arguments),
+                    "status": "completed",
+                }
+            else:
+                item = {
+                    "type": "message",
+                    "id": "msg_fixture",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Fixture complete.",
+                            "annotations": [],
+                        }
+                    ],
+                }
+            response = {
+                "id": f"resp_{index}",
+                "object": "response",
+                "model": model,
+                "status": "completed",
+                "output": [item],
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 10,
+                    "total_tokens": 20,
+                },
+            }
+            events = [
+                {
+                    "type": "response.created",
+                    "response": {**response, "status": "in_progress", "output": []},
+                },
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {**item, "arguments": ""}
+                    if item["type"] == "function_call"
+                    else item,
+                },
+            ]
+            if item["type"] == "function_call":
+                events += [
+                    {
+                        "type": "response.function_call_arguments.delta",
+                        "item_id": item["id"],
+                        "output_index": 0,
+                        "delta": item["arguments"],
+                    },
+                    {
+                        "type": "response.function_call_arguments.done",
+                        "item_id": item["id"],
+                        "output_index": 0,
+                        "arguments": item["arguments"],
+                    },
+                ]
+            else:
+                events += [
+                    {
+                        "type": "response.output_text.delta",
+                        "item_id": item["id"],
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": item["content"][0]["text"] if reviewer else "Fixture complete.",
+                    }
+                ]
+            events += [
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": item,
+                },
+                {"type": "response.completed", "response": response},
+            ]
+            data = "".join(
+                "data: " + json.dumps(event) + "\n\n" for event in events
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if barrier:
+                # Flush through output_item.done, where Core starts the tool, before waiting.
+                Fixture.blocked_inflight = True
+                head = "".join("data: " + json.dumps(event) + "\n\n" for event in events[:-1]).encode()
+                self.wfile.write(head)
+                self.wfile.flush()
+                Fixture.arrived = Fixture.reviewer_arrived.wait(barrier_seconds)
+                write(root / "fixture-overlap.json", {"arrived": Fixture.arrived, "overlap": Fixture.overlap})
+                self.wfile.write(data[len(head):])
+                self.wfile.flush()
+                Fixture.blocked_inflight = False
+                return
+            self.wfile.write(data)
+
+    return Fixture
+
+
 def main():
     parser = argparse.ArgumentParser()
     for key in ["root", "runtime", "bun", "rg", "runner", "python", "wheelhouse"]:
@@ -118,7 +473,10 @@ def main():
     parser.add_argument("--fixture-steps", type=int, default=1)
     parser.add_argument("--fixture-expiry", type=int)
     parser.add_argument("--blobs", type=Path)
+    parser.add_argument("--advisory", type=Path)
     args = parser.parse_args()
+    advisory_bytes = args.advisory.read_bytes() if args.advisory else None
+    advisory = validate_advisory(json.loads(advisory_bytes)) if advisory_bytes is not None else None
     if not args.fixture and (
         args.blobs is None or not (args.blobs / args.instance).is_dir()
     ):
@@ -127,6 +485,8 @@ def main():
         )
     root = args.root.resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    if advisory_bytes is not None:
+        (root / "advisory.json").write_bytes(advisory_bytes)
     ripgrep = prepare_ripgrep(args.rg, root)
     sys.path[:0] = [str(args.runner), str(args.runner / "src")]
     from scripts.campaign_provider_gateway import Gateway, process_identity
@@ -227,6 +587,7 @@ def main():
             "socket": "/channel/provider.sock",
             "model": args.model,
             "effort": "max",
+            **({"advisory": advisory} if advisory is not None else {}),
             "prompt": "Run the requested fixture shell command, then finish."
             if args.fixture
             else ORIGINAL_TASK,
@@ -235,192 +596,7 @@ def main():
     fixture = None
     if args.fixture:
 
-        class Fixture(http.server.BaseHTTPRequestHandler):
-            calls = 0
-            tools = 0
-            qualification = 0
-            stopped = False
-
-            def log_message(self, *_):
-                pass
-
-            def do_POST(self):
-                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                Fixture.calls += 1
-                index = Fixture.calls
-                with (root / "fixture-requests.jsonl").open("a") as log:
-                    log.write(
-                        json.dumps(
-                            body
-                            if index <= 2
-                            else {
-                                "fixtureRequest": index,
-                                "model": body["model"],
-                                "reasoning": body.get("reasoning"),
-                            }
-                        )
-                        + "\n"
-                    )
-                tool = next(
-                    (
-                        t["name"]
-                        for t in body.get("tools", [])
-                        if t.get("name", "").endswith("shell")
-                    ),
-                    None,
-                )
-                if tool and Fixture.tools < args.fixture_steps:
-                    Fixture.tools += 1
-                    probe = "import socket,os; assert os.listdir('/sys/class/net') == ['lo']; assert not os.path.exists('/var/run/docker.sock'); s=socket.socket(socket.AF_UNIX); s.connect('/channel/provider.sock'); s.sendall(b'POST /v1/responses HTTP/1.1\\r\\nHost: programbench-provider.invalid\\r\\nContent-Length: 2\\r\\n\\r\\n{}'); assert b'403' in s.recv(4096); print('native-v2-ok')"
-                    item = {
-                        "type": "function_call",
-                        "id": "fc_fixture",
-                        "call_id": "call_fixture",
-                        "name": tool,
-                        "arguments": json.dumps(
-                            {
-                                "command": (
-                                    "python3 -c "
-                                    + shlex.quote(probe)
-                                    + " > /candidate/native-v2-marker.txt"
-                                )
-                                if index == 1
-                                else "true",
-                                "timeout": 10000,
-                            }
-                        ),
-                        "status": "completed",
-                    }
-                elif not Fixture.stopped:
-                    Fixture.stopped = True
-                    item = {
-                        "type": "message",
-                        "id": "msg_premature_stop",
-                        "role": "assistant",
-                        "status": "completed",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": "Finished.",
-                                "annotations": [],
-                            }
-                        ],
-                    }
-                elif Fixture.qualification < 5:
-                    actions = [
-                        ("glob", {"pattern": "native-v2-marker.txt"}),
-                        (
-                            "grep",
-                            {"pattern": "native-v2-ok", "path": "native-v2-marker.txt"},
-                        ),
-                        (
-                            "patch",
-                            {
-                                "patchText": "*** Begin Patch\n*** Add File: /candidate/native-tools.txt\n+qualified\n*** End Patch"
-                            },
-                        ),
-                        ("read", {"path": "/candidate/native-tools.txt"}),
-                        (
-                            "contract_delivery",
-                            {
-                                "action": "blocked",
-                                "reason": "Scripted qualification finished, not a task submission",
-                            },
-                        ),
-                    ]
-                    name, arguments = actions[Fixture.qualification]
-                    selected = next(
-                        t["name"] for t in body["tools"] if t["name"].endswith(name)
-                    )
-                    Fixture.qualification += 1
-                    item = {
-                        "type": "function_call",
-                        "id": f"fc_qualification_{Fixture.qualification}",
-                        "call_id": f"call_qualification_{Fixture.qualification}",
-                        "name": selected,
-                        "arguments": json.dumps(arguments),
-                        "status": "completed",
-                    }
-                else:
-                    item = {
-                        "type": "message",
-                        "id": "msg_fixture",
-                        "role": "assistant",
-                        "status": "completed",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": "Fixture complete.",
-                                "annotations": [],
-                            }
-                        ],
-                    }
-                response = {
-                    "id": f"resp_{index}",
-                    "object": "response",
-                    "model": args.model,
-                    "status": "completed",
-                    "output": [item],
-                    "usage": {
-                        "input_tokens": 10,
-                        "output_tokens": 10,
-                        "total_tokens": 20,
-                    },
-                }
-                events = [
-                    {
-                        "type": "response.created",
-                        "response": {**response, "status": "in_progress", "output": []},
-                    },
-                    {
-                        "type": "response.output_item.added",
-                        "output_index": 0,
-                        "item": {**item, "arguments": ""}
-                        if item["type"] == "function_call"
-                        else item,
-                    },
-                ]
-                if item["type"] == "function_call":
-                    events += [
-                        {
-                            "type": "response.function_call_arguments.delta",
-                            "item_id": item["id"],
-                            "output_index": 0,
-                            "delta": item["arguments"],
-                        },
-                        {
-                            "type": "response.function_call_arguments.done",
-                            "item_id": item["id"],
-                            "output_index": 0,
-                            "arguments": item["arguments"],
-                        },
-                    ]
-                else:
-                    events += [
-                        {
-                            "type": "response.output_text.delta",
-                            "item_id": item["id"],
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": "Fixture complete.",
-                        }
-                    ]
-                events += [
-                    {
-                        "type": "response.output_item.done",
-                        "output_index": 0,
-                        "item": item,
-                    },
-                    {"type": "response.completed", "response": response},
-                ]
-                data = "".join(
-                    "data: " + json.dumps(event) + "\n\n" for event in events
-                ).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+        Fixture = fixture_handler(root, args.model, args.fixture_steps, advisory)
 
         fixture = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
         threading.Thread(target=fixture.serve_forever, daemon=True).start()
@@ -606,8 +782,10 @@ def main():
                 root / "candidate/native-v2-marker.txt"
             ).read_text() != "native-v2-ok\n":
                 raise RuntimeError("Native shell did not execute")
-            write(
-                root / "RESULT.json",
+            if advisory is not None:
+                qualify_advisory(root, advisory, gateway.db, Fixture.arrived, Fixture.overlap)
+            write_result(
+                root,
                 {
                     "qualified": True,
                     "fixture": True,
@@ -620,6 +798,7 @@ def main():
                     "nativeFixtureRequests": Fixture.calls,
                     "nativeFixtureTools": Fixture.tools,
                 },
+                advisory,
             )
             return
         handoff = delivery_handoff(root / "state/worker-ended.json")
@@ -719,7 +898,7 @@ def main():
             "deadline": deadline,
             "rsiPromotion": False,
         }
-        write(root / "RESULT.json", report)
+        write_result(root, report, advisory)
         if not valid:
             raise RuntimeError("Official evaluation incomplete; not a valid task score")
         write(

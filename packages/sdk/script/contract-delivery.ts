@@ -244,7 +244,12 @@ If an obligation cannot be resolved safely, use action="blocked" with a concrete
       )
       return next
     }
-    return { act, status, exclusive }
+    return {
+      act,
+      status,
+      exclusive,
+      probes: () => Array.from(probes.values(), (item) => ({ title: item.probe.title, args: [...item.probe.args] })),
+    }
   }
 
   function data(value: typeof Data.Type, directory: string) {
