@@ -832,27 +832,13 @@ capability candidate must depend on a signed private Evaluation Contract from
 its training cohort; confirmation and OOD outcomes remain sealed until the
 candidate is frozen.
 
-A discharged policy becomes usable by a future Contract only through an
-explicit `requires` edge marked `policy: true`. This first retention boundary
-does not select the newest candidate or maintain a mutable global policy
-pointer. Principal selection remains explicit, failed candidates remain inert,
-and support loss automatically enters the existing dependency-remediation
-path.
-
-OpenCode may retain that explicit selection in location configuration as
-`contract_policy`. A new natural-language proposal inherits the configured
-edge unless its exact draft already names another policy. The inherited edge is
-shown at the ordinary permission boundary and becomes part of the new
-`specHash`; configuration never bypasses principal approval or kernel evidence
-checks. Removing or replacing the setting affects only future proposals. A
-challenged configured policy remains selected but fails new issuance closed
-until the principal clears or replaces it.
-
-The local `opencode contract policy` command is the principal promotion effect.
-It refuses candidates without a current handoff and attestation, writes only
-the exact Contract ID and revision to location configuration, and reports the
-bound specification, subject, evidence, and attestation identities. It does not
-evaluate candidates or infer a winner.
+The policy-Contract retention design above is historical research, not the R2
+interactive interface. R2 keeps execution policy in the OpenCode binding,
+separate from Contract terms and `specHash`. Its preview supports explicit
+`procontract.execution_policy: "r2-v5"` configuration for future interactive
+Contracts, with human approval unchanged. There is no `opencode contract policy`
+command or automatically selected successor in this version. See
+[the interactive preview guide](pro-contract-interactive.md).
 
 ## OpenCode design
 

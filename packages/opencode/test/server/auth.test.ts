@@ -14,6 +14,24 @@ afterEach(() => {
 })
 
 describe("ServerAuth", () => {
+  test("gives only the private embedded worker an ephemeral credential", () => {
+    const input = { HOME: "/test", OMITTED: undefined }
+    const first = ServerAuth.workerEnv(input, false)
+    const second = ServerAuth.workerEnv(input, false)
+    expect(first.HOME).toBe("/test")
+    expect(first).not.toHaveProperty("OMITTED")
+    expect(first.OPENCODE_SERVER_PASSWORD).toMatch(/^[\da-f-]{36}$/)
+    expect(second.OPENCODE_SERVER_PASSWORD).not.toBe(first.OPENCODE_SERVER_PASSWORD)
+    expect(input).not.toHaveProperty("OPENCODE_SERVER_PASSWORD")
+    expect(ServerAuth.workerEnv(input, true)).not.toHaveProperty("OPENCODE_SERVER_PASSWORD")
+    expect(ServerAuth.workerEnv({ OPENCODE_SERVER_PASSWORD: "configured" }, false).OPENCODE_SERVER_PASSWORD).toBe(
+      "configured",
+    )
+    expect(ServerAuth.workerEnv({ OPENCODE_SERVER_PASSWORD: "configured" }, true).OPENCODE_SERVER_PASSWORD).toBe(
+      "configured",
+    )
+  })
+
   test("does not emit auth headers without a password", () => {
     Flag.OPENCODE_SERVER_PASSWORD = undefined
     Flag.OPENCODE_SERVER_USERNAME = "alice"

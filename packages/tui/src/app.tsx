@@ -51,6 +51,7 @@ import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
 import { DialogContracts } from "./component/dialog-contracts"
+import { ProContractExecutionPolicy } from "@opencode-ai/core/pro-contract/execution-policy"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { Home } from "./routes/home"
 import { Session } from "./routes/session"
@@ -776,7 +777,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Contracts",
         slashName: "contracts",
         run: () => {
-          dialog.replace(() => <DialogContracts scope={sdk.directory} />)
+          dialog.replace(() => <DialogContracts />)
         },
         category: "System",
       },
@@ -793,7 +794,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           })
           if (brief == null) return
           const directory = sdk.directory
-          if (!directory) {
+          const scope = project.project()
+          if (!directory || !scope) {
             toast.show({ variant: "error", message: "A project directory is required" })
             return
           }
@@ -804,9 +806,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           }
           const result = await sdk.client.v2.proContract.issue({
             id: `pct_${crypto.randomUUID()}`,
-            scope: directory,
+            scope,
             goal: goal.trim(),
             brief: brief.trim(),
+            executionPolicy: ProContractExecutionPolicy.select(undefined, sync.data.config.procontract),
             location: { directory },
             model: {
               providerID: model.providerID,
@@ -819,7 +822,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             return
           }
           toast.show({ variant: "success", message: "Contract issued" })
-          dialog.replace(() => <DialogContracts scope={directory} />)
+          dialog.replace(() => <DialogContracts />)
         },
         category: "System",
       },

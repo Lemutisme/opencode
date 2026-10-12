@@ -30,6 +30,39 @@ const catalogLayer = AppNodeBuilder.build(
 const it = testEffect(catalogLayer)
 
 describe("CatalogV2", () => {
+  it.effect("admits an explicitly configured AI SDK key without weakening disabled or missing-key checks", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const integrations = yield* Integration.Service
+      const providerID = ProviderV2.ID.make("inline-key")
+      const integrationID = Integration.ID.make("inline-key")
+      yield* integrations.transform((editor) => editor.update(integrationID, () => {}))
+      yield* catalog.transform((editor) =>
+        editor.provider.update(providerID, (provider) => {
+          provider.integrationID = integrationID
+          provider.api = { type: "aisdk", package: "@ai-sdk/openai-compatible", settings: {} }
+        }),
+      )
+      expect((yield* catalog.provider.available()).some((provider) => provider.id === providerID)).toBe(false)
+      yield* catalog.transform((editor) =>
+        editor.provider.update(providerID, (provider) => {
+          provider.api = {
+            type: "aisdk",
+            package: "@ai-sdk/openai-compatible",
+            settings: { apiKey: "non-secret-fixture" },
+          }
+        }),
+      )
+      expect((yield* catalog.provider.available()).some((provider) => provider.id === providerID)).toBe(true)
+      yield* catalog.transform((editor) =>
+        editor.provider.update(providerID, (provider) => {
+          provider.disabled = true
+        }),
+      )
+      expect((yield* catalog.provider.available()).some((provider) => provider.id === providerID)).toBe(false)
+    }),
+  )
+
   it.effect("publishes an updated event after catalog changes", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

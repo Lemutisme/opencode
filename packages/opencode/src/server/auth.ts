@@ -46,3 +46,12 @@ export function headers(credentials?: Credentials) {
   if (!authorization) return undefined
   return { Authorization: authorization }
 }
+
+export function workerEnv(input: NodeJS.ProcessEnv, external: boolean) {
+  const env = Object.fromEntries(
+    Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  )
+  // The embedded TUI has no listener: its private RPC worker acts for the local
+  // principal. Never generate implicit credentials for an external listener.
+  return external || env.OPENCODE_SERVER_PASSWORD ? env : { ...env, OPENCODE_SERVER_PASSWORD: crypto.randomUUID() }
+}

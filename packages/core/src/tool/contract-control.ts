@@ -3,9 +3,11 @@ export * as ContractControlTools from "./contract-control"
 import { ToolFailure } from "@opencode-ai/llm"
 import { Clock, Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
+import { Config } from "../config"
 import { PermissionV2 } from "../permission"
 import { ProContract } from "../pro-contract"
 import { ProContractOpenCode } from "../pro-contract/open-code"
+import { ProContractExecutionPolicy } from "../pro-contract/execution-policy"
 import { ProContractReplay } from "../pro-contract/replay"
 import { ProContractObservation } from "../pro-contract/observation"
 import { NonNegativeInt } from "../schema"
@@ -20,6 +22,7 @@ import { Tools } from "./tools"
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
+    const config = yield* Config.Service
     const contracts = yield* ProContract.Service
     const bindings = yield* ProContractOpenCode.Service
     const replayVerifier = yield* ProContractReplay.Service
@@ -51,7 +54,10 @@ const layer = Layer.effectDiscard(
               if (!session.model)
                 return yield* new ToolFailure({ message: "Contract proposal requires a selected model" })
               const now = yield* Clock.currentTimeMillis
-              const executionPolicy = input.executionPolicy
+              const executionPolicy = ProContractExecutionPolicy.select(
+                input.executionPolicy,
+                Config.latest(yield* config.entries(), "procontract"),
+              )
               const request = (yield* sessions.context(context.sessionID)).find((item) => item.type === "user")?.text
               const unnamedArtifacts = request
                 ? (input.spec.evidence.replay?.artifacts ?? []).filter(
@@ -81,8 +87,6 @@ const layer = Layer.effectDiscard(
                   specHash,
                   goal: spec.goal,
                   details: [
-                    spec.brief ? `Brief: ${spec.brief}` : undefined,
-                    executionPolicy ? `Execution policy: ${executionPolicy}` : undefined,
                     `Trigger: ${JSON.stringify(spec.trigger)}`,
                     `Authority: ${spec.authority.join(", ")}`,
                     `Budget: ${spec.budget.turns ?? "unbounded"} turns, ${spec.budget.actions ?? "unbounded"} actions, deadline ${spec.budget.deadline}`,
@@ -90,6 +94,9 @@ const layer = Layer.effectDiscard(
                     `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                     `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
                     `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
+                    executionPolicy ? `Execution policy SHA-256: ${Hash.sha256(executionPolicy)}` : undefined,
+                    spec.brief ? `Brief: ${spec.brief}` : undefined,
+                    executionPolicy ? `Execution policy: ${executionPolicy}` : undefined,
                   ]
                     .filter((item) => item !== undefined)
                     .join("\n"),
@@ -404,6 +411,7 @@ export const node = makeLocationNode({
   name: "tool/contract-control",
   layer,
   deps: [
+    Config.node,
     ToolRegistry.node,
     PermissionV2.node,
     ProContract.node,

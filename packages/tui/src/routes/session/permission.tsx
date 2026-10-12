@@ -160,10 +160,10 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               <text fg={theme.text}>
                 {typeof props.request.metadata?.goal === "string" ? props.request.metadata.goal : ""}
               </text>
+              <text fg={theme.textMuted}>Spec hash: {props.request.patterns[0]}</text>
               <text fg={theme.textMuted}>
                 {typeof props.request.metadata?.details === "string" ? props.request.metadata.details : ""}
               </text>
-              <text fg={theme.textMuted}>Spec hash: {props.request.patterns[0]}</text>
             </box>
           }
           options={{ once: "Confirm and start", revise: "Revise", reject: "Continue normally" }}

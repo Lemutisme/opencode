@@ -160,47 +160,27 @@ Continue normally     create no Contract
 
 Rejecting a proposal creates neither a Contract nor an execution binding.
 
-A proposal may bind one previously discharged Contract as its execution policy
-by setting `policy: true` on that requirement. OpenCode injects the policy
-Contract's exact `spec.policy` and evidence identities into the dedicated
-Session. A Policy Contract keeps its current ratification work in `goal` and
-the future execution rule in `policy`; the two must not be conflated. The policy
-is part of the approved `specHash`, applies only to the new Contract, and cannot
-override its authority or settlement terms. Challenging the Policy Contract
-invalidates its dependent support through the normal remediation path.
-
-To retain one principal-selected policy for future natural-language proposals,
-select it in the location's `opencode.json` after its Contract is discharged:
-
-```bash
-opencode contract policy pct_policy_example --config ./opencode.json
-```
-
-The command fails unless the exact Contract is discharged with a current
-handoff and attestation, then prints the specification, subject, evidence, and
-attestation identities written into the selection. Its resulting configuration
-is equivalent to:
+The R2 interactive preview can select the exact frozen v5 solver policy in
+`opencode.json`:
 
 ```json
 {
-  "contract_policy": {
-    "contractID": "pct_policy_example",
-    "revision": 1,
-    "policy": true
+  "procontract": {
+    "execution_policy": "r2-v5"
   }
 }
 ```
 
-The setting is a default compiler input, not an authority grant. An explicit
-policy in a proposal overrides it, every inherited edge remains visible in the
-approval UI, and a challenged default causes new issuance to fail closed.
-Delete the setting to clear it or replace the exact ID and revision after a new
-policy is independently discharged. Existing Contracts keep their frozen
-policy edge.
+This is an explicit behavior-matching profile, not a general default or an
+RSI/promotion decision. Omitted or `false` leaves policy unset. An independently
+supplied `executionPolicy` overrides it. Both proposal paths show the resolved
+policy before approval and persist it in the execution binding, outside
+`specHash`. Existing bindings keep their frozen policy even if configuration
+changes. See [interactive preview](pro-contract-interactive.md) for installation,
+user flow, verification, cancellation, and evidence limits.
 
-```bash
-opencode contract policy --clear --config ./opencode.json
-```
+The older `contract_policy` / `opencode contract policy` instructions described
+an earlier policy-Contract experiment; those commands are not the R2 interface.
 
 ### 4.2 Unattended formation
 
@@ -1171,11 +1151,11 @@ for remediation or reruns.
 After rebuilding and restarting the host, ProContract Sessions use observation
 packing and exact paged recall by default. Ordinary Sessions remain opt-in.
 
-| Host setting | ProContract Sessions | Ordinary Sessions |
-|---|---|---|
-| Unset | Enabled | Disabled |
-| `OPENCODE_OBSERVATION_PACK=0` | Disabled | Disabled |
-| `OPENCODE_OBSERVATION_PACK=1` | Enabled | Enabled |
+| Host setting                  | ProContract Sessions | Ordinary Sessions |
+| ----------------------------- | -------------------- | ----------------- |
+| Unset                         | Enabled              | Disabled          |
+| `OPENCODE_OBSERVATION_PACK=0` | Disabled             | Disabled          |
+| `OPENCODE_OBSERVATION_PACK=1` | Enabled              | Enabled           |
 
 Other explicit values disable packing. Registration and request projection share
 the host setting captured when the service graph starts. Contract terms,

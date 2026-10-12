@@ -1994,6 +1994,7 @@ export type Config = {
             }
       }
   instructions?: Array<string>
+  procontract?: ConfigProContract
   layout?: LayoutConfig
   permission?: PermissionConfig
   tools?: {
@@ -3836,6 +3837,13 @@ export type ConfigV2ReferenceLocal = {
   path: string
   description?: string
   hidden?: boolean
+}
+
+export type ConfigProContract = {
+  /**
+   * Opt into the frozen R2 v5 behavior-matching strategy for future interactive Contracts. Omitted or false leaves execution policy unset; does not grant authority or approve Contract formation.
+   */
+  execution_policy?: "r2-v5" | false
 }
 
 export type PolicyEffect = "allow" | "deny"

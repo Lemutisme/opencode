@@ -1,6 +1,8 @@
 import type { ProContractInfo } from "@opencode-ai/sdk/v2"
-import { createMemo, createResource } from "solid-js"
+import { createMemo, createResource, onCleanup, onMount } from "solid-js"
 import { useSDK } from "../context/sdk"
+import { useProject } from "../context/project"
+import { DialogContractExecution } from "./dialog-contract-execution"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
@@ -8,22 +10,43 @@ import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
 import { errorMessage } from "../util/error"
 
+export async function loadDialogContracts(input: {
+  scope?: string
+  directory?: string
+  list: (query: { scope: string }) => Promise<{ data?: { data: ProContractInfo[] }; error?: unknown }>
+}) {
+  // Older manually issued Contracts used directory scopes. Preserve their
+  // visibility while natural-language and new manual issuance use project IDs.
+  const scopes = [...new Set([input.scope, input.directory].filter((scope): scope is string => !!scope))]
+  const results = await Promise.all(scopes.map((scope) => input.list({ scope })))
+  const failed = results.find((result) => result.error)
+  if (failed) throw failed.error
+  return [
+    ...new Map(
+      results.flatMap((result) => result.data?.data ?? []).map((contract) => [contract.id, contract]),
+    ).values(),
+  ]
+}
+
 export function DialogContracts(props: { scope?: string } = {}) {
   const sdk = useSDK()
+  const project = useProject()
   const dialog = useDialog()
   const toast = useToast()
-  const [contracts, { refetch }] = createResource(() =>
-    sdk.client.v2.proContract
-      .list(props.scope ? { scope: props.scope } : undefined)
-      .then((result) => {
-        if (result.error) throw result.error
-        return result.data.data
-      })
-      .catch((error) => {
+  const [contracts, { refetch }] = createResource(
+    () => ({ scope: props.scope ?? project.project(), directory: sdk.directory }),
+    (input) =>
+      loadDialogContracts({ ...input, list: (query) => sdk.client.v2.proContract.list(query) }).catch((error) => {
         toast.show({ variant: "error", message: errorMessage(error) })
         return []
       }),
   )
+  onMount(() => {
+    const timer = setInterval(() => {
+      if (!contracts.loading) void refetch()
+    }, 1000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   const options = createMemo(() =>
     (contracts() ?? []).map((contract) => ({
@@ -55,10 +78,10 @@ export function DialogContracts(props: { scope?: string } = {}) {
             ]
           : []),
         `Authority: ${contract.spec.authority.join(", ")}`,
-        `Budget: ${contract.spec.budget.turns} turns · ${contract.spec.budget.actions} actions`,
+        `Budget: ${contract.spec.budget.turns ?? "unbounded"} turns · ${contract.spec.budget.actions ?? "unbounded"} actions`,
+        `Deadline: ${new Date(contract.spec.budget.deadline).toUTCString()} (${contract.spec.budget.deadline} ms)`,
       ],
       onSelect: () => {
-        if (contract.status === "discharged" || contract.status === "released") return
         manage(contract)
       },
     })),
@@ -69,6 +92,18 @@ export function DialogContracts(props: { scope?: string } = {}) {
       <DialogSelect
         title={contract.spec.goal}
         options={[
+          {
+            title: "Open execution Session",
+            description: "View the dedicated OpenCode executor, if this Contract has one",
+            value: "session",
+            onSelect: () => void openExecution(contract),
+          },
+          {
+            title: "Refresh status",
+            description: "Reload the latest handoff and principal decisions",
+            value: "refresh",
+            onSelect: () => void refresh(contract),
+          },
           ...(contract.status === "verification" && contract.handoff && contract.spec.evidence.type === "principal"
             ? [
                 {
@@ -88,7 +123,7 @@ export function DialogContracts(props: { scope?: string } = {}) {
                     `Goal: ${contract.pendingRevision.spec.goal}`,
                     `Brief: ${contract.pendingRevision.spec.brief ? "updated" : "empty"}`,
                     `Authority: ${contract.pendingRevision.spec.authority.join(", ")}`,
-                    `Budget: ${contract.pendingRevision.spec.budget.turns} turns · ${contract.pendingRevision.spec.budget.actions} actions`,
+                    `Budget: ${contract.pendingRevision.spec.budget.turns ?? "unbounded"} turns · ${contract.pendingRevision.spec.budget.actions ?? "unbounded"} actions`,
                   ],
                   value: "accept",
                   onSelect: () => void decideRevision(contract, true),
@@ -111,15 +146,35 @@ export function DialogContracts(props: { scope?: string } = {}) {
                 },
               ]
             : []),
-          {
-            title: "Release without evidence",
-            description: "Explicitly end the obligation",
-            value: "release",
-            onSelect: () => void release(contract),
-          },
+          ...(contract.status === "discharged" || contract.status === "released"
+            ? []
+            : [
+                {
+                  title: "Release without evidence",
+                  description: "Explicitly end the obligation",
+                  value: "release",
+                  onSelect: () => void release(contract),
+                },
+              ]),
         ]}
       />
     ))
+  }
+
+  async function refresh(contract: ProContractInfo) {
+    const result = await sdk.client.v2.proContract.get({ contractID: contract.id })
+    if (result.error) return toast.show({ variant: "error", message: errorMessage(result.error) })
+    manage(result.data.data)
+  }
+
+  async function openExecution(contract: ProContractInfo) {
+    const result = await sdk.client.v2.proContract.execution({ contractID: contract.id })
+    if (result.error) return toast.show({ variant: "error", message: errorMessage(result.error) })
+    const session = await sdk.client.v2.session.get({ sessionID: result.data.sessionID })
+    if (session.error) return toast.show({ variant: "error", message: "The execution Session has not started yet" })
+    // Native execution records live in session_message, not the legacy TUI's
+    // message/part projection. Never open a blank legacy editor for this work.
+    dialog.replace(() => <DialogContractExecution sessionID={result.data.sessionID} />)
   }
 
   async function attest(contract: ProContractInfo) {

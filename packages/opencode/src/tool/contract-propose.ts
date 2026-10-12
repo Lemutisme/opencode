@@ -1,12 +1,14 @@
 import { ProContract } from "@opencode-ai/core/pro-contract"
 import { ProContractOpenCode } from "@opencode-ai/core/pro-contract/open-code"
+import { ProContractExecutionPolicy } from "@opencode-ai/core/pro-contract/execution-policy"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Clock, Effect, Schema } from "effect"
 import { Agent } from "@/agent/agent"
 import { Session } from "@/session/session"
-import * as Tool from "./tool"
+import { Config } from "@/config/config"
+import { Tool } from "./tool"
 
 export const Parameters = Schema.Struct({
   spec: ProContract.Spec,
@@ -22,13 +24,14 @@ type Metadata = {
 export const ContractProposeTool = Tool.define<
   typeof Parameters,
   Metadata,
-  Agent.Service | ProContractOpenCode.Service | Session.Service
+  Agent.Service | ProContractOpenCode.Service | Session.Service | Config.Service
 >(
   "contract_propose",
   Effect.gen(function* () {
     const bindings = yield* ProContractOpenCode.Service
     const agents = yield* Agent.Service
     const sessions = yield* Session.Service
+    const config = yield* Config.Service
 
     return {
       description:
@@ -44,7 +47,10 @@ export const ContractProposeTool = Tool.define<
             return yield* Effect.die("This Session already delegated its obligation to a Contract")
           if (!session.model) return yield* Effect.die("Contract proposal requires a selected model")
           const now = yield* Clock.currentTimeMillis
-          const executionPolicy = input.executionPolicy
+          const executionPolicy = ProContractExecutionPolicy.select(
+            input.executionPolicy,
+            (yield* config.get()).procontract,
+          )
           const draft = ProContract.normalizeSpec(input.spec)
           const request = ctx.messages
             .findLast((item) => item.info.role === "user")
@@ -68,8 +74,6 @@ export const ContractProposeTool = Tool.define<
               specHash,
               goal: spec.goal,
               details: [
-                spec.brief ? `Brief: ${spec.brief}` : undefined,
-                executionPolicy ? `Execution policy: ${executionPolicy}` : undefined,
                 `Trigger: ${JSON.stringify(spec.trigger)}`,
                 `Authority: ${spec.authority.join(", ")}`,
                 `Budget: ${spec.budget.turns ?? "unbounded"} turns, ${spec.budget.actions ?? "unbounded"} actions, deadline ${spec.budget.deadline}`,
@@ -77,6 +81,9 @@ export const ContractProposeTool = Tool.define<
                 `Settlement claim: ${ProContract.evidenceClaim(spec)}`,
                 `Evidence: ${spec.evidence.type}${spec.evidence.replay ? ` + replay (${spec.evidence.replay.checks.length} checks)` : ""}`,
                 `Resolution: ${spec.resolution.maxAttempts} attempts, ${spec.resolution.retryDelay} ms retry delay`,
+                executionPolicy ? `Execution policy SHA-256: ${Hash.sha256(executionPolicy)}` : undefined,
+                spec.brief ? `Brief: ${spec.brief}` : undefined,
+                executionPolicy ? `Execution policy: ${executionPolicy}` : undefined,
               ]
                 .filter((item) => item !== undefined)
                 .join("\n"),
