@@ -16,11 +16,11 @@ export default Runtime.handler(Commands.commands.contract, (input) =>
     const profile = Option.getOrUndefined(input.profile)
     if (!profile) throw new Error("--profile is required")
     const { ProContractRSI } = await import("@opencode/sdk/pro-contract")
-    const config = Schema.decodeUnknownSync(Schema.fromJsonString(ProContractRSI.Configuration))(
-      await Bun.file(profile).text(),
-      { onExcessProperty: "error" },
-    )
-    const host = await ProContractRSI.open(root, config)
+    const { ProContractTask } = await import("@opencode/sdk/pro-contract/task")
+    const config = Schema.decodeUnknownSync(
+      Schema.fromJsonString(Schema.Union([ProContractTask.Configuration, ProContractRSI.Configuration])),
+    )(await Bun.file(profile).text(), { onExcessProperty: "error" })
+    const host = "method" in config ? await ProContractTask.open(root, config) : await ProContractRSI.open(root, config)
     try {
       if (input.action === "inspect") {
         process.stdout.write(JSON.stringify(host.store.read(), null, 2) + "\n")

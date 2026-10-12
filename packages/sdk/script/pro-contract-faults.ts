@@ -3,9 +3,11 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { ProContract } from "@opencode/schema/pro-contract"
 import { ProContractRSI } from "../src/pro-contract"
+import { ProContractTask } from "../src/pro-contract/task"
 import { fixture } from "../test/pro-contract/wire"
 
-const [root, release, bun = process.execPath] = process.argv.slice(2)
+const taskOnly = process.argv.includes("--task-only")
+const [root, release, bun = process.execPath] = process.argv.slice(2).filter((arg) => arg !== "--task-only")
 if (!root || !release) throw new Error("Usage: bun script/pro-contract-faults.ts NEW_ROOT FROZEN_RELEASE [BUN]")
 await fs.mkdir(root, { mode: 0o700 })
 const input = path.join(root, "input")
@@ -33,7 +35,9 @@ const results: unknown[] = []
 try {
   for (const mode of ["cancel", "expiry", "withdrawal"] as const) {
     const campaign = path.join(root, mode)
-    const host = await ProContractRSI.open(campaign, config)
+    const host = taskOnly
+      ? await ProContractTask.open(campaign, { runtime: config.runtime, model: config.model, method: config.seed })
+      : await ProContractRSI.open(campaign, config)
     const id = ProContract.ID.make(`pct_${mode}`)
     const deadline = Date.now() + (mode === "expiry" ? 6000 : 21600000)
     const controller = new AbortController()
@@ -59,6 +63,7 @@ try {
     if (mode === "withdrawal") host.store.withdraw(host.store.read().active.grant, "Qualification withdrawal")
     const error = await work
     const state = host.store.read()
+    if (taskOnly && !("kind" in state.protocol)) throw new Error("Fault qualification admitted a research protocol")
     const executions = await fs.readdir(path.join(campaign, "executions"))
     const fenced = await Promise.all(
       executions.map((execution) => Bun.file(path.join(campaign, "executions", execution, "FENCED.json")).json()),
@@ -77,7 +82,7 @@ try {
   }
   await Bun.write(
     path.join(root, "RESULT.json"),
-    JSON.stringify({ kind: "native-fault-qualification", realModel: false, results }, null, 2),
+    JSON.stringify({ kind: "native-fault-qualification", taskOnly, realModel: false, results }, null, 2),
   )
   console.log(JSON.stringify(results, null, 2))
 } finally {

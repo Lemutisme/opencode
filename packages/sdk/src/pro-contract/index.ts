@@ -73,6 +73,8 @@ export const initialMethod: RSI.Method = {
 export async function open(root: string, configuration: Configuration) {
   if (!path.isAbsolute(root)) throw new Error("An absolute private ledger directory is required")
   const config = Schema.decodeUnknownSync(Configuration)(configuration, { onExcessProperty: "error" })
+  if (!config.tests.length && config.proposals !== 0)
+    throw new Error("Without performance panels, explicitly admit fixed-method task execution with proposals: 0")
   nonoverlapping(root, config.runtime.directory)
   RSI.method(config.seed)
   await fs.mkdir(root, { recursive: true, mode: 0o700 })
@@ -101,25 +103,28 @@ export async function open(root: string, configuration: Configuration) {
       }
     }),
   )
-  const protocol = RSI.protocol({
-    version: 1,
-    performanceRule: "task-pareto",
-    environment: RSI.hash({
-      release,
-      model: config.model,
-      tests,
-      proposals: config.proposals,
-      reserveBytes: config.reserveBytes,
-    }),
-    tests: tests.map((test) => ({
-      id: test.id,
-      panel: test.panel,
-      repeats: test.repeats,
-      total: test.total,
-      checkpoint: test.checkpoint,
-      verifier: test.verifierHash,
-    })),
+  const environment = RSI.hash({
+    release,
+    model: config.model,
+    tests,
+    proposals: config.proposals,
+    reserveBytes: config.reserveBytes,
   })
+  const protocol = tests.length
+    ? RSI.protocol({
+        version: 1,
+        performanceRule: "task-pareto",
+        environment,
+        tests: tests.map((test) => ({
+          id: test.id,
+          panel: test.panel,
+          repeats: test.repeats,
+          total: test.total,
+          checkpoint: test.checkpoint,
+          verifier: test.verifierHash,
+        })),
+      })
+    : Schema.decodeUnknownSync(ContractLedger.TaskProtocol)({ kind: "task", version: 1, environment })
   const store = new ContractLedger.Store(path.join(root, "ledger.sqlite"), protocol, config.seed)
   const frozen = {
     release,
@@ -250,9 +255,10 @@ export async function open(root: string, configuration: Configuration) {
               checkpoint: result.checkpoint,
               deadline,
               signal: controller.signal,
-              terminal: task.verification === "terminal"
-                ? { task: task.id, execution: path.basename(result.root), action: "submit" }
-                : undefined,
+              terminal:
+                task.verification === "terminal"
+                  ? { task: task.id, execution: path.basename(result.root), action: "submit" }
+                  : undefined,
             })
             if (grade.result.total !== task.total) throw new Error("Original task verifier denominator changed")
             await Bun.write(

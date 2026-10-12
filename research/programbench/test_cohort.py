@@ -67,6 +67,43 @@ def protocol():
 
 
 class CohortTests(unittest.TestCase):
+    def test_paired_fixed_methods_require_every_task_arm_repeat_and_exact_order(self):
+        value = protocol()
+        value['arms'] = ['r2', 'core']
+        value['originalTasks'] = 36
+        value['assignments'] = [
+            {**item, 'arm': arm, 'id': item['id'].replace('-rsi-', '-' + arm + '-'),
+             'order': int(item['id'].split('-')[0]) * 2 + index}
+            for item in value['assignments'] for index, arm in enumerate(value['arms'])]
+        validate_protocol(value)
+        duplicate = {**value, 'assignments': value['assignments'][:-1] + [value['assignments'][0]]}
+        with self.assertRaises(ValueError):
+            validate_protocol(duplicate)
+        with self.assertRaises(ValueError):
+            validate_protocol({**value, 'assignments': value['assignments'][:-1]})
+        reordered = [dict(item) for item in value['assignments']]
+        reordered[-1]['order'] = 0
+        with self.assertRaises(ValueError):
+            validate_protocol({**value, 'assignments': reordered})
+
+    def test_paired_fixed_methods_execute_all_slots_in_the_frozen_counterbalanced_order(self):
+        value = protocol()
+        value['arms'] = ['r2', 'core']
+        value['originalTasks'] = 36
+        value['assignments'] = [
+            {**item, 'arm': arm, 'id': item['id'].replace('-rsi-', '-' + arm + '-'),
+             'order': int(item['id'].split('-')[0]) * 2 + index}
+            for item in value['assignments'] for index, arm in enumerate(
+                value['arms'] if item['repeat'] == 1 else list(reversed(value['arms'])))]
+        validate_protocol(value)
+        controller = self.controller(settings=value)
+        result = controller.run()
+        self.assertTrue(result['complete'])
+        expected = [item['id'] for repeat in (1, 2) for item in sorted(
+            [row for row in value['assignments'] if row['repeat'] == repeat], key=lambda row: row['order'])]
+        self.assertEqual(result['admitted'], expected)
+        self.assertEqual(len(result['completed']), 36)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='cohort-test-')
         self.root = Path(self.temporary.name)

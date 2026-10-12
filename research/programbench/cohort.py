@@ -50,15 +50,24 @@ def validate_protocol(protocol):
     instances = [item['id'] for item in protocol['instances']]
     if len(instances) != 9 or len(set(instances)) != 9:
         raise ValueError('Exactly nine distinct frozen instances required')
-    expected = {(instance, repeat) for instance in instances for repeat in (1, 2)}
-    observed = {(item['instance'], item['repeat']) for item in assignments}
-    if len(assignments) != 18 or len({item['id'] for item in assignments}) != 18 or observed != expected:
-        raise ValueError('Exactly two fixed repeats per instance required')
-    if any(not re.fullmatch(r'[0-8]-rsi-r[12]', item['id']) for item in assignments):
-        raise ValueError('Unsafe or non-RSI allocation name')
-    if any(item['id'] != f"{instances.index(item['instance'])}-rsi-r{item['repeat']}" for item in assignments):
+    arms = protocol.get('arms', ['rsi'])
+    if not isinstance(arms, list) or not arms or any(
+            not isinstance(arm, str) or not re.fullmatch(r'[a-z][a-z0-9]{0,15}', arm) for arm in arms) or len(set(arms)) != len(arms):
+        raise ValueError('Distinct safe frozen arm identities required')
+    expected = {(instance, arm, repeat) for instance in instances for arm in arms for repeat in (1, 2)}
+    observed = {(item['instance'], item.get('arm', 'rsi'), item['repeat']) for item in assignments}
+    if len(assignments) != len(expected) or len({item['id'] for item in assignments}) != len(expected) or observed != expected:
+        raise ValueError('Exactly two fixed repeats per instance and arm required')
+    if any(not re.fullmatch(r'[0-8]-[a-z][a-z0-9]{0,15}-r[12]', item['id']) for item in assignments):
+        raise ValueError('Unsafe allocation name')
+    if any(item['id'] != f"{instances.index(item['instance'])}-{item.get('arm', 'rsi')}-r{item['repeat']}" for item in assignments):
         raise ValueError('Allocation names must follow frozen instance order')
-    for key, value in {'originalTasks': 18, 'repeatBlocks': 2, 'concurrencyPerBlock': 3,
+    for repeat in (1, 2):
+        orders = [item.get('order') for item in assignments if item['repeat'] == repeat]
+        if any(order is not None for order in orders) and (any(type(order) is not int for order in orders)
+                or set(orders) != set(range(len(orders)))):
+            raise ValueError('Explicit admission order must cover each repeat block exactly')
+    for key, value in {'originalTasks': len(expected), 'repeatBlocks': 2, 'concurrencyPerBlock': 3,
                        'secondsPerOriginal': 21600}.items():
         if protocol.get(key) != value:
             raise ValueError(f'Frozen coordinate {key} must equal {value}')
@@ -431,7 +440,7 @@ class Controller:
             for repeat in (1, 2):
                 self.repeat = repeat
                 self.queue = sorted([item for item in self.protocol['assignments'] if item['repeat'] == repeat],
-                                    key=lambda item: int(item['id'].split('-')[0]))
+                                    key=lambda item: item.get('order', int(item['id'].split('-')[0])))
                 while self.queue or self.children:
                     if self.signal_requested or (self.root / 'CANCEL').exists():
                         self.cancel('Explicit cohort cancellation')
@@ -505,13 +514,17 @@ def main():
         with Path(reference['path']).open('rb') as source:
             if hashlib.file_digest(source, 'sha256').hexdigest() != reference['sha256']:
                 raise RuntimeError('Frozen input changed: ' + reference['path'])
+    for reference in frozen.get('links', []):
+        file = Path(reference['path'])
+        if not file.is_symlink() or os.readlink(file) != reference['link']:
+            raise RuntimeError('Frozen link changed: ' + reference['path'])
     if (root / 'LAUNCH.json').exists() or (root / 'CANCEL').exists():
         raise RuntimeError('Refusing replay or cancelled admission')
     if not os.environ.get('OPENAI_API_KEY'):
         raise RuntimeError('Host model credential absent')
     if not create(root / 'LAUNCH.json', json.dumps({'started': time.time(), 'pid': os.getpid(),
                   'birth': birth(os.getpid()), 'source': protocol['sourceCommit'], 'model': protocol['model'],
-                  'cohortToken': protocol['cohortToken'], 'originalTasks': 18, 'modelCallsBeforeLaunch': 0}, indent=2) + '\n'):
+                  'cohortToken': protocol['cohortToken'], 'originalTasks': protocol['originalTasks'], 'modelCallsBeforeLaunch': 0}, indent=2) + '\n'):
         raise RuntimeError('Refusing concurrent launch')
     result = Controller(root, protocol, SystemdBackend(root, protocol, frozen)).run()
     return 0 if result['executionComplete'] else 1

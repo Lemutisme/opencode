@@ -19,6 +19,7 @@
     ".": "./src/index.ts",
     "./effect": "./src/effect/index.ts",
     "./pro-contract": "./src/pro-contract/index.ts",
+    "./pro-contract/task": "./src/pro-contract/task.ts",
     "./workerd": "./src/workerd.ts",
     "./workerd/effect": "./src/effect/workerd.ts"
   },

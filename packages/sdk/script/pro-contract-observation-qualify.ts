@@ -4,10 +4,18 @@ import path from "node:path"
 import { Schema } from "effect"
 import { ProContract } from "@opencode/schema/pro-contract"
 import { ProContractRSI } from "../src/pro-contract"
+import { ProContractTask } from "../src/pro-contract/task"
 import { ContractEnvironment } from "../src/pro-contract/environment"
 import { continuation, observationFixture, recovered } from "../test/pro-contract/observation-wire"
 
-const [root, release, bun = process.execPath, environmentFile] = process.argv.slice(2)
+const taskOnly = process.argv.includes("--task-only")
+const cli = process.argv.includes("--cli")
+const unrelated = Number(process.env.PROCONTRACT_QUALIFY_WARMUP ?? 26)
+if (!Number.isSafeInteger(unrelated) || unrelated < 26)
+  throw new Error("Observation qualification needs at least 26 actual unrelated shells")
+const [root, release, bun = process.execPath, environmentFile] = process.argv
+  .slice(2)
+  .filter((arg) => arg !== "--task-only" && arg !== "--cli")
 if (!root || !release)
   throw new Error(
     "Usage: bun script/pro-contract-observation-qualify.ts NEW_ROOT FROZEN_RELEASE [BUN] [ENVIRONMENT_JSON]",
@@ -19,7 +27,8 @@ const environment = environmentFile
 
 // The successor receives no marker, hash or path from the scripted provider. It must
 // locate the prior native command and recover the untranscoded bytes from the archive.
-const wire = observationFixture(`python3 - <<'PY'
+const repairFeedback = "PUBLIC_ACCEPTANCE_REPAIR_REQUIRED"
+const recover = `python3 - <<'PY'
 import base64, errno, hashlib, json, pathlib, socket
 root = pathlib.Path('/admission/observations')
 rows = [json.loads(line) for line in (root / 'index.jsonl').read_text().splitlines()]
@@ -29,6 +38,9 @@ def blob(row):
     assert hashlib.sha256(value).hexdigest() == row['hash']
     return value
 native = [(row, json.loads(blob(row))) for row in rows if row['kind'] == 'native-result']
+origin = [row for row, value in native if value['input'].get('command', '').startswith("python3 - <<'PY'\\nimport base64, os\\n")]
+assert len(origin) == 1
+native = [(row, value) for row, value in native if row['sessionID'] == origin[0]['sessionID']]
 def called(fragment):
     found = [(row, value) for row, value in native if fragment in value['input'].get('command', '')]
     assert len(found) == 1, (fragment, len(found))
@@ -67,8 +79,8 @@ failed = [row for row in rows if row['kind'] == 'model-visible' and row['callID'
 assert len(failed) == 1 and b'error' in blob(failed[0])
 session = json.loads(pathlib.Path('/state/identity.json').read_text())['sessionID']
 assert original['sessionID'] != session
-assert len(set(row['sessionID'] for row in rows)) == 1
-assert sorted(item.name for item in pathlib.Path('/workspace').iterdir()) == ['task.txt']
+assert len(set(row['sessionID'] for row in rows)) == (2 if pathlib.Path('/workspace/answer.txt').exists() else 1)
+assert sorted(item.name for item in pathlib.Path('/workspace').iterdir()) in [['task.txt'], ['answer.txt', 'task.txt']]
 readonly = []
 for file in [root / 'index.jsonl', root / 'blobs' / saved['hash'], root / 'cannot-create']:
     try:
@@ -88,7 +100,14 @@ assert b'403' in peer.recv(4096)
 peer.close()
 pathlib.Path('/workspace/answer.txt').write_bytes(marker + b'\\n')
 print('${recovered} ' + json.dumps(dict(hash=saved['hash'], bytes=len(value), previousSession=original['sessionID'], session=session, readonly=readonly, timeoutHonest=True, errorHonest=True)))
-PY`)
+PY`
+const wire = observationFixture(
+  recover,
+  taskOnly
+    ? { feedback: repairFeedback, command: recover + "\nprintf 'repaired\\n' > /workspace/acknowledged.txt" }
+    : undefined,
+  unrelated,
+)
 const initial = path.join(root, "input")
 const verifier = path.join(root, "verifier")
 await fs.mkdir(initial)
@@ -96,12 +115,20 @@ await fs.mkdir(verifier)
 await Bun.write(path.join(initial, "task.txt"), "Public observation-continuity mechanics task.\n")
 await Bun.write(
   path.join(verifier, "judge.py"),
-  `import json,pathlib\ns=pathlib.Path('/workspace/answer.txt').read_text()\nprint(json.dumps(dict(passed=int(s==${JSON.stringify(wire.marker + "\n")}),total=1,valid=True)))\n`,
+  `import json,pathlib\ns=pathlib.Path('/workspace/answer.txt').read_text()\np=int(s==${JSON.stringify(wire.marker + "\n")})\n` +
+    (taskOnly
+      ? `ack=pathlib.Path('/workspace/acknowledged.txt')\np+=int(ack.exists() and ack.read_text()=='repaired\\n')\nprint(json.dumps(dict(passed=p,total=2,valid=True,feedback='${repairFeedback}: retain the answer and write repaired followed by a newline in acknowledged.txt.')))\n`
+      : "print(json.dumps(dict(passed=p,total=1,valid=True)))\n"),
 )
 const config: ProContractRSI.Configuration = {
   runtime: { directory: release, bun, python: "/usr/bin/python3", bwrap: "/usr/bin/bwrap" },
   model: { id: "scripted", effort: "max", upstream: wire.url },
-  seed: { instructions: "Retain public evidence across checkpoints without confusing observations with acceptance." },
+  seed: process.env.PROCONTRACT_QUALIFY_METHOD
+    ? Schema.decodeUnknownSync(Schema.Struct({ instructions: Schema.NonEmptyString }))(
+        await Bun.file(process.env.PROCONTRACT_QUALIFY_METHOD).json(),
+        { onExcessProperty: "error" },
+      )
+    : { instructions: "Retain public evidence across checkpoints without confusing observations with acceptance." },
   proposals: 0,
   tests: (["safety", "development", "confirmation"] as const).map((panel) => ({
     id: panel,
@@ -116,25 +143,81 @@ const config: ProContractRSI.Configuration = {
 const deadline = Date.now() + 15 * 60 * 1000
 const task: ProContractRSI.Task = {
   id: ProContract.ID.make("pct_observation_continuity"),
-  goal: "OBS_CONTINUITY_ORIGINAL: recover the first line of the original public shell output after checkpoint and submit it as answer.txt.",
+  goal:
+    "OBS_CONTINUITY_ORIGINAL: recover the first line of the original public shell output after checkpoint and submit it as answer.txt." +
+    (taskOnly ? " Also retain the repair acknowledgement as acknowledged.txt, containing repaired and a newline." : ""),
   directory: initial,
-  total: 1,
+  total: taskOnly ? 2 : 1,
   deadline,
   verifier: { directory: verifier, command: ["/usr/bin/python3", "/verifier/judge.py"] },
   ...(environment ? { environment } : {}),
 }
-await Bun.write(path.join(root, "PROFILE.json"), JSON.stringify(config, null, 2))
+const profile = taskOnly ? { runtime: config.runtime, model: config.model, method: config.seed } : config
+await Bun.write(path.join(root, "PROFILE.json"), JSON.stringify(profile, null, 2))
 await Bun.write(path.join(root, "TASK.json"), JSON.stringify(task, null, 2))
-const host = await ProContractRSI.open(path.join(root, "campaign"), config)
+const host =
+  "method" in profile
+    ? await ProContractTask.open(path.join(root, "campaign"), profile)
+    : await ProContractRSI.open(path.join(root, "campaign"), profile)
 try {
-  const result = await host.run(task)
+  const result = cli
+    ? await (async () => {
+        const child = Bun.spawn(
+          [
+            bun,
+            path.join(release, "packages/cli/src/index.ts"),
+            "contract",
+            "run",
+            path.join(root, "campaign"),
+            "--profile",
+            path.join(root, "PROFILE.json"),
+            "--task",
+            path.join(root, "TASK.json"),
+          ],
+          {
+            cwd: path.join(release, "packages/cli"),
+            env: {
+              PATH: "/usr/bin:/bin",
+              HOME: path.join(root, "cli-home"),
+              XDG_DATA_HOME: path.join(root, "cli-data"),
+              XDG_CONFIG_HOME: path.join(root, "cli-config"),
+              XDG_CACHE_HOME: path.join(root, "cli-cache"),
+              XDG_STATE_HOME: path.join(root, "cli-state"),
+            },
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        )
+        const [code, stdout, stderr] = await Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+        ])
+        await Bun.write(path.join(root, "CLI.json"), JSON.stringify({ code, stdout, stderr }))
+        if (code !== 0) throw new Error(`Frozen native CLI failed: ${stderr}`)
+        return Schema.decodeUnknownSync(
+          Schema.fromJsonString(Schema.Struct({ contract: Schema.Struct({ status: Schema.String }) })),
+        )(stdout)
+      })()
+    : await host.run(task)
   if (result.contract.status !== "discharged") throw new Error("Independent final byte verification did not pass")
-  if (wire.records.length !== 34) throw new Error("Unexpected native observation qualification request schedule")
+  if (wire.records.length !== unrelated + (taskOnly ? 10 : 8))
+    throw new Error("Unexpected native observation qualification request schedule")
   const state = host.store.read()
+  if (taskOnly && (!("kind" in state.protocol) || state.protocol.kind !== "task"))
+    throw new Error("Task-only qualification admitted a research protocol")
+  if (
+    taskOnly &&
+    wire.records.some((record) => {
+      const handoff = record.request.tools.find((tool) => tool.name.endsWith("contract_handoff"))
+      return !handoff?.parameters || JSON.stringify(handoff.parameters).includes('"propose"')
+    })
+  )
+    throw new Error("Actual native tool schema exposed method research in a task-only allocation")
   if (state.compared.length || state.kernel.contracts[task.id].spec.budget.deadline !== deadline)
     throw new Error("Observation continuity changed policy authority or the original deadline")
   const ids = await fs.readdir(path.join(root, "campaign", "executions"))
-  if (ids.length !== 2) throw new Error("Qualification requires exactly two fresh native executions")
+  if (ids.length !== (taskOnly ? 3 : 2)) throw new Error("Qualification has an unexpected fresh execution count")
   const execution = await Promise.all(
     ids.map(async (id) => {
       const directory = path.join(root, "campaign", "executions", id)
@@ -159,14 +242,22 @@ try {
     }),
   )
   const first = execution.find((item) => item.handoff.action === "checkpoint")
-  const second = execution.find((item) => item.handoff.action === "submit")
+  const second = execution.find((item) => item.handoff.action === "submit" && item.workspace.includes("answer.txt"))
   if (!first || !second || first.sessionID === second.sessionID || first.handoff.summary !== continuation)
     throw new Error("Fresh native Session continuation was not established")
   if (
     JSON.stringify(first.workspace) !== '["task.txt"]' ||
-    JSON.stringify(second.workspace) !== '["answer.txt","task.txt"]'
+    !execution.some((item) => JSON.stringify(item.workspace) === '["answer.txt","task.txt"]') ||
+    (taskOnly &&
+      !execution.some((item) => JSON.stringify(item.workspace) === '["acknowledged.txt","answer.txt","task.txt"]'))
   )
     throw new Error("Observation logs were injected into the task workspace")
+  if (
+    taskOnly &&
+    (!state.tasks[task.id].feedback.some((text) => text.startsWith(repairFeedback)) ||
+      wire.records.filter((record) => record.repairing).length !== 2)
+  )
+    throw new Error("Independent negative evidence did not cause same-task public repair")
   if (
     wire.records
       .filter((item) => item.continued && item.step === 0)
@@ -198,11 +289,17 @@ try {
     kind: "deterministic-native-observation-continuity-e2e",
     realModel: false,
     performanceClaim: false,
+    taskOnly,
+    cli,
+    comparisons: state.compared.length,
+    publicRepairFeedbackRetained:
+      taskOnly && state.tasks[task.id].feedback.some((text) => text.startsWith(repairFeedback)),
     ...(environment ? { taskEnvironment: environment } : {}),
     result,
     deadline,
     sessions: execution.map((item) => item.sessionID),
     physicalRequests: wire.records.length,
+    unrelatedShells: unrelated,
     rawBytes: wire.bytes.length,
     hash,
     originalShellFileEvicted: true,

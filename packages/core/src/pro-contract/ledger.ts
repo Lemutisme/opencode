@@ -6,6 +6,12 @@ import { ProContract } from "@opencode/schema/pro-contract"
 import { ProContractKernel } from "./kernel.js"
 import { RSI } from "./rsi.js"
 
+export const TaskProtocol = Schema.Struct({
+  kind: Schema.Literal("task"),
+  version: Schema.Literal(1),
+  environment: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+})
+
 export type Method = { hash: string; grant: ProContract.ID }
 export type Task = {
   id: ProContract.ID
@@ -17,7 +23,7 @@ export type Task = {
 export type State = {
   revision: number
   kernel: ProContractKernel.State
-  protocol: RSI.Protocol
+  protocol: RSI.Protocol | typeof TaskProtocol.Type
   active: Method
   methods: Record<string, RSI.Method>
   tasks: Record<string, Task>
@@ -31,8 +37,9 @@ export type State = {
 export class Store {
   readonly db: Database
 
-  constructor(file: string, protocol: RSI.Protocol, seed: RSI.Method) {
-    RSI.protocol(protocol)
+  constructor(file: string, protocol: State["protocol"], seed: RSI.Method) {
+    if ("kind" in protocol) Schema.decodeUnknownSync(TaskProtocol)(protocol, { onExcessProperty: "error" })
+    if (!("kind" in protocol)) RSI.protocol(protocol)
     RSI.method(seed)
     this.db = new Database(file, { create: true, strict: true })
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000")
@@ -226,6 +233,7 @@ export class Store {
 
   propose(id: ProContract.ID, parent: Method, candidate: RSI.Method, source: string) {
     return this.change({ type: "comparison-admitted", id, parent, candidate, source }, (state) => {
+      if ("kind" in state.protocol) throw new Error("Task-only admission does not authorize method research")
       this.assertTask(state, id)
       this.assertMethod(state, parent)
       const receipt = Schema.decodeUnknownSync(RSI.Execution)(this.inspect(source))
@@ -249,6 +257,8 @@ export class Store {
 
   select(parent: Method, candidate: RSI.Method, measurements: readonly RSI.Measurement[]) {
     return this.change({ type: "method-comparison", parent, candidate, measurements }, (state, apply) => {
+      const protocol = state.protocol
+      if ("kind" in protocol) throw new Error("Task-only admission does not authorize method selection")
       this.assertMethod(state, parent)
       if (state.active.hash !== parent.hash || state.active.grant !== parent.grant) throw new Error("Incumbent changed")
       const method = RSI.method(candidate)
@@ -290,7 +300,7 @@ export class Store {
             throw new Error("Evaluation handoff does not match its final segment")
         }
         const verification = Schema.decodeUnknownSync(RSI.Verification)(this.inspect(row.verification))
-        const test = state.protocol.tests.find((test) => test.id === row.test)
+        const test = protocol.tests.find((test) => test.id === row.test)
         if (
           !test ||
           !execution.evaluation ||
@@ -311,7 +321,7 @@ export class Store {
         )
           throw new Error("Measurement is not bound to its admitted execution and verifier")
       }
-      const decision = RSI.compare(state.protocol, measurements, state.retained)
+      const decision = RSI.compare(protocol, measurements, state.retained)
       const evidence = this.object({ parent, candidate: hash, protocol: state.protocol, measurements, decision })
       const evaluation = ProContract.ID.make(`pct_measurement_${key}`)
       this.grant(evaluation, "Record a complete paired measurement, not permission to deploy", evidence, [], apply)
