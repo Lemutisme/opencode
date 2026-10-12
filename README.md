@@ -8,6 +8,13 @@
   </a>
 </p>
 <p align="center">The open source AI coding agent.</p>
+
+> **ProContract research fork:** this branch contains opt-in task-first V2 work,
+> not a replacement for upstream default behavior. Start with the
+> [branch map and research insights](specs/pro-contract-branches.md),
+> [kernel foundation](specs/pro-contract-kernel-foundation.md), and
+> [paired experiment readout](specs/pro-contract-kernel-paired.md).
+
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
   <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
