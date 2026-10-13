@@ -22,21 +22,31 @@ result = {'valid': mode == 'scored'}
 endpoint = {'version': 1, 'id': admission['id'], 'admissionID': admission['admissionID'],
             'cohortToken': admission['cohortToken'], 'instance': 'task-' + admission['id'].split('-')[0],
             'deadline': admission['deadline'], 'profileSha256': 'a' * 64, 'taskSha256': 'b' * 64,
-            'outcome': 'scored' if mode == 'scored' else 'invalid-official-score',
+            'outcome': 'provider-refusal' if mode == 'refusal' else 'scored' if mode == 'scored' else 'invalid-official-score',
             'cleanup': {'native': {'acknowledged': mode != 'unack'}, 'official': {'acknowledged': True}},
             'finished': int(time.time() * 1000)}
 if mode == 'wrong-binding':
     endpoint['deadline'] += 1
+if mode == 'refusal':
+    endpoint['cleanup']['official'] = {'acknowledged': True, 'state': 'not-admitted', 'admitted': 0}
+    result.update({'score': {'passed': None, 'total': None, 'valid': False}, 'delivered': False, 'contract': 'escalated'})
+    (root / 'RESULT.json').write_text(json.dumps(result))
+    (root / 'VERIFICATION-INVENTORY.json').write_text(json.dumps({**endpoint, 'state': 'not-admitted',
+        'admitted': [], 'directory': str(root / 'campaign/verifications')}))
 classification = {**endpoint, 'eligible': True, 'errors': [],
                   'predicates': {'scriptedLocalEndpoint': mode != 'wrong-classification'}}
 (root / 'CLASSIFICATION.json').write_text(json.dumps(classification))
 artifacts = [('admission', root / 'ADMISSION.json'), ('classification', root / 'CLASSIFICATION.json'),
              ('result', root / 'RESULT.json')]
-for kind in ('native-fence', 'native-ownership', 'native-admission', 'native-handoff', 'verification',
-             'official-result', 'official-fence', 'official-wrapper-fence', 'official-subject', 'subject-archive'):
+kinds = ('native-fence', 'native-ownership', 'native-admission', 'provider-journal') if mode == 'refusal' else (
+    'native-fence', 'native-ownership', 'native-admission', 'native-handoff', 'verification',
+    'official-result', 'official-fence', 'official-wrapper-fence', 'official-subject', 'subject-archive')
+for kind in kinds:
     path = root / (kind + '.fixture')
     path.write_text('Zero-model local process fixture; not benchmark evidence')
     artifacts.append((kind, path))
+if mode == 'refusal':
+    artifacts.append(('verification-inventory', root / 'VERIFICATION-INVENTORY.json'))
 endpoint['artifacts'] = [{'kind': kind, 'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
                          for kind, path in artifacts]
 (root / 'ENDPOINT.json').write_text(json.dumps(endpoint))

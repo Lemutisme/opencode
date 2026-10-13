@@ -5,6 +5,7 @@ import {
   Media,
   LLM,
   AIError,
+  isRetryable,
   HttpContext,
   HttpOptions,
   LLMEvent,
@@ -4970,6 +4971,51 @@ describe("OpenAI Responses route", () => {
           ],
         },
       ])
+    }),
+  )
+
+  for (const failure of [
+    { error: { message: "litellm.APIError: Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt", type: null, param: null, code: "400" }, tag: "ContentPolicy", retry: false },
+    { error: { message: "Key expired", type: "authentication_error" }, tag: "Authentication", retry: false },
+    { error: { message: "Server overloaded", type: "overloaded_error" }, tag: "ProviderInternal", retry: true },
+  ]) {
+    it.effect(`classifies a bare HTTP200 error envelope as ${failure.tag}`, () =>
+      Effect.gen(function* () {
+        const body = JSON.stringify({ error: failure.error, preserved: "proxy detail" })
+        const error = yield* LLMClient.generate(request).pipe(
+          Effect.provide(fixedResponse(`data: ${body}\n\n`)),
+          Effect.flip,
+        )
+        expect(error.reason._tag).toBe(failure.tag)
+        expect(error.reason.body).toBe(body)
+        expect(error.reason.http?.status).toBe(200)
+        expect(error.reason.http?.url).toBe("https://api.openai.test/v1/responses")
+        expect(isRetryable(error)).toBe(failure.retry)
+      }),
+    )
+  }
+
+  it.effect("does not retry an HTTP200 JSON usage-policy rejection", () =>
+    Effect.gen(function* () {
+      const body = JSON.stringify({ error: { message: "Invalid prompt: potentially violating our usage policy", code: "400" }, extra: "retained" })
+      const error = yield* LLMClient.generate(request).pipe(
+        Effect.provide(fixedResponse(body, { headers: { "content-type": "application/json", "x-should-retry": "true" } })),
+        Effect.flip,
+      )
+      expect(error.reason).toMatchObject({ _tag: "ContentPolicy", body, http: { status: 200 } })
+      expect(isRetryable(error)).toBe(false)
+    }),
+  )
+
+  it.effect("does not normalize malformed bare frames into provider errors", () =>
+    Effect.gen(function* () {
+      const body = '{"message":"ordinary unexpected content","error":null}'
+      const error = yield* LLMClient.generate(request).pipe(
+        Effect.provide(fixedResponse(`data: ${body}\n\n`)),
+        Effect.flip,
+      )
+      expect(error.reason).toMatchObject({ _tag: "InvalidProviderOutput", body })
+      expect(isRetryable(error)).toBe(false)
     }),
   )
 

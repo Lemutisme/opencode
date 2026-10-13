@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema, SchemaGetter } from "effect"
 import type { Content } from "@opencode/schema/tool"
 import { HttpTransport } from "../route/transport/index.js"
 import { Protocol } from "../route/protocol.js"
@@ -386,24 +386,22 @@ export const Event = Schema.StructWithRest(
 export type Event = Schema.Schema.Type<typeof Event>
 export type NormalizedEvent = Event & { readonly item?: OutputItem | null }
 
-const decodeEventValue = Schema.decodeUnknownEffect(Event)
-const decodeFrame = Schema.decodeUnknownEffect(ProviderShared.Json)
-
-/**
- * Decodes one WebSocket frame. Some providers and gateways answer a rejected `response.create` with a bare
- * `{ "error": ... }` envelope and no event type; that reads as an error event so it classifies instead of
- * failing decoding.
- */
-export const decodeChannelEvent = (frame: string) =>
-  decodeFrame(frame).pipe(
-    Effect.flatMap((value) =>
-      decodeEventValue(
-        ProviderShared.isRecord(value) && value.type === undefined && value.error != null
-          ? { ...value, type: "error" }
-          : value,
-      ),
-    ),
-  )
+// HTTP/SSE proxies and WebSocket gateways can both reject a request with a
+// bare error envelope. Normalize only that envelope, never arbitrary frames.
+const BareError = Schema.StructWithRest(
+  Schema.Struct({
+    type: Schema.optional(Schema.Never),
+    error: Schema.Unknown.check(Schema.makeFilter((value) => value != null || "Missing error")),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+)
+const WireEvent = Schema.Union([Event, BareError]).pipe(
+  Schema.decodeTo(Event, {
+    decode: SchemaGetter.transform((value) => ({ ...value, type: value.type ?? "error" })),
+    encode: SchemaGetter.transform((event) => event),
+  }),
+)
+export const decodeChannelEvent = Schema.decodeUnknownEffect(Protocol.jsonEvent(WireEvent))
 
 export interface ProviderAdapter {
   readonly id: string
@@ -602,10 +600,7 @@ const lowerToolResultOutput = Effect.fnUntraced(function* (
 
 const DEFAULT_EFFORT = "medium"
 
-const lowerMessages = Effect.fnUntraced(function* (
-  request: LLMRequest,
-  adapter: ProviderAdapter,
-) {
+const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest, adapter: ProviderAdapter) {
   const input: OpenResponsesInputItem[] = []
   const providerMetadataKey = metadataKey(request.model)
 
@@ -765,10 +760,7 @@ const lowerMessages = Effect.fnUntraced(function* (
   return input
 })
 
-export const lowerConversation = Effect.fnUntraced(function* (
-  request: LLMRequest,
-  adapter: ProviderAdapter,
-) {
+export const lowerConversation = Effect.fnUntraced(function* (request: LLMRequest, adapter: ProviderAdapter) {
   const instructions = ProviderShared.joinText(request.system)
   return {
     model: request.model.id,
@@ -1152,10 +1144,7 @@ const onReasoningSummaryPartDone = (state: ParserState, event: Event): StepResul
   ]
 }
 
-const onFunctionCallArgumentsDelta = Effect.fnUntraced(function* (
-  state: ParserState,
-  event: Event,
-) {
+const onFunctionCallArgumentsDelta = Effect.fnUntraced(function* (state: ParserState, event: Event) {
   if (event.item_id === undefined) return [state, NO_EVENTS] satisfies StepResult
   const tool = state.tools[event.item_id]
   if (!tool) return [state, NO_EVENTS] satisfies StepResult
@@ -1183,10 +1172,7 @@ const onFunctionCallArgumentsDelta = Effect.fnUntraced(function* (
   return [{ ...state, lifecycle, tools: result.tools }, events] satisfies StepResult
 })
 
-const onOutputItemDone = Effect.fnUntraced(function* (
-  state: ParserState,
-  item: NormalizedEvent["item"],
-) {
+const onOutputItemDone = Effect.fnUntraced(function* (state: ParserState, item: NormalizedEvent["item"]) {
   if (!item) return [state, NO_EVENTS] satisfies StepResult
 
   if (item.type === "compaction") {
@@ -1495,7 +1481,7 @@ export const protocol = Protocol.make({
     from: fromRequest,
   },
   stream: {
-    event: Protocol.jsonEvent(Event),
+    event: Protocol.jsonEvent(WireEvent),
     initial,
     step: (state: ParserState, event: Event) => step(state, normalize(state, event)),
     terminal,

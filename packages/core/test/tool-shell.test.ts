@@ -1031,6 +1031,27 @@ describe("ShellTool", () => {
     ),
   )
 
+  it.live("settles a synchronous NUL-argument startup failure and admits the next shell", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withSession(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const failed = yield* executeTool(registry, call({ command: "printf 'before\0after'", timeout: 1000 }))
+              .pipe(Effect.timeout("5 seconds"))
+            expect(failed.status).toBe("error")
+            const repaired = yield* executeTool(registry, call({ command: "printf recovered", timeout: 1000 }, "call-repaired"))
+              .pipe(Effect.timeout("5 seconds"))
+            expect(repaired.status).toBe("completed")
+            expect(repaired.content?.[0]).toMatchObject(Expected.text(expect.stringContaining("recovered")))
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),
+    ),
+  )
+
   it.live("reports a missing workdir", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

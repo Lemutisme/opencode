@@ -24,8 +24,8 @@ class EndpointSchemaTests(unittest.TestCase):
         root = Path(os.environ.get('PROGRAMBENCH_QUALIFICATION_ROOT') or tempfile.mkdtemp(prefix='endpoint-schema-'))
         root.mkdir(parents=True, exist_ok=True)
         outcomes = []
-        for valid, mixed in ((False, False), (True, False), (False, True), (True, True)):
-            case = root / (('actual-valid' if valid else 'actual-invalid') + ('-mixed' if mixed else ''))
+        for valid, mixed, refused in ((False, False, False), (True, False, False), (False, True, False), (True, True, False), (False, False, True)):
+            case = root / (('actual-valid' if valid else 'actual-invalid') + ('-mixed' if mixed else '') + ('-refusal' if refused else ''))
             case.mkdir()
             command = [os.environ.get('PROGRAMBENCH_QUALIFICATION_BUN') or shutil.which('bun'),
                        str(Path(__file__).with_name('endpoint-fixture.ts'))]
@@ -33,6 +33,8 @@ class EndpointSchemaTests(unittest.TestCase):
                 command.append('--valid')
             if mixed:
                 command.append('--mixed')
+            if refused:
+                command.append('--refusal')
             produced = subprocess.run(command, capture_output=True, text=True, timeout=10, check=True,
                                       env={**os.environ, 'PROGRAMBENCH_FIXTURE_ROOT': str(case)})
             (case / 'producer.stdout').write_text(produced.stdout)
@@ -45,8 +47,9 @@ class EndpointSchemaTests(unittest.TestCase):
             child.process = subprocess.Popen([sys.executable, '-c', 'raise SystemExit(' + str(fixture['returncode']) + ')'])
             child.process.wait(timeout=3)
             consumed = endpoint(child, fixture['admission']['cohortToken'])
-            self.assertEqual(consumed['outcome'], 'scored' if valid else 'invalid-official-score')
-            self.assertEqual(consumed['cleanup'], {'native': {'acknowledged': True}, 'official': {'acknowledged': True}})
+            self.assertEqual(consumed['outcome'], 'provider-refusal' if refused else 'scored' if valid else 'invalid-official-score')
+            self.assertEqual(consumed['cleanup']['native']['acknowledged'], True)
+            self.assertEqual(consumed['cleanup']['official'], {'acknowledged': True, 'state': 'not-admitted' if refused else 'fenced', 'admitted': 0 if refused else 3 if mixed else 1})
             outcomes.append({'root': str(case), 'producer': observed['outcome'], 'consumer': consumed['outcome']})
         write(root / 'SCHEMA-RESULT.json', {'passed': True, 'modelCalls': 0, 'graderCalls': 0,
               'scriptedQualificationOnly': True, 'outcomes': outcomes,

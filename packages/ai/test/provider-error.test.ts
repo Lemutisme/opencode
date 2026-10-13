@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isContextOverflow } from "../src/index.js"
+import { AIError, HttpContext, isRetryable, isContextOverflow } from "../src/index.js"
 import { classifyProviderFailure, providerErrorMessage } from "../src/provider-error.js"
 
 describe("provider error classification", () => {
@@ -581,4 +581,25 @@ describe("provider error messages", () => {
       ].map(providerErrorMessage),
     ).toEqual([undefined, undefined, undefined, undefined])
   })
+})
+
+test("retry headers cannot override a deterministic provider refusal", () => {
+  for (const [code, message] of [
+    ["content_policy_violation", "Denied"],
+    ["invalid_prompt", "Potentially violating our usage policy. Please try again with a different prompt"],
+    ["authentication_error", "Key expired"],
+    ["insufficient_quota", "No credits"],
+    ["invalid_request_error", "Bad request"],
+  ]) {
+    const reason = classifyProviderFailure({
+      message,
+      rawBody: JSON.stringify({ error: { code, message } }),
+      http: new HttpContext({
+        url: "https://provider.test/responses",
+        status: 200,
+        headers: { "x-should-retry": "true" },
+      }),
+    })
+    expect(isRetryable(new AIError({ reason }))).toBe(false)
+  }
 })

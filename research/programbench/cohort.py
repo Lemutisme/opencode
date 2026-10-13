@@ -18,6 +18,8 @@ import subprocess
 import time
 import uuid
 
+from credential import preflight, validate
+
 
 def read(path):
     return json.loads(path.read_text())
@@ -76,6 +78,13 @@ def validate_protocol(protocol):
             raise ValueError(f'{key} must explicitly be null')
     if not re.fullmatch(r'[a-f0-9]{32}', protocol.get('cohortToken', '')):
         raise ValueError('A separately frozen unique cohortToken is required')
+    refusal_policy = protocol.get('endpointPolicy', {}).get('witnessedProviderRefusal', 'fail-closed-and-cancel')
+    if refusal_policy not in ('fail-closed-and-cancel', 'unknown-and-continue-independent-assignments'):
+        raise ValueError('Unknown frozen provider refusal policy')
+    if refusal_policy == 'unknown-and-continue-independent-assignments' and protocol['endpointPolicy'].get('retry') is not False:
+        raise ValueError('A provider refusal can never authorize a retry')
+    if 'credentialPreflight' in protocol:
+        validate(protocol['credentialPreflight'], protocol['model']['upstream'])
     shutdown = protocol['shutdown']
     for key in ('graceSeconds', 'killWaitSeconds', 'commandSeconds', 'pollSeconds'):
         value = shutdown.get(key)
@@ -259,12 +268,38 @@ def endpoint(child, token):
         raise ValueError('Endpoint and classification outcome disagree')
     if record.get('outcome') in ('execution-fault', 'cancelled'):
         return record
-    if record.get('outcome') not in ('scored', 'invalid-official-score'):
+    if record.get('outcome') not in ('scored', 'invalid-official-score', 'provider-refusal'):
         raise ValueError('Unknown endpoint outcome')
     if (classification.get('eligible') is not True or classification.get('errors') != []
             or not classification.get('predicates')
             or any(value is not True for value in classification['predicates'].values())):
         raise ValueError('Host original-endpoint classification did not admit this evidence')
+    if record['outcome'] == 'provider-refusal':
+        required = {'native-fence', 'native-ownership', 'native-admission', 'provider-journal', 'verification-inventory'}
+        if not required.issubset(kinds) or kinds.get('result') != [child.directory / 'RESULT.json']:
+            raise ValueError('Refusal lacks authenticated provider evidence and native fencing')
+        cleanup = record.get('cleanup', {})
+        if (cleanup.get('native', {}).get('acknowledged') is not True
+                or cleanup.get('official') != {'acknowledged': True, 'state': 'not-admitted', 'admitted': 0}):
+            raise ValueError('Refusal cleanup or absent-grader admission is unacknowledged')
+        inventory_file = child.directory / 'VERIFICATION-INVENTORY.json'
+        if kinds.get('verification-inventory') != [inventory_file]:
+            raise ValueError('Missing exact host verification inventory')
+        inventory = read(inventory_file)
+        if (any(inventory.get(key) != value for key, value in expected.items())
+                or inventory.get('outcome') != 'provider-refusal' or inventory.get('state') != 'not-admitted'
+                or inventory.get('admitted') != []
+                or inventory.get('directory') != str(child.directory / 'campaign/verifications')):
+            raise ValueError('Invalid not-admitted verification inventory')
+        catalog = child.directory / 'campaign/verifications'
+        if catalog.is_symlink() or (catalog.exists() and (not catalog.is_dir() or any(catalog.iterdir()))):
+            raise ValueError('Refusal has a started or unknown grader')
+        result = read(child.directory / 'RESULT.json')
+        if (child.process.returncode != 1 or result.get('valid') is not False
+                or result.get('score') != {'passed': None, 'total': None, 'valid': False}
+                or result.get('delivered') is not False or result.get('contract') != 'escalated'):
+            raise ValueError('Refusal cannot carry a score or discharge')
+        return record
     required = {'native-fence', 'native-ownership', 'native-admission', 'native-handoff', 'verification',
                 'official-result', 'official-fence', 'official-wrapper-fence', 'official-subject', 'subject-archive'}
     if not required.issubset(kinds) or kinds.get('result') != [child.directory / 'RESULT.json']:
@@ -389,14 +424,18 @@ class Controller:
                 continue
             try:
                 child.endpoint = endpoint(child, self.protocol['cohortToken'])
-                if child.endpoint['outcome'] not in ('scored', 'invalid-official-score'):
+                admitted_refusal = (child.endpoint['outcome'] == 'provider-refusal'
+                    and self.protocol.get('endpointPolicy', {}).get('witnessedProviderRefusal')
+                    == 'unknown-and-continue-independent-assignments')
+                if child.endpoint['outcome'] not in ('scored', 'invalid-official-score') and not admitted_refusal:
                     self.fail('Original execution fault: ' + child.id + ': ' + child.endpoint['outcome'])
             except Exception as error:
                 child.errors.append('Endpoint: ' + str(error))
                 self.fail('Incomplete original endpoint: ' + child.id + ': ' + str(error))
             if child.endpoint.get('outcome') == 'scored':
                 self.completed.append(child.id)
-            if child.endpoint.get('outcome') == 'invalid-official-score':
+            if (child.endpoint.get('outcome') == 'invalid-official-score'
+                    or (child.endpoint.get('outcome') == 'provider-refusal' and self.cancelled_at is None)):
                 self.unknown.append(child.id)
             self.retire(child)
 
@@ -522,6 +561,10 @@ def main():
         raise RuntimeError('Refusing replay or cancelled admission')
     if not os.environ.get('OPENAI_API_KEY'):
         raise RuntimeError('Host model credential absent')
+    if 'credentialPreflight' not in protocol or not protocol['credentialPreflight'].get('keyFingerprint'):
+        raise RuntimeError('A separately frozen credential-lifetime preflight is required')
+    credential = preflight(protocol, os.environ.get('OPENAI_API_KEY'))
+    write(root / 'PRELAUNCH-CREDENTIAL-CHECK.json', credential)
     if not create(root / 'LAUNCH.json', json.dumps({'started': time.time(), 'pid': os.getpid(),
                   'birth': birth(os.getpid()), 'source': protocol['sourceCommit'], 'model': protocol['model'],
                   'cohortToken': protocol['cohortToken'], 'originalTasks': protocol['originalTasks'], 'modelCallsBeforeLaunch': 0}, indent=2) + '\n'):

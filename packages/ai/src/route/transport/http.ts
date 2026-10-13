@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Stream } from "effect"
+import { Clock, Duration, Effect, Option, Schema, Stream } from "effect"
 import { Headers, HttpClientRequest } from "effect/unstable/http"
 import { Auth } from "../auth.js"
 import { render as renderEndpoint } from "../endpoint.js"
@@ -7,6 +7,7 @@ import type { HttpMiddleware, Transport, TransportPrepareInput } from "./index.j
 import * as ProviderShared from "../../protocols/shared.js"
 import {
   AIError,
+  InvalidProviderOutputError,
   DEFAULT_HTTP_TIMEOUT_MS,
   mergeJsonRecords,
   TransportError,
@@ -14,6 +15,7 @@ import {
   type HttpTimeout,
   type LLMRequest,
 } from "../../schema/index.js"
+import { classifyProviderFailure, providerErrorMessage } from "../../provider-error.js"
 import { RequestExecutor } from "../executor.js"
 
 export type JsonRequestInput<Body> = TransportPrepareInput<Body>
@@ -78,6 +80,12 @@ export interface HttpJsonTransport<Body, Frame> extends Transport<Body, HttpPrep
   readonly with: (patch: HttpJsonPatch<Body, Frame>) => HttpJsonTransport<Body, Frame>
 }
 
+const errorEnvelope = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({ error: Schema.Unknown.check(Schema.makeFilter((value) => value != null || "Missing error")) }),
+  ),
+)
+
 export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJsonTransport<Body, Frame> => ({
   id: "http-json",
   with: (patch) => httpJson({ ...input, ...patch }),
@@ -119,20 +127,46 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
       )
       const http = RequestExecutor.responseHttp(response)
       const remaining = Duration.subtract(total, Duration.millis((yield* Clock.currentTimeMillis) - started))
-      return {
-        frames: prepared.framing.frame(
-          RequestExecutor.responseStream(response).pipe(
-            Stream.timeoutOrElse({
-              duration: timeoutDuration(request.http?.chunkTimeout),
-              orElse: () => Stream.fail(timeout("read", "Timed out waiting for response data", http)),
-            }),
-            Stream.interruptWhen(
-              Effect.sleep(remaining).pipe(
-                Effect.andThen(Effect.fail(timeout("read", "Timed out waiting for the response to complete", http))),
-              ),
-            ),
+      const bytes = RequestExecutor.responseStream(response).pipe(
+        Stream.timeoutOrElse({
+          duration: timeoutDuration(request.http?.chunkTimeout),
+          orElse: () => Stream.fail(timeout("read", "Timed out waiting for response data", http)),
+        }),
+        Stream.interruptWhen(
+          Effect.sleep(remaining).pipe(
+            Effect.andThen(Effect.fail(timeout("read", "Timed out waiting for the response to complete", http))),
           ),
         ),
+      )
+      return {
+        // Some proxies return a JSON rejection with HTTP200 despite stream=true.
+        // Never discard it as empty SSE and retry the refused request.
+        frames:
+          prepared.framing.id === "sse" &&
+          /^application\/(?:[\w.-]+\+)?json(?:;|$)/i.test(http.headers["content-type"] ?? "")
+            ? Stream.fromEffect(
+                Stream.mkString(bytes.pipe(Stream.decodeText())).pipe(
+                  Effect.flatMap((body) =>
+                    Effect.fail(
+                      new AIError({
+                        reason: Option.isSome(errorEnvelope(body))
+                          ? classifyProviderFailure({
+                              message: providerErrorMessage(body) ?? body,
+                              status: http.status,
+                              rawBody: body,
+                              http,
+                            })
+                          : new InvalidProviderOutputError({
+                              message: "Expected an SSE response, received JSON",
+                              body,
+                              http,
+                            }),
+                      }),
+                    ),
+                  ),
+                ),
+              )
+            : prepared.framing.frame(bytes),
         http,
         body: prepared.framing.body,
       }

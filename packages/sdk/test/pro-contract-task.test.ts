@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
 import { Schema } from "effect"
 import { ProContractRSI } from "../src/pro-contract"
 import { ProContractTask } from "../src/pro-contract/task"
@@ -56,4 +59,19 @@ test("missing performance panels cannot silently downgrade a research admission"
       tests: [],
     }),
   ).rejects.toThrow("Without performance panels")
+})
+
+
+test("an absent configured host credential fails before creating a campaign or task", async () => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), "contract-credential-"))
+  const root = path.join(parent, "campaign")
+  try {
+    await expect(ProContractTask.open(root, {
+      ...profile,
+      model: { ...profile.model, credential: `PROCONTRACT_MISSING_${crypto.randomUUID()}` },
+    })).rejects.toThrow("Configured host provider credential is unavailable")
+    expect(await fs.stat(root).catch(() => undefined)).toBeUndefined()
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true })
+  }
 })

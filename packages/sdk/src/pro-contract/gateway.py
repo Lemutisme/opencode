@@ -81,6 +81,21 @@ def record(value):
             os.fsync(out.fileno())
 
 
+def provider_event(identifier, raw, status):
+    try:
+        event = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(event, dict):
+        return None
+    if event.get("type") in ("response.failed", "error") or ("type" not in event and event.get("error") is not None):
+        # Journal before forwarding: a consumer closing the socket must not
+        # erase affirmative provider refusal evidence or its actual HTTP status.
+        record({"type": "provider-error", "id": identifier, "time": time.time(),
+                "status": status, "body": raw.decode("utf-8"), "event": event})
+    return event
+
+
 def observation(handler):
     """The native peer supplies bytes, never host filenames or allocation IDs."""
     encoded = handler.headers.get("X-Observation", "")
@@ -226,29 +241,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", response.getheader("Content-Type", "text/event-stream"))
             self.end_headers()
             pending = b""
+            document = "application/json" in response.getheader("Content-Type", "").lower()
             while True:
                 standing()
                 chunk = response.read1(65536)
                 if not chunk:
                     break
-                self.wfile.write(chunk)
-                self.wfile.flush()
                 pending += chunk
-                while b"\n" in pending:
-                    line, pending = pending.split(b"\n", 1)
-                    if not line.startswith(b"data: "):
-                        continue
-                    try:
-                        event = json.loads(line[6:])
-                    except (ValueError, UnicodeDecodeError):
-                        continue
-                    if event.get("type") == "response.completed":
-                        complete = True
-                        usage = event.get("response", {}).get("usage")
-                    if event.get("type") in ("response.failed", "error"):
-                        record({"type": "provider-error", "id": identifier, "event": event})
+                if not document:
+                    while b"\n" in pending:
+                        line, pending = pending.split(b"\n", 1)
+                        if not line.startswith(b"data:"):
+                            continue
+                        event = provider_event(identifier, line[5:].lstrip(b" "), response.status)
+                        if event and event.get("type") == "response.completed":
+                            complete = True
+                            usage = event.get("response", {}).get("usage")
                 if len(pending) > 32 * 1024 * 1024:
                     raise ValueError("Unbounded provider event")
+                self.wfile.write(chunk)
+                self.wfile.flush()
+            if document:
+                provider_event(identifier, pending, response.status)
+
         except Exception as error:
             record({"type": "observation-failure" if self.path == "/v1/observations" else "failure",
                     "id": identifier, "admitted": admitted, "error": str(error)})
@@ -256,7 +271,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(403, "Admission denied")
         finally:
             if admitted:
-                record({"type": "finished", "id": identifier, "complete": complete, "usage": usage,
+                record({"type": "finished", "id": identifier, "time": time.time(), "complete": complete, "usage": usage,
                         "usageIncomplete": usage is None, "cost": None})
             if upstream:
                 upstream.close()

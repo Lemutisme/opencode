@@ -143,6 +143,23 @@ export async function addEvaluations(value: Awaited<ReturnType<typeof fixture>>)
   return { execution, verification, local }
 }
 
+export async function addRefusal(value: Awaited<ReturnType<typeof fixture>>) {
+  await fs.rm(path.join(value.input.directory, "campaign", "verifications"), { recursive: true })
+  await fs.rm(path.join(value.execution, "state", "result.json"))
+  await fs.rm(path.join(value.input.directory, "campaign", "FINAL_SCORE.json"), { force: true })
+  await change(path.join(value.input.directory, "campaign", "FROZEN.json"), { tests: [] })
+  await write(path.join(value.root, "FROZEN.json"), { sdkDirectory: path.resolve(import.meta.dir, "../..") })
+  value.input.hostError = `Error: Native worker failed; inspect ${value.execution}`
+  const event = { error: { message: "Invalid prompt: potentially violating our usage policy. Please try again with a different prompt", type: null, code: "400" } }
+  const records = [
+    { type: "admitted", id: "refused", time: (value.input.admission.started + 100) / 1000 },
+    { type: "provider-error", id: "refused", time: (value.input.admission.started + 200) / 1000, status: 200, body: JSON.stringify(event), event },
+    { type: "finished", id: "refused", time: (value.input.admission.started + 300) / 1000, complete: false, usage: null, usageIncomplete: true, cost: null },
+  ]
+  await Bun.write(path.join(value.execution, "requests.jsonl"), records.map((record) => JSON.stringify(record)).join("\n") + "\n")
+  return records
+}
+
 async function write(file: string, value: unknown) {
   await Bun.write(file, JSON.stringify(value))
 }
@@ -150,6 +167,7 @@ async function write(file: string, value: unknown) {
 if (import.meta.main) {
   const value = await fixture(process.argv.includes("--valid"), process.env.PROGRAMBENCH_FIXTURE_ROOT)
   if (process.argv.includes("--mixed")) await addEvaluations(value)
+  if (process.argv.includes("--refusal")) await addRefusal(value)
   const result = await Endpoint.finish(value.input)
   await write(path.join(value.root, "FIXTURE.json"), { directory: value.input.directory, allocation: value.input.assignment, admission: value.input.admission, returncode: result.endpoint.outcome === "scored" ? 0 : 1 })
   console.log(JSON.stringify({ root: value.root, outcome: result.endpoint.outcome, errors: result.classification.errors }))

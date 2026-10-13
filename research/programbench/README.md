@@ -104,3 +104,25 @@ new grading, task resumption, or preregistered benchmark evidence.
 opt-in with `PROCONTRACT_RECEIPT_REPLAY_ROOT` and
 `PROCONTRACT_RECEIPT_REPLAY_OUTPUT` (a new directory). A passing offline replay
 does not mean a new live model/grader cohort has been run or admitted.
+
+## Repaired execution protocol (new cohorts only)
+
+See [execution repair](../../specs/pro-contract-execution-repair.md). Preparation
+now freezes a host-only `credential.py` gate and explicit no-retry provider-refusal
+policy. Credential metadata must cover the full worst-case schedule, without a
+finite monetary cap, and never enters worker mounts or raw artifacts.
+
+A positively witnessed provider policy refusal may be a terminal UNKNOWN only
+under `endpointPolicy.witnessedProviderRefusal =
+"unknown-and-continue-independent-assignments"` and `retry: false`. The receipt
+must link the authenticated gateway journal, complete request accounting, all
+native PID/birth fences and an explicit never-admitted verifier inventory.
+Unknown scores are not zeros and prevent fixed-repeat promotion. All other
+execution/identity/cleanup uncertainty still fails closed. No refused allocation
+is replayed, and neither historical paired cohort adopts this new policy.
+
+Future freezing additionally requires `qualification/execution-repair/RESULT.json`
+and `reports/credential-tests.log` (three pure gate tests). The former comes from
+`packages/sdk/script/pro-contract-repair-qualify.ts` using the frozen runtime:
+NUL startup recovery, SSE/JSON refusal, authentication and malformed-frame cases.
+The native fixtures and credential metadata query make no real model calls.

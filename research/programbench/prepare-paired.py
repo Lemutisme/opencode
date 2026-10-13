@@ -37,7 +37,7 @@ if (ROOT / 'PROTOCOL-DRAFT.json').exists() or (ROOT / 'PROTOCOL.json').exists() 
     raise RuntimeError('Refusing preparation over a previously prepared, frozen or launched root')
 prior = json.loads((SUPPLIER / 'PROTOCOL.json').read_text())
 assert digest(R2) == 'b382202cc07a74e212a8ab41e47a117a291dce1815e4967125a360a62e76d067'
-for old, new in [('cohort.py', 'launch.py'), ('run-one.ts', 'run-one.ts'), ('endpoint.ts', 'endpoint.ts')]:
+for old, new in [('cohort.py', 'launch.py'), ('run-one.ts', 'run-one.ts'), ('endpoint.ts', 'endpoint.ts'), ('credential.py', 'credential.py')]:
     shutil.copyfile(SOURCE / 'research/programbench' / old, ROOT / new)
 core = json.loads(subprocess.check_output([
     str(BUN), '-e', "import { ProContractTask } from './packages/sdk/src/pro-contract/task.ts'; console.log(JSON.stringify(ProContractTask.evidenceMethod))",
@@ -106,7 +106,10 @@ plan = {
         'No deployment promotion is authorized by this development study alone; complete independent confirmation and established-full-pass protection remain required.',
     ],
     'endpointPolicy': {'safelyProvenInvalidOfficialScore': 'unknown-and-continue-independent-assignments',
-                       'executionFaultOrUnknownCleanup': 'fail-closed-and-cancel', 'retry': False},
+                       'executionFaultOrUnknownCleanup': 'fail-closed-and-cancel', 'retry': False,
+                       'witnessedProviderRefusal': 'unknown-and-continue-independent-assignments'},
+    'credentialPreflight': {'metadataURL': prior['model']['upstream'].split('/v1')[0].rstrip('/') + '/key/info',
+                            'marginSeconds': 900, 'keyFingerprint': None},
     'cancellation': str(ROOT / 'CANCEL'),
     'preparedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }

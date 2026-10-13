@@ -47,10 +47,10 @@ assert plan['arms'] == ['r2', 'core'] and plan['rsi'] is False and plan['formalC
 assert plan['performanceRule'] == 'task-pareto'
 source = Path(plan['sourceDirectory'])
 runtime = Path(plan['runtimeDirectory'])
-for name, original in [('launch.py', 'cohort.py'), ('run-one.ts', 'run-one.ts'), ('endpoint.ts', 'endpoint.ts')]:
+for name, original in [('launch.py', 'cohort.py'), ('run-one.ts', 'run-one.ts'), ('endpoint.ts', 'endpoint.ts'), ('credential.py', 'credential.py')]:
     assert (ROOT / name).read_bytes() == (source / 'research/programbench' / original).read_bytes(), name
 checks = {}
-for name, count in [('controller-tests', 16), ('systemd-tests', 2), ('endpoint-tests', 1)]:
+for name, count in [('controller-tests', 19), ('systemd-tests', 2), ('endpoint-tests', 1), ('credential-tests', 3)]:
     log = ROOT / 'reports' / (name + '.log')
     text = log.read_text()
     assert re.search(rf'Ran {count} tests?', text) and text.rstrip().endswith('OK'), name
@@ -79,6 +79,20 @@ assert faults['taskOnly'] is True and faults['realModel'] is False
 assert {row['mode'] for row in faults['results']} == {'cancel', 'expiry', 'withdrawal'}
 assert all(row['status'] == 'escalated' and all(fence['acknowledged'] for fence in row['fenced']) for row in faults['results'])
 checks['faults'] = ref(ROOT / 'qualification/faults/RESULT.json')
+repair = read(ROOT / 'qualification/execution-repair/RESULT.json')
+assert repair['realModel'] is False and repair['performanceClaim'] is False
+assert repair['release'] == ref(runtime / 'RELEASE.json')
+assert repair['source'] == ref(source / 'packages/sdk/script/pro-contract-repair-qualify.ts')
+assert [row['mode'] for row in repair['results']] == ['nul-shell', 'refusal-sse', 'refusal-json', 'auth-sse', 'malformed-sse']
+assert [row['physicalRequests'] for row in repair['results']] == [3, 1, 1, 1, 1]
+assert all(row['executions'] == 1 and row['fence']['acknowledged'] is True for row in repair['results'])
+assert repair['results'][0]['contract'] == 'discharged'
+assert all(row['contract'] == 'escalated' for row in repair['results'][1:])
+assert all(row['endpoint']['outcome'] == 'provider-refusal'
+           and row['endpoint']['cleanup']['official'] == {'acknowledged': True, 'state': 'not-admitted', 'admitted': 0}
+           for row in repair['results'][1:3])
+checks['execution-repair'] = ref(ROOT / 'qualification/execution-repair/RESULT.json')
+
 resource = read(ROOT / 'qualification/resource-oom-v2/RESULT.json')
 assert resource['realModel'] is False and resource['mode'] == 'oom' and resource['result']['ok']
 assert resource['result']['value']['contract']['status'] == 'discharged'
@@ -160,7 +174,14 @@ for assignment in plan['assignments']:
 for arm in plan['arms']:
     add(plan['methodArtifacts'][arm]['path'], plan['methodArtifacts'][arm]['sha256'])
 add(plan['r2BasePolicy']['path'], plan['r2BasePolicy']['sha256'])
-for name in ['launch.py', 'run-one.ts', 'endpoint.ts']:
+# Before freezing, qualify the host key and pin only its fingerprint. Raw
+# key/info metadata may contain secrets and must never enter the artifact tree.
+from credential import preflight
+credential = preflight(plan, os.environ.get('OPENAI_API_KEY'))
+plan['credentialPreflight']['keyFingerprint'] = credential['keyFingerprint']
+create(ROOT / 'CREDENTIAL-VALIDITY.json', credential)
+controller.validate_protocol(plan)
+for name in ['launch.py', 'run-one.ts', 'endpoint.ts', 'credential.py', 'CREDENTIAL-VALIDITY.json']:
     add(ROOT / name)
 for reference in checks.values():
     add(reference['path'], reference['sha256'])

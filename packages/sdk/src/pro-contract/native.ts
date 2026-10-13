@@ -205,10 +205,11 @@ export async function run(input: {
   observationScope?: string
   reserveBytes?: number
 }) {
+  const credential = input.model.credential ? process.env[input.model.credential] : undefined
+  if (input.model.credential && !credential) throw new Error("Configured host provider credential is unavailable")
   const root = path.join(input.root, "executions", input.id)
   const workspace = path.join(root, "workspace")
   const state = path.join(root, "state")
-  const channel = await fs.mkdtemp("/tmp/pc-channel-")
   const admission = path.join(root, "admission")
   const observations = path.join(
     input.root,
@@ -225,8 +226,6 @@ export async function run(input: {
   await fs.mkdir(path.join(root, "observation-staging"), { mode: 0o700 })
   await restore(path.join(input.root, "checkpoints"), input.checkpoint, workspace)
   const initial = input.store.read()
-  const credential = input.model.credential ? process.env[input.model.credential] : undefined
-  if (input.model.credential && !credential) throw new Error("Configured host provider credential is unavailable")
   input.store.assertTask(initial, input.task)
   input.store.assertMethod(initial, input.parent)
   const deadline = initial.kernel.contracts[input.task].spec.budget.deadline
@@ -263,6 +262,7 @@ export async function run(input: {
       ...(toolCgroup ? { toolCgroup: true } : {}),
     }),
   )
+  const channel = await fs.mkdtemp("/tmp/pc-channel-")
   const worker = Bun.spawn(
     [
       ...sandbox(

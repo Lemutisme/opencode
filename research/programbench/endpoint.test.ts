@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Endpoint } from "./endpoint"
-import { addEvaluations, change, fixture } from "./endpoint-fixture"
+import { addEvaluations, addRefusal, change, fixture } from "./endpoint-fixture"
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))) })
@@ -19,7 +19,7 @@ test("a positively fenced isolated invalid official result is UNKNOWN, not zero"
   expect(result.endpoint.outcome).toBe("invalid-official-score")
   expect(result.result.score).toEqual({ passed: null, total: null, valid: false })
   expect(result.result.delivered).toBe(false)
-  expect(result.endpoint.cleanup).toEqual({ native: { acknowledged: true }, official: { acknowledged: true } })
+  expect(result.endpoint.cleanup).toEqual({ native: { acknowledged: true }, official: { acknowledged: true, state: "fenced", admitted: 1 } })
   expect(result.endpoint.artifacts.find((item) => item.path === value.stdout)).toEqual({
     kind: "official-operation-stdout", path: value.stdout,
     sha256: Bun.SHA256.hash(await Bun.file(value.stdout).bytes(), "hex"),
@@ -194,7 +194,8 @@ test.each(["deadline", "cancellation"] as const)("diagnostic context cannot bypa
   const observation = { diagnostic: true as const, observedAt: value.input.admission.started + 9000, cancelled: false }
   expect((await Endpoint.inspect(value.input, observation)).classification.outcome).toBe("scored")
   expect((await Endpoint.inspect(value.input)).classification.outcome).toBe("execution-fault")
-  const published = await Reflect.apply(Endpoint.finish, undefined, [value.input, observation])
+  const publish: (input: Endpoint.Input, ignored?: unknown) => ReturnType<typeof Endpoint.finish> = Endpoint.finish
+  const published = await publish(value.input, observation)
   expect(published.endpoint.outcome).toBe("execution-fault")
   expect(published.classification.errors).toEqual([gate === "deadline" ? "terminal.before-deadline" : "terminal.not-cancelled"])
   expect((await Bun.file(path.join(value.input.directory, "ENDPOINT.json")).json()).outcome).toBe("execution-fault")
@@ -209,3 +210,38 @@ test("historical cancellation and malformed observation contexts remain diagnost
   expect(malformed.classification.outcome).toBe("execution-fault")
   expect(malformed.classification.errors).toEqual(["observation.valid"])
 })
+
+
+test("a host-witnessed policy refusal is terminal UNKNOWN with an explicitly never-admitted grader", async () => {
+  const value = await setup()
+  await addRefusal(value)
+  const result = await Endpoint.finish(value.input)
+  expect(result.endpoint.outcome).toBe("provider-refusal")
+  expect(result.classification.errors).toEqual([])
+  expect(result.result.score).toEqual({ passed: null, total: null, valid: false })
+  expect(result.result.delivered).toBe(false)
+  expect(result.endpoint.cleanup).toEqual({ native: { acknowledged: true }, official: { acknowledged: true, state: "not-admitted", admitted: 0 } })
+  expect(result.endpoint.artifacts.map((reference) => reference.kind)).toContain("provider-journal")
+  expect((await Bun.file(path.join(value.input.directory, "VERIFICATION-INVENTORY.json")).json()).admitted).toEqual([])
+})
+
+test.each(["unclassified", "replayed", "unknown-usage", "started-grader", "missing-fence", "mismatched-body"])(
+  "provider refusal isolation remains fail-closed for %s", async (mode) => {
+    const value = await setup()
+    const records = await addRefusal(value)
+    if (mode === "unclassified") {
+      records[1]!.event = { error: { message: "Unexpected failure", type: null, code: "400" } }
+      records[1]!.body = JSON.stringify(records[1]!.event)
+    }
+    if (mode === "replayed") records.push({ type: "admitted", id: "retry", time: (value.input.admission.started + 400) / 1000 })
+    if (mode === "unknown-usage") records.pop()
+    if (mode === "mismatched-body") records[1]!.body = JSON.stringify({ error: { message: "Different event" } })
+    if (mode === "started-grader") await fs.mkdir(path.join(value.input.directory, "campaign", "verifications", "started"), { recursive: true })
+    if (mode === "missing-fence") await fs.rm(path.join(value.execution, "FENCED.json"))
+    await Bun.write(path.join(value.execution, "requests.jsonl"), records.map((record) => JSON.stringify(record)).join("\n") + "\n")
+    const result = await Endpoint.finish(value.input)
+    expect(result.endpoint.outcome).toBe("execution-fault")
+    expect(result.classification.eligible).toBe(false)
+    expect(result.result.score?.valid).toBe(false)
+  },
+)

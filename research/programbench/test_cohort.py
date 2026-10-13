@@ -275,6 +275,32 @@ class CohortTests(unittest.TestCase):
                 self.assertFalse(result['unknown'])
         self.root = original
 
+    def test_refusal_continues_only_under_a_separately_frozen_no_retry_policy(self):
+        settings = protocol()
+        settings['endpointPolicy'] = {'witnessedProviderRefusal': 'unknown-and-continue-independent-assignments', 'retry': False}
+        validate_protocol(settings)
+        result = self.controller(LocalBackend({'0-rsi-r1': 'refusal'}), settings).run()
+        self.assertFalse(result['complete'])
+        self.assertTrue(result['executionComplete'])
+        self.assertFalse(result['cancelled'])
+        self.assertEqual(result['unknown'], ['0-rsi-r1'])
+        self.assertEqual(len(result['admitted']), 18)
+        self.assertEqual(len(set(result['admitted'])), 18)
+        self.assertEqual(result['unacknowledged'], [])
+
+    def test_refusal_defaults_to_fail_closed_without_preregistration(self):
+        result = self.controller(LocalBackend({'0-rsi-r1': 'refusal'})).run()
+        self.assertTrue(result['cancelled'])
+        self.assertFalse(result['executionComplete'])
+        self.assertEqual(result['unknown'], [])
+        self.assertLess(len(result['admitted']), 18)
+
+    def test_refusal_policy_never_admits_a_retry(self):
+        settings = protocol()
+        settings['endpointPolicy'] = {'witnessedProviderRefusal': 'unknown-and-continue-independent-assignments', 'retry': True}
+        with self.assertRaisesRegex(ValueError, 'never authorize a retry'):
+            validate_protocol(settings)
+
     def test_frozen_coordinates_reject_count_caps_and_shortened_budget(self):
         for key, value in [('secondsPerOriginal', 10), ('requestCountCap', 1000000),
                            ('monetaryCap', 999999), ('concurrencyPerBlock', 4)]:

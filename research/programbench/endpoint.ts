@@ -66,6 +66,11 @@ export async function finish(input: Input) {
   const classification = { ...identity, eligible: inspected.eligible, predicates: inspected.predicates, errors: inspected.errors }
   await write(path.join(input.directory, "CLASSIFICATION.json"), classification)
   inspected.artifacts.push(await owned(input.directory, path.join(input.directory, "CLASSIFICATION.json"), "classification", input.admission.started))
+  if (inspected.cleanup.official.state === "not-admitted") {
+    const file = path.join(input.directory, "VERIFICATION-INVENTORY.json")
+    await write(file, { ...identity, state: "not-admitted", admitted: [], directory: path.join(input.directory, "campaign", "verifications") })
+    inspected.artifacts.push(await owned(input.directory, file, "verification-inventory", input.admission.started))
+  }
   const endpoint = { ...identity, cleanup: inspected.cleanup, artifacts: inspected.artifacts }
   await write(path.join(input.directory, "ENDPOINT.json"), endpoint)
   return { endpoint, classification, result }
@@ -96,7 +101,7 @@ async function classify(input: Input, observation?: Observation) {
   const artifacts: Artifact[] = []
   const predicates: Record<string, boolean> = {}
   const errors: string[] = []
-  const cleanup = { native: { acknowledged: false }, official: { acknowledged: false } }
+  const cleanup = { native: { acknowledged: false }, official: { acknowledged: false, state: "unverified", admitted: 0 } }
   const state: { score?: { passed: number; total: number; valid: true }; verification?: string; invalid?: boolean } = {}
   const check = (name: string, condition: boolean) => {
     predicates[name] = condition
@@ -129,6 +134,14 @@ async function classify(input: Input, observation?: Observation) {
     const frozen = await read(path.join(input.directory, "campaign", "FROZEN.json"), "campaign-configuration")
     check("campaign.tests", Array.isArray(frozen.tests))
     const tests = (frozen.tests as unknown[]).map(object)
+    const verifications = await directories(path.join(input.directory, "campaign", "verifications")).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return []
+      throw error
+    })
+    cleanup.official.admitted = verifications.length
+    // Absence is distinct from a started grader whose fence is missing. Once
+    // native execution is fenced, no verifier can subsequently be admitted.
+    if (!verifications.length) cleanup.official = { acknowledged: true, state: "not-admitted", admitted: 0 }
     const executions = await directories(path.join(input.directory, "campaign", "executions"))
     check("native.present", executions.length > 0)
     const natives = await gather(executions.map(async (execution) => {
@@ -146,11 +159,28 @@ async function classify(input: Input, observation?: Observation) {
           && identity.birth === object(fence[role]).birth && (role !== "wrapper" || identity.pid === fence.pid))
         check(`native.${path.basename(execution)}.${role}.exited`, await exited(identity))
       }
-      check(`native.${path.basename(execution)}.time`, time(fence.time, input.admission.started, input.admission.deadline))
       return { execution, fence, admitted }
     }))
     cleanup.native.acknowledged = true
-    const verifications = await directories(path.join(input.directory, "campaign", "verifications"))
+    for (const native of natives)
+      check(`native.${path.basename(native.execution)}.time`, time(native.fence.time, input.admission.started, input.admission.deadline))
+    if (!verifications.length) {
+      check("refusal.task-only", tests.length === 0 && natives.every((native) => native.admitted.evaluation === false))
+      const rejected = await providerRefusal(input, natives, artifacts)
+      check("refusal.host-failure", input.hostError === `Error: Native worker failed; inspect ${rejected.execution}`
+        && input.summary.contract === "escalated" && input.summary.proposals === 0 && input.summary.comparisons === 0
+        && input.summary.selectedMethod === input.summary.seedMethod)
+      check("refusal.no-score", !await Bun.file(path.join(input.directory, "campaign", "FINAL_SCORE.json")).exists())
+      check("terminal.not-cancelled", !input.aborted && (observation ? !observation.cancelled
+        : !await Bun.file(path.join(input.admission.cohortRoot, "CANCEL")).exists()
+          && !await Bun.file(path.join(input.directory, "campaign", "CANCEL")).exists()))
+      check("terminal.before-deadline", (observation?.observedAt ?? Date.now()) <= input.admission.deadline)
+      predicates["refusal.witnessed-nonretryable"] = true
+      return {
+        outcome: "provider-refusal", eligible: true, predicates, errors, cleanup, artifacts,
+        score: { passed: null, total: null, valid: false }, verification: null,
+      }
+    }
     check("official.present", verifications.length > 0)
     const grades = await gather(verifications.map(async (verification) => {
       const link = await read(path.join(verification, "VERIFICATION.json"), "verification")
@@ -193,6 +223,7 @@ async function classify(input: Input, observation?: Observation) {
       return { verification, link, score, fence, wrapper, completed: Number(fence.time) * 1000 }
     }))
     cleanup.official.acknowledged = true
+    cleanup.official.state = "fenced"
     const terminal = grades.filter((grade) => grade.link.terminal !== null)
     check("terminal.unique", terminal.length === 1)
     const grade = terminal[0]!
@@ -307,6 +338,75 @@ async function classify(input: Input, observation?: Observation) {
     score: outcome === "scored" ? state.score : { passed: null, total: null, valid: false },
     verification: state.verification ?? null,
   }
+}
+
+/** Only authenticated host gateway journals can witness a refusal; Session text
+ * and candidate-owned failure reports are never used for this classification. */
+async function providerRefusal(
+  input: Input,
+  natives: { execution: string; fence: ObjectValue }[],
+  artifacts: Artifact[],
+) {
+  const frozen = object(await Bun.file(path.join(input.admission.cohortRoot, "FROZEN.json")).json())
+  if (typeof frozen.sdkDirectory !== "string" || !path.isAbsolute(frozen.sdkDirectory)
+    || await fs.realpath(frozen.sdkDirectory) !== frozen.sdkDirectory) throw new Error("Missing canonical frozen provider classifier")
+  const { classifyProviderFailure } = await import(path.join(frozen.sdkDirectory, "packages/ai/src/provider-error.ts"))
+  const admissions: { execution: string; id: string; time: number }[] = []
+  const refusals: { execution: string; id: string; time: number }[] = []
+  for (const native of natives) {
+    const journal = await owned(input.directory, path.join(native.execution, "requests.jsonl"), "provider-journal", input.admission.started)
+    artifacts.push(journal)
+    const pending = new Map<string, ObjectValue>()
+    const completed = new Set<string>()
+    for await (const line of createInterface({ input: createReadStream(journal.path), crlfDelay: Infinity })) {
+      if (!line) continue
+      const event = object(JSON.parse(line))
+      if (!["admitted", "provider-error", "finished"].includes(String(event.type))) continue
+      if (typeof event.id !== "string" || !time(Number(event.time) * 1000, input.admission.started, Number(native.fence.time)))
+        throw new Error("Unbound or out-of-time provider record")
+      if (event.type === "admitted") {
+        if (pending.has(event.id)) throw new Error("Duplicate provider admission")
+        pending.set(event.id, event)
+        admissions.push({ execution: native.execution, id: event.id, time: Number(event.time) })
+        continue
+      }
+      if (!pending.has(event.id) || completed.has(event.id)) throw new Error("Unmatched provider record")
+      if (event.type === "finished") {
+        completed.add(event.id)
+        if (refusals.some((refusal) => refusal.execution === native.execution && refusal.id === event.id)
+          && (event.complete !== false || event.usage !== null || event.usageIncomplete !== true || event.cost !== null))
+          throw new Error("Refusal must preserve unknown usage and no successful completion")
+        continue
+      }
+      if (typeof event.body !== "string" || !Number.isSafeInteger(event.status)
+        || Number(event.status) < 100 || Number(event.status) > 599) throw new Error("Provider error lacks original body/status")
+      const body = object(JSON.parse(event.body))
+      if (JSON.stringify(body) !== JSON.stringify(event.event)) throw new Error("Provider event and original body disagree")
+      const raw = body.error ?? object(body.response ?? {}).error
+      const error = typeof raw === "string" ? { message: raw } : object(raw ?? {})
+      const message = typeof body.message === "string" ? body.message : error.message
+      if (typeof message !== "string") continue
+      if (classifyProviderFailure({ message, status: Number(event.status), rawBody: event.body })._tag === "ContentPolicy")
+        refusals.push({ execution: native.execution, id: event.id, time: Number(event.time) })
+    }
+    if (pending.size !== completed.size) throw new Error("Unfinished provider accounting")
+  }
+  if (refusals.length !== 1) throw new Error("Exactly one host-witnessed policy refusal required")
+  const refusal = refusals[0]!
+  const last = admissions.sort((a, b) => a.time - b.time).at(-1)
+  if (!last || last.id !== refusal.id || last.execution !== refusal.execution
+    || admissions.some((admission) => admission.time > refusal.time)) throw new Error("Provider work admitted after refusal")
+  for (const native of natives) {
+    const file = path.join(native.execution, "state", "result.json")
+    if (native.execution === refusal.execution) {
+      if (await Bun.file(file).exists()) throw new Error("Refused native execution also handed off")
+      continue
+    }
+    const handoff = object(JSON.parse(await Bun.file(file).text()))
+    if (handoff.action !== "checkpoint") throw new Error("Only fixed-method checkpoints may precede refusal")
+    artifacts.push(await owned(input.directory, file, "native-handoff", input.admission.started))
+  }
+  return refusal
 }
 
 function object(value: unknown): ObjectValue {

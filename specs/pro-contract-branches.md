@@ -150,3 +150,11 @@ this archival publication after the focused checks and redacted secret audit;
 no hook configuration or remote branch history is rewritten. Publishing a ref
 does not certify every old package against the current toolchain. Uncommitted
 V1 changes and private artifact directories are not part of this publication.
+
+### Execution repair follow-up
+
+`repair-execution` descends from `kernel-foundation` and preserves its methods and
+pure normative kernel. It fixes native shell startup failures, provider refusal
+classification, absent-grader receipts and reusable credential-lifetime gates.
+See `specs/pro-contract-execution-repair.md` for the evidence and separately frozen
+fault policy. This is the repaired development candidate, not a proven R2 winner.

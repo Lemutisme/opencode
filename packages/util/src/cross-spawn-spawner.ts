@@ -1,7 +1,7 @@
 import { isArrayNonEmpty } from "effect/Array"
 import * as NodeSink from "@effect/platform-node/NodeSink"
 import * as NodeStream from "@effect/platform-node/NodeStream"
-import { Deferred, Effect, Exit, FileSystem, Layer, Path, PlatformError, Predicate, Sink, Stream } from "effect"
+import { Deferred, Effect, Exit, FileSystem, Layer, Path, PlatformError, Predicate, Result, Sink, Stream } from "effect"
 import type { Scope } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import {
@@ -280,7 +280,17 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
     Effect.callback<Spawned, PlatformError.PlatformError>((resume) => {
       const closed = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
       const exited = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
-      const proc = launch(command.command, command.args, opts)
+      // Keep launch and listener/canceller registration in the same callback.
+      // Node can throw before a ChildProcess exists or emits its `error` event.
+      const result = Result.try({
+        try: () => launch(command.command, command.args, opts),
+        catch: (err) => toPlatformError("spawn", toError(err), command),
+      })
+      if (Result.isFailure(result)) {
+        resume(Effect.fail(result.failure))
+        return
+      }
+      const proc = result.success
       let end = false
       let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
       proc.on("error", (err) => {

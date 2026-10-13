@@ -73,6 +73,8 @@ export const initialMethod: RSI.Method = {
 export async function open(root: string, configuration: Configuration) {
   if (!path.isAbsolute(root)) throw new Error("An absolute private ledger directory is required")
   const config = Schema.decodeUnknownSync(Configuration)(configuration, { onExcessProperty: "error" })
+  if (config.model.credential && !process.env[config.model.credential])
+    throw new Error("Configured host provider credential is unavailable")
   if (!config.tests.length && config.proposals !== 0)
     throw new Error("Without performance panels, explicitly admit fixed-method task execution with proposals: 0")
   nonoverlapping(root, config.runtime.directory)

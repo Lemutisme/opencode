@@ -1,7 +1,7 @@
 export * as Shell from "./shell.js"
 
 import path from "path"
-import { Context, Deferred, Duration, Effect, Fiber, Latch, Layer, Schema, Schedule, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Exit, Fiber, Latch, Layer, Schema, Schedule, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { produce } from "immer"
 import { Shell } from "@opencode/schema/shell"
@@ -427,7 +427,11 @@ const layer = () =>
               // release (kill) the process before its exit is observed.
               yield* Deferred.await(command.done).pipe(Effect.catch(() => Effect.void))
             }),
-          ).pipe(Effect.catchTag("AppProcessError", (error) => Deferred.fail(ready, error))),
+          ).pipe(
+            // A failed startup must settle the handshake even on a defect or
+            // interruption; otherwise create waits forever without a process.
+            Effect.onExit((exit) => (Exit.isFailure(exit) ? Deferred.failCause(ready, exit.cause) : Effect.void)),
+          ),
         )
 
         const command = yield* Deferred.await(ready)

@@ -79,6 +79,8 @@ export const isContextOverflowFailure = (failure: unknown) =>
  * not deliver an accepted write, and unrecognized failures. Callers decide which calls are safe to repeat.
  */
 export const isRetryable = (error: AIError) => {
+  // A transport hint cannot authorize replay of a deterministic refusal.
+  if (["ContentPolicy", "Authentication", "QuotaExceeded", "InvalidRequest"].includes(error.reason._tag)) return false
   const override = error.reason.http?.headers["x-should-retry"]
   if (override === "true") return true
   if (override === "false") return false
@@ -244,7 +246,7 @@ export function classifyProviderFailure(input: ProviderFailure): AIError["reason
   // Scan the raw payload too so signals missing from the summary message
   // (e.g. overflow phrases nested in a JSON error body) still classify.
   const text = [input.message, body].filter((value) => value.length > 0).join("\n")
-  const clientScoped = input.status === undefined || (input.status >= 400 && input.status < 500)
+  const clientScoped = input.status === undefined || input.status < 500
 
   if (
     clientScoped &&
