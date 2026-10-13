@@ -7,16 +7,21 @@ must not be pushed to the upstream `anomalyco/opencode` repository.
 
 ## Current candidate and historical reference
 
-**Current V2 development candidate: `kernel-foundation`.** It provides task-only
+**Current V2 development candidate: `repair-execution`, based on `kernel-foundation`.** It provides task-only
 admission, exact fixed methods, immutable public observation recall, native
 checkpoint continuation, independent verification, and bounded identity-owned
 cleanup. No method research or selection is granted in this profile.
 
-The only current paid-model paired observation is sd repeat 1: **95.4321% versus
-93.0864%, +2.3457 percentage points** against the R2 v5 method on the same V2
-runtime. The cohort was interrupted by an expired provider credential. It has
-no complete fixed-repeat means, no panel promotion, and no full task pass. Use
-this as the next research candidate, **not as a demonstrated global winner**.
+The running repaired cohort is frozen at `ead1499`. As of 2026-10-13 21:09 UTC,
+its first-repeat pairs show Core +0.1235 pp on sd, **−4.9288 pp on eva and
+−3.3113 pp on hexyl**. Seven official scores are available; no fixed-repeat task
+mean or panel promotion is established. See [live insights](pro-contract-live-insights.md).
+This is a repaired development candidate, **not a demonstrated R2 winner**.
+
+The earlier credential-interrupted cohort's sd observation remains historical:
+95.4321% versus 93.0864%, +2.3457 pp. It is not pooled with the new cohort and
+must not stand in for the newer negative evidence. Both studies compare fixed
+methods on V2, not the old V1 R2 binary against V2.
 
 **Historical R2 references: `procontract-snapshot` and `procontract-rsi`.**
 The exact source remains `a0750c05b4a4a7be90fa76f45ccfa55303e9c2e0`; the published
@@ -32,7 +37,8 @@ implementation or engineering boundary; publishing it is not deployment approval
 
 | Branch                                                                                                                                                                                                                                                      | Why retain it                                                                            | Evidence boundary                                                                                   |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| [kernel-foundation](https://github.com/Lemutisme/opencode/tree/kernel-foundation)                                                                                                                                                                           | Current task-first V2 and fixed-method paired experiment                                 | Native mechanics pass; one encouraging sd pair, incomplete performance study                        |
+| [repair-execution](https://github.com/Lemutisme/opencode/tree/repair-execution) | Current repaired task-only V2 candidate; live frozen cohort at `ead1499` | Valid real scores include Core regressions; no complete fixed-repeat means or promotion |
+| [kernel-foundation](https://github.com/Lemutisme/opencode/tree/kernel-foundation) | Original task-first V2 and fixed-method experiment foundation | Native mechanics pass; historical incomplete studies are not a winner claim |
 | [receipt-layout](https://github.com/Lemutisme/opencode/tree/receipt-layout)                                                                                                                                                                                 | Last base before task-only admission; exact official receipt/companion parsing           | Grading provenance and engineering repair, not a solver gain                                        |
 | [bounded-shutdown](https://github.com/Lemutisme/opencode/tree/bounded-shutdown)                                                                                                                                                                             | Signal-safe cancellation, bounded cleanup, scope ownership, truthful unknown endpoints   | Preserve failures and distinctions between process exit and acknowledged cleanup                    |
 | [evidence-learning](https://github.com/Lemutisme/opencode/tree/evidence-learning)                                                                                                                                                                           | Durable public observation retention, R2 gap and trace audits                            | Repair of concrete evidence-loss counterexamples, not established score recovery                    |
@@ -123,6 +129,7 @@ that was never recorded.
 
 ## Read next
 
+- [Real ProgramBench readout and latest insights](pro-contract-live-insights.md)
 - [Task-first design and native qualification](pro-contract-kernel-foundation.md)
 - [Paired protocol and terminal readout](pro-contract-kernel-paired.md)
 - [R2 gap, concrete repair boundaries](essential-rsi-correction.md)
@@ -134,7 +141,12 @@ remain in private local storage, not in this public branch. Historical freezes
 are unchanged; publication commits must not be substituted for the evaluated
 runtime's original provenance.
 
-## Publication checks and limitations
+## Publication checks and limitations — archival publication, 2026-10-12
+
+This section preserves the original publication conditions. The later
+`repair-execution` check passes with the supported toolchain; see
+[execution repair](pro-contract-execution-repair.md). It does not certify the
+historical V1 working tree or erase the failures below.
 
 The current task/kernel package regressions and paired controller tests were
 rerun before publication; Core, SDK and driver typechecks passed. The full

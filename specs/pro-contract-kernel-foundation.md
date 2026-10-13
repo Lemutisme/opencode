@@ -1,5 +1,9 @@
 # ProContract kernel foundation: task first, RSI later
 
+后续真实 ProgramBench 结果与最新解释见
+[live insights](pro-contract-live-insights.md)。下文保留本轮基础设计和资格的原始时间边界；
+脚本化资格不被追认为性能证据。
+
 2026-10-11. 本轮只研究和验证 ProContract 本身；不启动 Test-time RSI、方法搜索、
 运行时 OTA 或付费模型实验。新工作树 `opencode-kernel-foundation` / `kernel-foundation`
 从 upstream `v2@1d610f9` 创建，再快进到已有 V2 实现 `receipt-layout@42d0289`。

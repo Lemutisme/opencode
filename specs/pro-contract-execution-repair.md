@@ -2,6 +2,11 @@
 
 2026-10-13 · branch `repair-execution` · descendant of `kernel-foundation`.
 
+The later real-model ProgramBench cohort runs the frozen implementation at
+`ead1499`. See [live insights](pro-contract-live-insights.md) for its preliminary
+scores, including regressions. Later documentation commits do not change that
+running revision or turn the scripted qualifications below into performance evidence.
+
 ## What failed
 
 The second independent paired diagnostic admitted 15 of its 36 originals and
